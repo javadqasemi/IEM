@@ -1,0 +1,16 @@
+node_modules
+dist
+.DS_Store
+*.local
+.vite
+
+# tsc -b incremental build stamp
+tsconfig.tsbuildinfo
+
+# Stray emit if noEmit is ever removed from tsconfig.json — these shadow the
+# .tsx sources in Vite's resolution order and cause stale output.
+src/**/*.js
+
+# Real client models and drawings (Guglera, Giffers) — not ours to publish, and
+# nothing in the build needs them: the components they generate are committed.
+ifc/

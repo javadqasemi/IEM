@@ -1,0 +1,179 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: light;
+    scroll-behavior: smooth;
+    /* Sticky nav is 4rem; keep anchor targets clear of it. */
+    scroll-padding-top: 5.5rem;
+  }
+  body {
+    @apply bg-base text-ink font-sans antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  /* Plain CSS, not @apply: a custom colour with an opacity modifier inside
+     @apply resolves unreliably (see the note on :focus-visible below). */
+  ::selection {
+    background-color: rgba(144, 129, 78, 0.28);
+    color: #0b1b33;
+  }
+  /* Written as plain CSS rather than @apply: a custom colour plus an opacity
+     modifier inside @apply is the fragile path, and this rule is global. */
+  :focus-visible {
+    outline: 2px solid #003882;
+    outline-offset: 2px;
+  }
+  /* Numeric readouts should never reflow as digits change. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .grid-bg {
+    background-image: theme("backgroundImage.grid");
+    background-size: 64px 64px;
+  }
+  .hairline {
+    @apply border-t border-line;
+  }
+  /* The mono uppercase eyebrow — a brand signature, used verbatim throughout. */
+  .eyebrow {
+    @apply font-mono text-[11px] uppercase tracking-ultra-wide;
+  }
+  /* Brand rule: a hairline hung with vertical bars of decreasing width — the
+     construction of the IEM logo itself, which is drawn as a raster of tapering
+     strokes. Used to separate sections instead of a plain border, so the
+     divider quotes the mark rather than decorating. */
+  .tick-rule {
+    @apply relative border-t border-line;
+  }
+  .tick-rule::before {
+    content: "";
+    @apply absolute inset-x-0 top-0 h-2;
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgba(0, 56, 130, 0.32) 0 2.5px,
+      transparent 2.5px 10px,
+      rgba(0, 56, 130, 0.32) 10px 12px,
+      transparent 12px 20px,
+      rgba(0, 56, 130, 0.32) 20px 21.5px,
+      transparent 21.5px 30px,
+      rgba(0, 56, 130, 0.32) 30px 31px,
+      transparent 31px 40px
+    );
+  }
+  /* The `mark` button variant's leading glyph: four vertical bars of tapering
+     width, the construction of the IEM logo itself — the same rhythm the
+     `.tick-rule` divider hangs off a hairline, compressed to 16px so it reads
+     at button scale. The button is `inline-flex` with `gap-2`, so the
+     pseudo-element becomes a flex item and needs no padding or positioning of
+     its own; it sits in the row and inherits the gap.
+
+     Plain CSS with literal hexes, not @apply: a custom colour inside @apply is
+     the pattern that has taken this stylesheet down twice, and a gradient stop
+     cannot be written as a utility at all. Sand (#CBB87F) is the palette's
+     "gold on navy" value — 5.5:1 — and the hover flips it to white. */
+  .btn-mark::before {
+    content: "";
+    flex: none;
+    width: 1rem;
+    height: 0.9em;
+    background-image: linear-gradient(
+      90deg,
+      #cbb87f 0 2.5px,
+      transparent 2.5px 5.5px,
+      #cbb87f 5.5px 7.5px,
+      transparent 7.5px 10.5px,
+      #cbb87f 10.5px 12px,
+      transparent 12px 15px,
+      #cbb87f 15px 16px
+    );
+  }
+  .btn-mark:hover::before {
+    background-image: linear-gradient(
+      90deg,
+      #ffffff 0 2.5px,
+      transparent 2.5px 5.5px,
+      #ffffff 5.5px 7.5px,
+      transparent 7.5px 10.5px,
+      #ffffff 10.5px 12px,
+      transparent 12px 15px,
+      #ffffff 15px 16px
+    );
+  }
+
+  /* Social buttons. The platform hue arrives per-instance as `--sc` (set inline
+     from `socials` in src/content/iem.ts) rather than as a Tailwind token —
+     LinkedIn blue and Instagram magenta are not part of the IEM palette and
+     must not leak into `brand-*`.
+
+     Plain CSS, not @apply: the hover state mixes a custom colour with an alpha,
+     which is exactly the pattern that resolves inconsistently inside @apply and
+     has taken this stylesheet down twice. */
+  .social-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.5rem;
+    background-color: theme("colors.surface");
+    box-shadow: inset 0 0 0 1px theme("colors.line");
+    color: var(--sc);
+    transition:
+      transform 200ms ease,
+      box-shadow 200ms ease,
+      background-color 200ms ease;
+  }
+  /* Hover inverts to the solid platform colour with a white mark. A tint-and-
+     ring version was tried first and read as nothing at all — 1px of colour and
+     a 10% wash are invisible on a 40px chip. */
+  .social-btn:hover {
+    transform: translateY(-2px);
+    background-color: var(--sc);
+    color: theme("colors.surface");
+    box-shadow:
+      inset 0 0 0 1px var(--sc),
+      0 8px 18px -8px var(--sc);
+  }
+  .social-btn:active {
+    transform: translateY(0);
+  }
+  .social-btn svg {
+    width: 1.125rem;
+    height: 1.125rem;
+  }
+  /* The lift is motion; the colour change carries the affordance on its own. */
+  @media (prefers-reduced-motion: reduce) {
+    .social-btn:hover {
+      transform: none;
+    }
+  }
+
+  .skip-link {
+    @apply absolute left-4 top-4 z-[100] -translate-y-24 rounded-md bg-ink px-4 py-2 text-sm
+           font-medium text-surface transition-transform focus-visible:translate-y-0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  /* The flow slugs in the hero section are motion and nothing else — with the
+     duration clamped below they would freeze mid-pipe as a stray white dash on
+     each run. Removed rather than stopped. */
+  .flow-run {
+    display: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
