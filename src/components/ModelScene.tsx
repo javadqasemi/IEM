@@ -730,7 +730,7 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
        phase buttons and the caption below the fold. Height that answers to the
        viewport keeps the whole section in view; the cap stops it growing
        absurd on a tall monitor. */
-    <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg bg-surface ring-1 ring-line shadow-card sm:aspect-[16/10] lg:aspect-auto lg:h-[min(58vh,560px)]">
+    <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg bg-surface shadow-card sm:aspect-[16/10] lg:aspect-auto lg:h-[min(58vh,560px)]">
       <div aria-hidden className="grid-bg absolute inset-0 opacity-50" />
 
       <div

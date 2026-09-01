@@ -73,8 +73,10 @@ The roster is the real 41 people. Two rules, worth respecting:
 
 - Names and name→photo pairings come from the `alt` attributes on `iem.ch/team`, not from filenames
   — the filenames mix `first_last` and `last_first` order, so guessing mislabels real people.
-- Only the three leadership roles have a published function. **Don't invent job titles.** The other
-  38 entries show name and location only.
+- Only the three Geschäftsleitung cards state a function, and those are the three iem.ch itself
+  publishes. The other 38 entries show name and location only, and the roster no longer marks who is
+  an apprentice. `lernend` and the rest of `role` stay in the data but nothing renders or searches
+  them. **Don't invent job titles** for the entries that don't have a published one.
 
 ## Images
 

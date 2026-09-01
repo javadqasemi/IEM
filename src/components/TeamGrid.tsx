@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FILTER_TEAM } from "./SiteSearch";
 import { initials, normalize } from "@/lib/search";
-import { groups, team, type Group, type Member } from "@/content/iem";
+import { team, trades, type Member, type Trade } from "@/content/iem";
 
 type Filter = "Alle" | "Thun" | "Bern";
 const filters: Filter[] = ["Alle", "Thun", "Bern"];
@@ -11,7 +11,7 @@ const filters: Filter[] = ["Alle", "Thun", "Bern"];
  * its authored order and looking exactly as it did before the dropdown existed,
  * and picking an option narrows it to that group.
  */
-type GroupChoice = "Alle" | Group;
+type GroupChoice = "Alle" | Trade;
 
 /**
  * A-Z by first name, with the surname as tiebreak.
@@ -30,16 +30,18 @@ function byFirstName(a: Member, b: Member) {
 
 /**
  * Every whitespace-separated token must appear somewhere in the member's name,
- * function, office or group, so "pedro sanitär" narrows instead of returning
+ * office or Fachgruppe, so "pedro sanitär" narrows instead of returning
  * nothing. `normalize` is shared with the site search, so both boxes fold
  * umlauts the same way.
+ *
+ * A person's function and their apprenticeship are deliberately *not* in the
+ * haystack. The cards no longer print either, so matching on them would filter
+ * the roster on something the reader cannot see — and typing "Lernende" would
+ * still single out the apprentices, which is exactly what removing the label
+ * was meant to stop.
  */
 function matches(member: Member, tokens: string[]) {
-  const haystack = normalize(
-    [member.name, member.role, member.office, member.group, member.lernend ? "Lernende" : null]
-      .filter(Boolean)
-      .join(" "),
-  );
+  const haystack = normalize([member.name, member.office, member.group].filter(Boolean).join(" "));
   return tokens.every((t) => haystack.includes(t));
 }
 
@@ -90,8 +92,9 @@ export function TeamGrid() {
     return () => window.removeEventListener(FILTER_TEAM, onFilter);
   }, []);
 
-  // Split on `lead`, not on "has a role": most of the roster carries a function
-  // too, and keying off `role` would pull everyone into the leadership block.
+  // Split on `lead` — the one field that says who sits in the Geschäftsleitung.
+  // Nothing on the page prints a function any more, so this is the *only* thing
+  // that can drive the split; don't reintroduce a "has a role" test.
   //
   // The office pills stay a roster-only filter, as before — but search spans
   // both blocks, because looking up a name has to find that person whether or
@@ -100,13 +103,7 @@ export function TeamGrid() {
   const roster = useMemo(() => {
     const rest = team.filter((m) => !m.lead && matches(m, tokens));
     const byOffice = active === "Alle" ? rest : rest.filter((m) => m.office === active);
-    // Lernende is the second axis, so it reads the flag; the trades read `group`.
-    const byGroup =
-      group === "Alle"
-        ? byOffice
-        : group === "Lernende"
-          ? byOffice.filter((m) => m.lernend)
-          : byOffice.filter((m) => m.group === group);
+    const byGroup = group === "Alle" ? byOffice : byOffice.filter((m) => m.group === group);
     return [...byGroup].sort(byFirstName);
   }, [active, group, tokens]);
 
@@ -130,11 +127,18 @@ export function TeamGrid() {
                     className="aspect-[4/5] w-full transition-transform duration-500 group-hover:scale-[1.03]"
                   />
                 </div>
-                <div className="flex flex-col gap-1 p-5">
+                {/* Name and function. These three titles are the only ones on
+                    the page, and the only ones iem.ch itself publishes — the
+                    roster's `role` values came from IEM internally and stay
+                    unprinted. `role` is optional, so guard it rather than
+                    assuming a lead has one. */}
+                <div className="p-5">
                   <h4 className="font-display text-lg font-semibold leading-tight text-ink">
                     {m.name}
                   </h4>
-                  <p className="text-[13px] leading-snug text-brand-blue">{m.role}</p>
+                  {m.role ? (
+                    <p className="mt-1.5 text-[13px] leading-snug text-muted">{m.role}</p>
+                  ) : null}
                 </div>
               </li>
             ))}
@@ -164,7 +168,7 @@ export function TeamGrid() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Person suchen"
-                aria-label="Team nach Name, Funktion oder Standort durchsuchen"
+                aria-label="Team nach Name, Fachgruppe oder Standort durchsuchen"
                 className="w-full rounded-full bg-surface py-1.5 pl-9 pr-9 text-[13px] text-ink ring-1 ring-line transition-colors placeholder:text-muted hover:ring-line-strong [&::-webkit-search-cancel-button]:appearance-none"
               />
               {query ? (
@@ -200,7 +204,7 @@ export function TeamGrid() {
                 className="w-full cursor-pointer appearance-none rounded-full bg-surface py-1.5 pl-4 pr-9 text-[13px] font-medium text-ink ring-1 ring-line transition-colors hover:ring-line-strong sm:w-auto"
               >
                 <option value="Alle">Alle Gruppen</option>
-                {groups.map((g) => (
+                {trades.map((g) => (
                   <option key={g} value={g}>
                     {g}
                   </option>
@@ -255,16 +259,14 @@ export function TeamGrid() {
                   className="aspect-[3/4] w-full transition-transform duration-500 group-hover:scale-[1.04]"
                 />
               </div>
+              {/* Name and office, nothing else. The roster used to print a
+                  function and a "· Lernende" marker; both were removed at the
+                  client's request, so no card singles a person out by rank or
+                  by being an apprentice. */}
               <div className="flex flex-col gap-0.5">
                 <span className="text-[14px] font-medium leading-tight text-ink">{m.name}</span>
-                {/* Function where IEM has supplied one; the rest keep the
-                    office line alone rather than showing an empty slot. */}
-                {m.role ? (
-                  <span className="text-[12px] leading-snug text-brand-blue">{m.role}</span>
-                ) : null}
                 <span className="font-mono text-[10px] uppercase tracking-ultra-wide text-muted">
                   {m.office}
-                  {m.lernend ? <span className="text-brand-bronze"> · Lernende</span> : null}
                 </span>
               </div>
             </li>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { openBewerbung } from "./BewerbungButton";
 import { Button } from "./Button";
 import { HeroModel } from "./HeroModel";
 import { KPI } from "./KPI";
@@ -89,6 +90,12 @@ export function Hero() {
           <div className="flex flex-wrap items-center gap-3">
             <Button size="lg" href="#kontakt" trailing="→">
               Kontaktiere
+            </Button>
+            {/* Opens the form hosted down in `JobRegister` over the
+                `iem:open-bewerbung` seam, so the hero neither owns the dialog
+                nor has to scroll the reader to Karriere to reach it. */}
+            <Button size="lg" variant="mark" onClick={() => openBewerbung()}>
+              Bewerben
             </Button>
             <Button size="lg" variant="secondary" href="#referenzen">
               Referenzen ansehen

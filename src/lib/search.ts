@@ -130,9 +130,11 @@ export const searchIndex: SearchResult[] = [
       id: `team:${m.name}`,
       kind: "Team",
       title: m.name,
-      detail: [m.role, m.office, m.group, m.lernend ? "Lernende" : null]
-        .filter(Boolean)
-        .join(" · "),
+      // Office and Fachgruppe only. A person's function and their
+      // apprenticeship are recorded but unpublished (see `Member` in the
+      // content module), and the search panel is part of the page — printing
+      // them here would put back exactly what the team cards no longer show.
+      detail: [m.office, m.group].filter(Boolean).join(" · "),
       href: "#team",
       member: m,
       image: m.photo,

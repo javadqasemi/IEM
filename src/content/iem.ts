@@ -801,22 +801,25 @@ export type Member = {
   name: string;
   office: "Thun" | "Bern" | null;
   /**
-   * Published function.
+   * Published function. **Recorded, but no longer shown anywhere on the page** —
+   * the client asked for every personal function to come off the team section,
+   * the Geschäftsleitung's three included. `TeamGrid` and the site search both
+   * ignore this field; a card carries name and office only.
    *
-   * iem.ch/team prints a function for **three** people only — the Geschäfts-
-   * führer and the two site heads. Every other `role` here comes from IEM
-   * internally and cannot be checked against the public site, so treat it the
-   * way you would any unsourced claim: **never guess one.** A wrong job title
-   * on a real, named person is a different class of error from a wrong project
-   * figure. Leave it unset and the card shows name and office only.
+   * It is kept rather than deleted because the three values that came from
+   * iem.ch/team (Geschäftsführer, the two Standortleiter) are sourced facts and
+   * cheap to hold. Everything else here came from IEM internally and cannot be
+   * checked against the public site, so the old rule still stands if the labels
+   * ever come back: **never guess a function for a real, named person.**
    */
   role?: string;
   /**
    * Geschäftsleitung — drives the split in `TeamGrid`.
    *
-   * Deliberately separate from `role`: the split used to key off "has a role",
-   * which silently meant that giving anyone else a function moved them into the
-   * leadership block and emptied the roster.
+   * Deliberately separate from `role`, and now the *only* thing that can drive
+   * that split, since no function is rendered. The split used to key off "has a
+   * role", which silently meant that giving anyone else a function moved them
+   * into the leadership block and emptied the roster.
    */
   lead?: boolean;
   /**
@@ -832,10 +835,15 @@ export type Member = {
    */
   group?: Trade;
   /**
-   * Lernende — orthogonal to `group`, never a substitute for it.
+   * Lernende — orthogonal to `group`, never a substitute for it: apprentices
+   * hold a trade as well, so this is a flag alongside `group` rather than a
+   * value inside it.
    *
-   * See the note on `groups`: apprentices hold a trade as well, so this is a
-   * flag alongside `group` rather than a value inside it.
+   * **Recorded, not published.** Like `role`, this was taken off the page at the
+   * client's request — no card prints it, the Fachgruppen dropdown has no
+   * "Lernende" option, and neither search box matches on it. Don't wire it back
+   * into the UI without asking; the point of removing it was that the roster
+   * stops marking out which colleagues are apprentices.
    */
   lernend?: boolean;
   photo: string | null;
@@ -843,25 +851,16 @@ export type Member = {
 
 /**
  * The four Fachgruppen a person belongs to — mutually exclusive, one each.
+ * They are also, in this order, the options of the dropdown in `TeamGrid`.
+ *
+ * There is deliberately **no fifth "Lernende" option.** It is not a trade —
+ * every apprentice IEM listed also sits in one — and more to the point the page
+ * no longer states anyone's function at all, so it is not a filter either. See
+ * `lernend` on `Member`: the flag is still recorded, just never published.
  */
 export const trades = ["Admin", "Heizung", "Lüftung", "Sanitär"] as const;
 
 export type Trade = (typeof trades)[number];
-
-/**
- * The dropdown's options: the four trades, plus Lernende.
- *
- * **Lernende is a second axis, not a fifth trade.** Every apprentice IEM listed
- * also sits in a trade — an apprentice learns *within* Heizung or Sanitär — and
- * the one assignment the public site publishes says so outright: Dilagshan
- * Krishnamoorthy's function on iem.ch/team reads "Lernende Lüftung". So it is
- * carried as the separate `lernend` flag rather than as a `group` value, the
- * same split `lead` and `role` already make above. Collapsing the two would
- * force every apprentice out of their trade.
- */
-export const groups = [...trades, "Lernende"] as const;
-
-export type Group = (typeof groups)[number];
 
 export const team: Member[] = [
   // `group` / `lernend` below were supplied by IEM (August 2026), not derived.
@@ -891,7 +890,7 @@ export const team: Member[] = [
   { name: "Ken Zurflüh", office: "Bern", group: "Heizung", photo: "/img/team/ken-zurflh.jpg" },
 
   { name: "Nico Baumgartner", office: "Thun", group: "Heizung", photo: "/img/team/nico-baumgartner.jpg" },
-  { name: "Finn Borter", office: "Thun", group: "Heizung", photo: null },
+  { name: "Finn Borter", office: "Thun", group: "Heizung", photo: "/img/team/borter-finn.jpg" },
   { name: "Kastriot Colaj", office: "Thun", group: "Heizung", photo: "/img/team/colaj-kastriot-2026-2.jpg" },
   { name: "Ilir Destani", office: "Thun", group: "Heizung", photo: "/img/team/destani-ilir-2026.jpg" },
   { name: "Seraina Grossen", office: "Thun", group: "Admin", photo: "/img/team/grossen-seraina.jpg" },
@@ -904,7 +903,7 @@ export const team: Member[] = [
   { name: "Stefan Pulfer", office: "Thun", group: "Sanitär", photo: "/img/team/stefan-pulfer.jpg" },
   { name: "Janis Reusser", office: "Thun", group: "Heizung", photo: "/img/team/reusser-janis.jpg" },
   { name: "Jan Reuter", office: "Thun", group: "Lüftung", photo: "/img/team/jan-reuter.jpg" },
-  { name: "Yosef Shonora", office: "Thun", group: "Sanitär", photo: null },
+  { name: "Yosef Shonora", office: "Thun", group: "Sanitär", photo: "/img/team/shonora-yosef.jpg" },
   { name: "Joel Soder", office: "Thun", group: "Sanitär", photo: "/img/team/joel-soder.jpg" },
   { name: "Miriam Soricelli", office: "Thun", group: "Lüftung", photo: "/img/team/soricelli-miriam-2025.jpg" },
   { name: "Emir Sylejmani", office: "Thun", group: "Heizung", lernend: true, photo: "/img/team/emir-sylejmani.jpg" },
