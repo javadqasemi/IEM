@@ -3,7 +3,7 @@ import { Badge } from "./Badge";
 import { ProjectDialog } from "./ProjectDialog";
 import { OPEN_PROJECT } from "./SiteSearch";
 import { matchesProject, projectId, tokenize } from "@/lib/search";
-import { disciplines, projects, useCategories, type UseCategory } from "@/content/iem";
+import { disciplines, inHLKSE, projects, useCategories, type UseCategory } from "@/content/iem";
 
 type Filter = UseCategory | "Alle";
 type Project = (typeof projects)[number];
@@ -182,8 +182,10 @@ export function ProjectRegister() {
                   </p>
                 ) : null}
 
+                {/* HLKSE, not the order the entry happens to be typed in —
+                    see `inHLKSE` in the content module. */}
                 <ul className="mt-auto flex flex-wrap gap-1.5 pt-2">
-                  {p.disciplines.map((k) => (
+                  {inHLKSE(p.disciplines).map((k) => (
                     <li key={k}>
                       <Badge tone={disciplines[k].tone} dot={false}>
                         {disciplines[k].short}

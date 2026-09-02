@@ -133,18 +133,23 @@ export function JobRegister() {
                 </div>
               </button>
 
-              {/* The client's own job advert — served from iem.ch, not copied
-                  here. It sits above the card button rather than inside it: a
-                  link nested in a button is invalid HTML, and these are two
-                  genuinely different actions. */}
+              {/* The advert itself, opened as a page in its own window rather
+                  than handed over as a PDF download: the same text, but
+                  readable on a phone, searchable, and with its own Bewerben
+                  button at the end. The PDF is still linked at the foot of that
+                  page, so nothing is hidden.
+
+                  It sits above the card button rather than inside it: a link
+                  nested in a button is invalid HTML, and reading the advert and
+                  applying are two genuinely different actions. */}
               <a
-                href={o.pdf}
+                href={`/stelle.html?id=${o.id}`}
                 target="_blank"
                 rel="noreferrer noopener"
-                aria-label={`Stelleninserat ${o.role} als PDF öffnen`}
+                aria-label={`Stelleninserat ${o.role} lesen`}
                 className="eyebrow absolute right-2.5 top-2.5 z-10 rounded-full bg-surface/90 px-2 py-1 text-brand-blue backdrop-blur-sm transition-colors hover:bg-surface hover:text-brand-bronze"
               >
-                PDF ↗
+                Detail →
               </a>
             </li>
           ))}
