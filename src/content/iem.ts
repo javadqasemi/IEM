@@ -29,6 +29,25 @@ export const disciplines = {
 
 export type DisciplineKey = keyof typeof disciplines;
 
+/**
+ * The table above is written in **HLKSE order** — Heizung, Lüftung (which is
+ * where Klima/Kälte sits in this taxonomy), Sanitär, Elektro, then the two that
+ * are not trades. That is the order the industry names them in, and it is the
+ * order every list of disciplines on the page has to read in.
+ *
+ * `inHLKSE` sorts a project's own tag list into it. Without it the tags come out
+ * in whatever order the entry was typed — the Freienhof reference led with
+ * "Energie & Sanierung" — so two projects could not be compared at a glance.
+ * Sorting against the table's own key order rather than a second hand-written
+ * list means there is nothing to keep in sync: add a discipline in the right
+ * place above and every badge row follows.
+ */
+export const disciplineOrder = Object.keys(disciplines) as DisciplineKey[];
+
+export function inHLKSE(keys: DisciplineKey[]): DisciplineKey[] {
+  return [...keys].sort((a, b) => disciplineOrder.indexOf(a) - disciplineOrder.indexOf(b));
+}
+
 /** The five service lines IEM actually sells, in the order the site lists them. */
 export const services = [
   {
@@ -753,21 +772,304 @@ export const jobCategoryNotes: Record<JobCategory, string> = {
     "Ab Sommer 2026 sind alle Lehrstellen besetzt. Für den nächsten Lehrbeginn nehmen wir Bewerbungen laufend entgegen.",
 };
 
+/**
+ * The advert bodies, read out of the seven PDFs IEM publishes and stored
+ * **verbatim** — the same rule the reference projects' `details` follow. These
+ * are a real employer's terms of employment; a reworded duty or a softened
+ * requirement is a false claim about what IEM is offering. Line breaks from the
+ * PDF's typesetting are joined, and nothing else is touched.
+ *
+ * Re-extract rather than edit by hand when an advert changes:
+ *   python -c "from pypdf import PdfReader; print(PdfReader('inserat.pdf').pages[0].extract_text())"
+ *
+ * The three passages every advert shares sit here once rather than seven times.
+ * The wording is identical across all seven files — checked, not assumed.
+ */
+export const jobUeberUns =
+  "Die IEM AG ist ein mittleres Unternehmen mit Sitz in Thun und Bern, das innovative und nachhaltige Lösungen im Bereich der Gebäudetechnikplanung bietet. Unsere Projekte reichen von kleinen Installationen bis hin zu grossen Industrieanlagen. Ob Heizungs-, Lüftungs-, Klima-, Sanitär- oder Elektroplanung – wir sind ein verlässlicher Partner mit einem starken Fokus auf qualitativ hochstehende Arbeit und entsprechende Kundenzufriedenheit.";
+
+export const jobBewerbung =
+  "Wenn Du Interesse an dieser herausfordernden und vielseitigen Position hast, freuen wir uns auf Deine vollständigen Bewerbungsunterlagen (Motivationsschreiben, Lebenslauf, Zeugnisse) per E-Mail an: info@iem.ch";
+
+export const jobSchluss = "Wir freuen uns darauf, Dich kennenzulernen!";
+
+/**
+ * The five closing "Wir bieten" lines every advert carries. The opening line
+ * differs — six adverts promise "Interessante Gesamtplanungen", the
+ * Gesamtprojektleitung promises its own — so it is written per advert.
+ */
+const bietenBasis = [
+  "Eine attraktive und leistungsgerechte Vergütung",
+  "Ein abwechslungsreiches und spannendes Tätigkeitsfeld",
+  "Moderne Arbeitsmittel und Software",
+  "Ein kollegiales und dynamisches Team",
+  "Weiterbildungsmöglichkeiten und Unterstützung bei der beruflichen Entwicklung",
+];
+
+const gesamtplanungen = "Interessante Gesamtplanungen (HLKSE, Gebäudeautomation und BIM)";
+const aufstieg = "Aufstiegsmöglichkeiten in die Geschäftsleitung";
+
+export type JobDetail = {
+  /**
+   * The advert's own headline, verbatim — masculine form plus "(m / w / d)",
+   * which is how IEM writes them. `role` on the opening carries the inclusive
+   * ":in" form the website's own list uses. Both are IEM's wording; neither is
+   * a correction of the other, so don't unify them.
+   */
+  titel: string;
+  /** The opening sentence: availability, workload and office. */
+  einstieg: string;
+  aufgaben: string[];
+  profil: string[];
+  bieten: string[];
+  /** Named contact for questions, as the advert prints them. */
+  kontakt: { name: string; telefon: string };
+};
+
+/**
+ * `id` is the slug the detail view is opened with (`/stelle.html?id=…`), taken
+ * from the PDF's own filename so the two stay recognisably paired.
+ */
 export const openings: {
+  id: string;
   role: string;
   pensum: string;
   place: string;
   pdf: string;
   image: string;
   category: JobCategory;
+  detail: JobDetail;
 }[] = [
-  { role: "Gesamtprojektleiter:in HLKS", pensum: "80–100%", place: "Thun", image: "/img/jobs/kaelte.jpg", category: "Offene Stellen", pdf: "https://www.iem.ch/download/pictures/5d/8tbx4wfy3vxz7ueprv64g3fozpx4pf/stelleninserat_gpl_hlks.pdf" },
-  { role: "Projektleiter:in Heizung", pensum: "80–100%", place: "Thun", image: "/img/jobs/heizung.jpg", category: "Offene Stellen", pdf: "https://www.iem.ch/download/pictures/94/m0j1ei3ry3ze1mi2ev8wudmjcv9g3q/stelleninserat_projektleiter_heizung.pdf" },
-  { role: "Projektleiter:in Lüftung", pensum: "80–100%", place: "Thun", image: "/img/jobs/lueftung.jpg", category: "Offene Stellen", pdf: "https://www.iem.ch/download/pictures/38/celiy2pubm8v9mksrzp3dwtzhrr9yi/stelleninserat_projektleiter_lueftung.pdf" },
-  { role: "Projektleiter:in Sanitär", pensum: "80–100%", place: "Thun oder Bern", image: "/img/jobs/sanitaer.jpg", category: "Offene Stellen", pdf: "https://www.iem.ch/download/pictures/0b/8jyg8vy6r4gvtzg4q5peawwbhqqb8w/stelleninserat_projektleiter_sanitaer.pdf" },
-  { role: "Heizungsplaner:in", pensum: "60–100%", place: "Thun oder Bern", image: "/img/jobs/heizung-2.jpg", category: "Offene Stellen", pdf: "https://www.iem.ch/download/pictures/2a/xem2btrx0ipd5i1cgfc9pfzawz8rt2/stelleninserat_heizungsplaner.pdf" },
-  { role: "Lüftungsplaner:in", pensum: "60–100%", place: "Thun", image: "/img/jobs/lueftung-2.jpg", category: "Offene Stellen", pdf: "https://www.iem.ch/download/pictures/d0/ltle1v7001x3l9renodg0k8n5d5m0e/stelleninserat_lueftungsplaner.pdf" },
-  { role: "Sanitärplaner:in", pensum: "60–100%", place: "Thun oder Bern", image: "/img/jobs/sanitaer-2.jpg", category: "Offene Stellen", pdf: "https://www.iem.ch/download/pictures/61/ghw0rtq81fq5hem7ohkwguo88pyslv/stelleninserat_sanitaerplaner.pdf" },
+  {
+    id: "gpl-hlks",
+    role: "Gesamtprojektleiter:in HLKS",
+    pensum: "80–100%",
+    place: "Thun",
+    image: "/img/jobs/kaelte.jpg",
+    category: "Offene Stellen",
+    pdf: "https://www.iem.ch/download/pictures/5d/8tbx4wfy3vxz7ueprv64g3fozpx4pf/stelleninserat_gpl_hlks.pdf",
+    detail: {
+      titel: "Gesamtprojektleiter HLKS (m / w / d)",
+      einstieg:
+        "Per sofort oder nach Vereinbarung motivierter und erfahrener Gesamtprojektleiter HLKS (m / w / d) 80 – 100 % zur Verstärkung unseres Teams in Thun gesucht!",
+      aufgaben: [
+        "Gesamtverantwortung für anspruchsvolle HLKS-Projekte von der Planung bis zur Inbetriebnahme",
+        "Koordination und Führung interner und externer Projektteams sowie Fachplaner",
+        "Termin-, Kosten- und Qualitätskontrolle über alle Gewerke hinweg",
+        "Ansprechperson für Bauherren, Architekten, Generalunternehmer und Behörden",
+        "Sicherstellung der Einhaltung aller relevanten Normen, Gesetze und Vorschriften",
+        "Unterstützung bei der Akquise, Projektkalkulation und Angebotsausarbeitung",
+      ],
+      profil: [
+        "Abgeschlossene Ausbildung im Bereich Gebäudetechnik (zB. HLKS-Ingenieur, Techniker HF oder gleichwertig)",
+        "Mehrjährige Berufserfahrung in der Leitung von komplexen Gesamtprojekten im HLKS-Umfeld",
+        "Ausgeprägtes technisches und betriebswirtschaftliches Verständnis",
+        "Führungsstärke, Durchsetzungsvermögen und hohe Sozialkompetenz",
+        "Strukturierte, lösungsorientierte und unternehmerische Denkweise",
+        "Sicherer Umgang mit gängiger Planungssoftware und MS Office",
+        "Gute Deutschkenntnisse in Wort und Schrift",
+      ],
+      bieten: [
+        "Anspruchsvolle, abwechslungsreiche Projekte mit viel Eigenverantwortung (HLKSE, Gebäudeautomation und BIM)",
+        ...bietenBasis,
+      ],
+      kontakt: { name: "Kevin von Dach", telefon: "033 227 40 20" },
+    },
+  },
+  {
+    id: "projektleiter-heizung",
+    role: "Projektleiter:in Heizung",
+    pensum: "80–100%",
+    place: "Thun",
+    image: "/img/jobs/heizung.jpg",
+    category: "Offene Stellen",
+    pdf: "https://www.iem.ch/download/pictures/94/m0j1ei3ry3ze1mi2ev8wudmjcv9g3q/stelleninserat_projektleiter_heizung.pdf",
+    detail: {
+      titel: "Projektleiter Heizung (m / w / d)",
+      einstieg:
+        "Per sofort oder nach Vereinbarung motivierter und erfahrener Projektleiter Heizung (m / w / d) 80 – 100 % zur Verstärkung unseres Teams in Thun gesucht!",
+      aufgaben: [
+        "Bearbeitung und Leitung von Projekten im Fachgebiet Heizungstechnik in allen Phasen (SIA)",
+        "Verantwortung für Budget, Zeitpläne und die technische Ausführung",
+        "Beratung von Bauherren und Kunden",
+        "Übernahme der Fachbauleitung und Umsetzung von Entwürfen und Projektbeschrieben",
+      ],
+      profil: [
+        "Abgeschlossene Ausbildung als Gebäudetechnikplaner/in Fachrichtung Heizung, allenfalls mit Weiterbildung Techniker/in HF",
+        "Mehrjährige Berufserfahrung, idealerweise in einer leitenden Position",
+        "Sicherer Umgang mit CAD-Software (NOVA) und den Office-Programmen",
+        "Hohes Verantwortungsbewusstsein und Engagement",
+        "Unternehmerisches Denken und Handeln",
+        "Ausgeprägte Team- und Kommunikationsfähigkeiten",
+        "Motivation, unser junges Heizungsteam zu fördern und weiterzuentwickeln",
+      ],
+      bieten: [gesamtplanungen, ...bietenBasis, aufstieg],
+      kontakt: { name: "Andreas Huber", telefon: "033 227 40 22" },
+    },
+  },
+  {
+    id: "projektleiter-lueftung",
+    role: "Projektleiter:in Lüftung",
+    pensum: "80–100%",
+    place: "Thun",
+    image: "/img/jobs/lueftung.jpg",
+    category: "Offene Stellen",
+    pdf: "https://www.iem.ch/download/pictures/38/celiy2pubm8v9mksrzp3dwtzhrr9yi/stelleninserat_projektleiter_lueftung.pdf",
+    detail: {
+      titel: "Projektleiter Lüftung (m / w / d)",
+      einstieg:
+        "Per sofort oder nach Vereinbarung motivierter und erfahrener Projektleiter Lüftung (m / w / d) 80 – 100 % zur Verstärkung unseres Teams in Thun gesucht!",
+      aufgaben: [
+        "Bearbeitung und Leitung von Projekten im Fachgebiet Lüftungstechnik in allen Phasen (SIA)",
+        "Verantwortung für Budget, Zeitpläne und die technische Ausführung",
+        "Beratung von Bauherren und Kunden",
+        "Übernahme der Fachbauleitung und Umsetzung von Entwürfen und Projektbeschrieben",
+      ],
+      profil: [
+        "Abgeschlossene Ausbildung als Gebäudetechnikplaner/in Fachrichtung Lüftung, allenfalls mit Weiterbildung Techniker/in HF",
+        "Mehrjährige Berufserfahrung, idealerweise in einer leitenden Position",
+        "Sicherer Umgang mit CAD-Software (NOVA) und den Office-Programmen",
+        "Hohes Verantwortungsbewusstsein und Engagement",
+        "Unternehmerisches Denken und Handeln",
+        "Ausgeprägte Team- und Kommunikationsfähigkeiten",
+        "Motivation, unser junges Lüftungsteam zu fördern und weiterzuentwickeln",
+      ],
+      bieten: [gesamtplanungen, ...bietenBasis, aufstieg],
+      kontakt: { name: "Kevin von Dach", telefon: "033 227 40 30" },
+    },
+  },
+  {
+    id: "projektleiter-sanitaer",
+    role: "Projektleiter:in Sanitär",
+    pensum: "80–100%",
+    place: "Thun oder Bern",
+    image: "/img/jobs/sanitaer.jpg",
+    category: "Offene Stellen",
+    pdf: "https://www.iem.ch/download/pictures/0b/8jyg8vy6r4gvtzg4q5peawwbhqqb8w/stelleninserat_projektleiter_sanitaer.pdf",
+    detail: {
+      titel: "Projektleiter Sanitär (m / w / d)",
+      einstieg:
+        "Per sofort oder nach Vereinbarung motivierter und erfahrener Projektleiter Sanitär (m / w / d) 80 – 100 % zur Verstärkung unseres Teams in Thun und Bern gesucht!",
+      aufgaben: [
+        "Bearbeitung und Leitung von Projekten im Fachgebiet Sanitärtechnik in allen Phasen (SIA)",
+        "Verantwortung für Budget, Zeitpläne und die technische Ausführung",
+        "Beratung von Bauherren und Kunden",
+        "Übernahme der Fachbauleitung und Umsetzung von Entwürfen und Projektbeschrieben",
+      ],
+      profil: [
+        "Abgeschlossene Ausbildung als Gebäudetechnikplaner/in Fachrichtung Sanitär, allenfalls mit Weiterbildung Techniker/in HF",
+        "Mehrjährige Berufserfahrung, idealerweise in einer leitenden Position",
+        "Sicherer Umgang mit CAD-Software (NOVA) und den Office-Programmen",
+        "Hohes Verantwortungsbewusstsein und Engagement",
+        "Unternehmerisches Denken und Handeln",
+        "Ausgeprägte Team- und Kommunikationsfähigkeiten",
+      ],
+      bieten: [gesamtplanungen, ...bietenBasis, aufstieg],
+      kontakt: { name: "Kevin von Dach", telefon: "033 227 40 30" },
+    },
+  },
+  {
+    id: "heizungsplaner",
+    role: "Heizungsplaner:in",
+    pensum: "60–100%",
+    place: "Thun oder Bern",
+    image: "/img/jobs/heizung-2.jpg",
+    category: "Offene Stellen",
+    pdf: "https://www.iem.ch/download/pictures/2a/xem2btrx0ipd5i1cgfc9pfzawz8rt2/stelleninserat_heizungsplaner.pdf",
+    detail: {
+      titel: "Heizungsplaner (m / w / d)",
+      einstieg:
+        "Per sofort oder nach Vereinbarung motivierter und erfahrener Heizungsplaner (m / w / d) 60 – 100 % zur Verstärkung unseres Teams in Thun oder Bern gesucht!",
+      aufgaben: [
+        "Planung und Projektierung von Heizungsanlagen in den Bereichen Industrie-, Gewerbe- und Wohnbau",
+        "Erstellung von Schemas, Grundrissplänen und Detailzeichnungen mittels CAD-Software",
+        "Berechnung von Dimensionierungen, Materialbedarf und Leistungswerten",
+        "Zusammenarbeit und Abstimmung mit Architekten, Bauherren und anderen Gewerken",
+        "Durchführung von Kosten- und Materialkalkulationen",
+        "Unterstützung bei der Erstellung von Ausschreibungsunterlagen und Angeboten",
+        "Betreuung und Koordination der Projekte von der Konzeptphase bis zur Inbetriebnahme",
+      ],
+      profil: [
+        "Abgeschlossene Ausbildung als Gebäudetechnikplaner Heizung EFZ oder eine vergleichbare Qualifikation",
+        "Mehrjährige Berufserfahrung in der Planung von Heizungsanlagen, idealerweise im Schweizer Bauwesen",
+        "Sicherer Umgang mit CAD-Software (NOVA)",
+        "Fundierte Kenntnisse der relevanten Normen und Vorschriften",
+        "Selbstständige und strukturierte Arbeitsweise",
+        "Teamfähigkeit und Kommunikationsstärke",
+        "Gute Deutschkenntnisse in Wort und Schrift",
+      ],
+      bieten: [gesamtplanungen, ...bietenBasis],
+      kontakt: { name: "Kevin von Dach", telefon: "033 227 40 20" },
+    },
+  },
+  {
+    id: "lueftungsplaner",
+    role: "Lüftungsplaner:in",
+    pensum: "60–100%",
+    place: "Thun",
+    image: "/img/jobs/lueftung-2.jpg",
+    category: "Offene Stellen",
+    pdf: "https://www.iem.ch/download/pictures/d0/ltle1v7001x3l9renodg0k8n5d5m0e/stelleninserat_lueftungsplaner.pdf",
+    detail: {
+      titel: "Lüftungsplaner (m / w / d)",
+      einstieg:
+        "Per sofort oder nach Vereinbarung motivierter und erfahrener Lüftungsplaner (m / w / d) 60 – 100 % zur Verstärkung unseres Teams in Thun und Bern gesucht!",
+      aufgaben: [
+        "Planung und Projektierung von Lüftungsanlagen in den Bereichen Industrie-, Gewerbe- und Wohnbau",
+        "Erstellung von Schemas, Grundrissplänen und Detailzeichnungen mittels CAD-Software",
+        "Berechnung von Dimensionierungen, Materialbedarf und Leistungswerten",
+        "Zusammenarbeit und Abstimmung mit Architekten, Bauherren und anderen Gewerken",
+        "Durchführung von Kosten- und Materialkalkulationen",
+        "Unterstützung bei der Erstellung von Ausschreibungsunterlagen und Angeboten",
+        "Betreuung und Koordination der Projekte von der Konzeptphase bis zur Inbetriebnahme",
+      ],
+      profil: [
+        "Abgeschlossene Ausbildung als Gebäudetechnikplaner Lüftung EFZ oder eine vergleichbare Qualifikation",
+        "Mehrjährige Berufserfahrung in der Planung von Lüftungsanlagen, idealerweise im Schweizer Bauwesen",
+        "Sicherer Umgang mit CAD-Software (NOVA)",
+        "Fundierte Kenntnisse der relevanten Normen und Vorschriften",
+        "Selbstständige und strukturierte Arbeitsweise",
+        "Teamfähigkeit und Kommunikationsstärke",
+        "Gute Deutschkenntnisse in Wort und Schrift",
+      ],
+      bieten: [gesamtplanungen, ...bietenBasis],
+      kontakt: { name: "Kevin von Dach", telefon: "033 227 40 20" },
+    },
+  },
+  {
+    id: "sanitaerplaner",
+    role: "Sanitärplaner:in",
+    pensum: "60–100%",
+    place: "Thun oder Bern",
+    image: "/img/jobs/sanitaer-2.jpg",
+    category: "Offene Stellen",
+    pdf: "https://www.iem.ch/download/pictures/61/ghw0rtq81fq5hem7ohkwguo88pyslv/stelleninserat_sanitaerplaner.pdf",
+    detail: {
+      titel: "Sanitärplaner (m / w / d)",
+      einstieg:
+        "Per sofort oder nach Vereinbarung motivierter und erfahrener Sanitärplaner (m / w / d) 60 – 100 % zur Verstärkung unseres Teams in Thun und Bern gesucht!",
+      aufgaben: [
+        "Planung und Projektierung von Sanitäranlagen in den Bereichen Industrie-, Gewerbe- und Wohnbau",
+        "Erstellung von Schemas, Grundrissplänen und Detailzeichnungen mittels CAD-Software",
+        "Berechnung von Dimensionierungen, Materialbedarf und Leistungswerten",
+        "Zusammenarbeit und Abstimmung mit Architekten, Bauherren und anderen Gewerken",
+        "Durchführung von Kosten- und Materialkalkulationen",
+        "Unterstützung bei der Erstellung von Ausschreibungsunterlagen und Angeboten",
+        "Betreuung und Koordination der Projekte von der Konzeptphase bis zur Inbetriebnahme",
+      ],
+      profil: [
+        "Abgeschlossene Ausbildung als Gebäudetechnikplaner Sanitär EFZ oder eine vergleichbare Qualifikation",
+        "Mehrjährige Berufserfahrung in der Planung von Sanitäranlagen, idealerweise im Schweizer Bauwesen",
+        "Sicherer Umgang mit CAD-Software (NOVA)",
+        "Fundierte Kenntnisse der relevanten Normen und Vorschriften",
+        "Selbstständige und strukturierte Arbeitsweise",
+        "Teamfähigkeit und Kommunikationsstärke",
+        "Gute Deutschkenntnisse in Wort und Schrift",
+      ],
+      bieten: [gesamtplanungen, ...bietenBasis],
+      kontakt: { name: "Kevin von Dach", telefon: "033 227 40 20" },
+    },
+  },
 ];
 
 /**
