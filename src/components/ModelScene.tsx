@@ -71,36 +71,22 @@ const PHASE_OPACITY: Record<string, [number, number, number]> = {
  */
 const MEDIUM_OPACITY: [number, number, number] = [0.2, 1, 1];
 
-const TONE_TEXT: Record<string, string> = {
-  heat: "text-disc-heat",
-  air: "text-disc-air",
-  water: "text-disc-water",
-};
-
-const TONE_DOT: Record<string, string> = {
-  heat: "bg-disc-heat",
-  air: "bg-disc-air",
-  water: "bg-disc-water",
-};
-
 const NAVY = 0x003882;
 const LINE = 0xbfcad9;
 
 export function ModelScene({ act, running }: { act: Act; running: boolean }) {
   const host = useRef<HTMLDivElement>(null);
-  const overlay = useRef<HTMLDivElement>(null);
   const actRef = useRef<Act>(act);
   const runRef = useRef(running);
   // The scene hands React a handle for the zoom buttons — the alternative is
   // lifting the whole three.js state up, which nothing else needs.
   const api = useRef<{ zoom: (dir: 1 | -1) => void } | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "running" | "failed">("idle");
-  // The legend, the labels and the component count all come out of the model,
-  // so they can only be rendered once it has loaded.
+  // The legend and the component count come out of the model, so they can only
+  // be rendered once it has loaded. Nothing else does any more — the in-scene
+  // labels that used to live here are gone.
   const [model, setModel] = useState<{
     medien: Modell["medien"];
-    messpunkte: Modell["messpunkte"];
-    zentralen: Modell["zentralen"];
     bauteile: number;
   } | null>(null);
 
@@ -596,30 +582,17 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
       switchPlate.position.set(...schalter);
       scene.add(switchPlate);
 
-      // ---- Hand the overlay what it needs, now that the model is here ----
+      // ---- Hand the legend and the title block what they need ----
       setModel({
         medien: M.medien,
-        messpunkte: M.messpunkte,
-        zentralen: M.zentralen,
         bauteile: M.inventar.gezeichnet.reduce((sum, r) => sum + r.n, 0),
       });
 
-      // ---- Labels ----
-      // Read on the next frame: the anchors above are state, so the DOM nodes
-      // carrying `data-anchor` do not exist until React has re-rendered.
-      const marks: { el: HTMLElement; at: Three.Vector3 }[] = [];
-      const collect = () => {
-        marks.length = 0;
-        const layer = overlay.current;
-        if (!layer) return;
-        for (const node of Array.from(layer.querySelectorAll<HTMLElement>("[data-anchor]"))) {
-          const [x, y, z] = node.dataset.anchor!.split(",").map(Number);
-          marks.push({ el: node, at: new THREE.Vector3(x, y, z) });
-        }
-      };
-      const mo = new MutationObserver(collect);
-      if (overlay.current) mo.observe(overlay.current, { childList: true, subtree: true });
-      collect();
+      // Nothing is labelled in the scene any more — no room names, no design
+      // values. The projection machinery that pinned DOM nodes to 3D anchors
+      // (a MutationObserver collecting `[data-anchor]`, plus a per-frame
+      // project-and-transform pass) went with them. If in-scene labels ever
+      // come back, that is what has to come back too.
 
       const ro = new ResizeObserver(() => {
         const w = el.clientWidth;
@@ -634,7 +607,6 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
       const clock = new THREE.Clock();
       const wantPos = new THREE.Vector3();
       const wantTarget = new THREE.Vector3();
-      const projected = new THREE.Vector3();
       let raf = 0;
       let flowTime = 0;
 
@@ -693,13 +665,6 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
           }
         }
 
-        for (const m of marks) {
-          projected.copy(m.at).project(camera);
-          m.el.style.transform = `translate(-50%, -50%) translate(${
-            ((projected.x + 1) / 2) * el.clientWidth
-          }px, ${((-projected.y + 1) / 2) * el.clientHeight}px)`;
-          m.el.style.visibility = projected.z > 1 ? "hidden" : "visible";
-        }
 
         renderer.render(scene, camera);
       }
@@ -708,7 +673,6 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
       return () => {
         cancelAnimationFrame(raf);
         api.current = null;
-        mo.disconnect();
         ro.disconnect();
         controls.dispose();
         renderer.dispose();
@@ -745,55 +709,22 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
         aria-label="Dreidimensionales Modell eines Projekts, zusammengesetzt aus den IFC-Fachmodellen für Architektur, Heizung und Lüftung: Planer am Rechner, Installateur in der Heizzentrale, Nutzer im Obergeschoss, mit den Leitungen für Vor- und Rücklauf, Zu- und Abluft und Kaltwasser. Der Ablauf ist daneben als Text beschrieben."
       />
 
-      {/* Labels ride above the canvas. `data-anchor` is the 3D point each one
-          is pinned to; the render loop projects it and writes the transform. */}
-      <div ref={overlay} aria-hidden className="pointer-events-none absolute inset-0">
-        {/* The three figures carry no label in the scene. Who is acting is
-            already said twice beside it — by the heading ("Der Installateur
-            baut sie ein.") and by the act the reader just pressed — and a
-            third time floating over the model was one too many. The figures
-            still stand where the exporter put them; they read as people at
-            1.8 m against a 51 m building, which is also the only thing in the
-            scene giving it scale. */}
+      {/* Nothing floats over the model. The three figures never carried a
+          label — who is acting is already said by the heading and by the act
+          the reader just pressed. The plant-room names ("Heizzentrale",
+          "Lüftungszentrale") and the three design values (heating load, flow
+          and return temperature, supply-duct size) followed them out at the
+          client's request, September 2026.
 
-        {/* Two rooms are named in the scene, and only two: the plant rooms are
-            where the building's services actually live, and the second act
-            plays in one of them. Naming all 168 rooms would turn the model
-            into a floor plan with labels all over it — and the rooms in this
-            model are all called "Raum" anyway. */}
-        {model?.zentralen.map((z) => (
-          <div
-            key={z.name}
-            data-anchor={[z.at[0], z.at[1] + 2.4, z.at[2]].join(",")}
-            className={`absolute left-0 top-0 transition-opacity duration-500 ${
-              act === 0 ? "opacity-0" : "opacity-100"
-            }`}
-          >
-            <span className="whitespace-nowrap rounded-sm bg-surface/90 px-1.5 py-0.5 eyebrow text-brand-blue ring-1 ring-line backdrop-blur-sm">
-              {z.name}
-            </span>
-          </div>
-        ))}
+          The data behind them is still exported — `zentralen` also frames the
+          camera, and `messpunkte` still comes out of the property sets — so
+          bringing labels back is a rendering job, not a regeneration. What
+          would have to come back with them is the anchor projection: a
+          MutationObserver collecting `[data-anchor]` nodes and a per-frame
+          pass writing each one's screen transform. Ask before reinstating any
+          of it. */}
 
-        {model?.messpunkte.map((mp) => (
-          <div
-            key={mp.id}
-            data-anchor={mp.at.join(",")}
-            className={`absolute left-0 top-0 transition-opacity duration-500 ${
-              act === 2 && running ? "opacity-100" : "opacity-0"
-            }`}
-          >
-            <span className="flex items-center gap-1.5 whitespace-nowrap rounded-sm bg-surface/90 px-1.5 py-0.5 ring-1 ring-line backdrop-blur-sm">
-              <span className={`h-1.5 w-1.5 rounded-full ${TONE_DOT[mp.tone]}`} />
-              <span className={`font-mono text-[11px] font-medium tnum ${TONE_TEXT[mp.tone]}`}>
-                {mp.value}
-              </span>
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Media legend. Five strands are only legible if the colours are named
+      {/* Media legend. The strands are only legible if the colours are named
           — this is the difference between "pipes" and "an installation". */}
       <ul
         className={`pointer-events-none absolute left-3 top-3 flex max-w-[70%] flex-wrap gap-x-3 gap-y-1 transition-opacity duration-500 ${
