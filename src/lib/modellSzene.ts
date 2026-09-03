@@ -1,4 +1,4 @@
-import type * as Three from "three";
+﻿import type * as Three from "three";
 import type { Modell } from "@/generated/scene_guglera";
 
 /**
@@ -8,8 +8,9 @@ import type { Modell } from "@/generated/scene_guglera";
  * Beide zeigen dasselbe Gebäude, inszenieren es aber verschieden: der Ablauf in
  * drei Akten mit Figuren und Beschriftung, der Hero als stille Kulisse über
  * sechs SIA-Phasen. Was beide gemeinsam haben, ist der Aufbau selbst — 2'451
- * Körper, 5'317 Leitungen, 18 Deckennetze — und der gehört genau einmal
- * geschrieben. Die Inszenierung bleibt beim jeweiligen Aufrufer.
+ * Körper, 7'694 Rohre, 1'468 Rechteckkanäle und 18 Deckennetze, worin 1'475
+ * Dämmhüllen stecken — und der gehört genau einmal geschrieben. Die
+ * Inszenierung bleibt beim jeweiligen Aufrufer.
  *
  * Die Zahl der Bühnenbilder legt der Aufrufer fest: `deckkraft` gibt je
  * Kategorie ein Feld zurück, dessen Länge die Zahl der Stufen ist. Der Ablauf
@@ -128,14 +129,34 @@ export function baueModell(
     scene.add(new THREE.Mesh(geo, deckenMat));
   }
 
-  // ---- Leitungen, eine InstancedMesh je Medium ----
-  // Rohre, Kanäle, Formstücke, Klappen und Schalldämpfer. Jedes trägt seine
-  // Achse in der Quelle als zwei IfcDistributionPort — ein Zylinder dazwischen
-  // ist keine Näherung, sondern dieselbe Beschreibung, kürzer geschrieben.
+  // ---- Leitungen, je Medium eine InstancedMesh für Rohre und eine für Kanäle ----
+  // Rundes und Rechteckiges sind zwei Körper, nicht einer. Ein Formstück steht
+  // dabei als mehrere Stücke: der Exporter schneidet die Portachsen im
+  // Bauteilmittelpunkt und zieht von dort je Anschluss einen Ast — ein Bogen
+  // wird sein Bogen, ein T-Stück behält seinen Abzweig. Beides hier deshalb
+  // nur noch aufstellen, nicht ausdenken.
   const unitTube = new THREE.CylinderGeometry(1, 1, 1, 8, 1, true);
   const a = new THREE.Vector3();
   const b = new THREE.Vector3();
   const dir = new THREE.Vector3();
+  const quer = new THREE.Vector3();
+  const dritte = new THREE.Vector3();
+
+  // Der Deckkraftfaktor des Mediums zählt mit. Für die fünf Medien ist er 1;
+  // die Dämmung liegt als Hülle über dem Rohr und muss durchscheinen, sonst
+  // sieht man von der Leitung nur noch ihre Verpackung.
+  const leitungsMaterial = (medium: Modell["medien"][number]) => {
+    const material = new THREE.MeshLambertMaterial({
+      color: new THREE.Color(medium.color),
+      transparent: true,
+      opacity: 0,
+      // Eine durchscheinende Hülle, die Tiefe schreibt, radiert das Rohr darin
+      // aus — dasselbe Problem wie bei den Wänden weiter oben.
+      depthWrite: medium.deckkraft >= 1,
+    });
+    merke(material, opts.medienDeckkraft.map((o) => o * medium.deckkraft));
+    return material;
+  };
 
   const jeMedium: number[][] = M.medien.map(() => []);
   for (let i = 0; i < M.straenge.length; i += M.STRANG_STRIDE) {
@@ -144,14 +165,7 @@ export function baueModell(
   M.medien.forEach((medium, m) => {
     const idx = jeMedium[m];
     if (!idx.length) return;
-    const material = new THREE.MeshLambertMaterial({
-      color: new THREE.Color(medium.color),
-      transparent: true,
-      opacity: 0,
-    });
-    merke(material, opts.medienDeckkraft);
-
-    const mesh = new THREE.InstancedMesh(unitTube, material, idx.length);
+    const mesh = new THREE.InstancedMesh(unitTube, leitungsMaterial(medium), idx.length);
     idx.forEach((o, n) => {
       a.set(M.straenge[o + 1], M.straenge[o + 2], M.straenge[o + 3]);
       b.set(M.straenge[o + 4], M.straenge[o + 5], M.straenge[o + 6]);
@@ -162,6 +176,45 @@ export function baueModell(
       // Ein Zylinder zeigt nach +Y; auf die Achse des Strangs drehen.
       quat.setFromUnitVectors(up, dir.divideScalar(len));
       scl.set(r, len, r);
+      mesh.setMatrixAt(n, mat4.compose(pos, quat, scl));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    scene.add(mesh);
+  });
+
+  // ---- Rechteckkanäle ----
+  // Die Querachse kommt fertig aus dem Modell, statt sie hier zu raten: sie
+  // steht in der Platzierung des Anschlusses. Damit wird die Drehung um die
+  // Kanalachse aus der Basis (Querachse, Achse, Kreuzprodukt) aufgebaut und
+  // nicht über setFromUnitVectors, das für die Drehung um die eigene Achse
+  // keine Aussage macht — ein hochkant stehender 200 × 700er läge sonst
+  // zufällig flach.
+  const kanalIdx: number[][] = M.medien.map(() => []);
+  for (let i = 0; i < M.kanaele.length; i += M.KANAL_STRIDE) {
+    kanalIdx[M.kanaele[i]].push(i);
+  }
+  M.medien.forEach((medium, m) => {
+    const idx = kanalIdx[m];
+    if (!idx.length) return;
+    const mesh = new THREE.InstancedMesh(unitBox, leitungsMaterial(medium), idx.length);
+    idx.forEach((o, n) => {
+      a.set(M.kanaele[o + 1], M.kanaele[o + 2], M.kanaele[o + 3]);
+      b.set(M.kanaele[o + 4], M.kanaele[o + 5], M.kanaele[o + 6]);
+      const breite = M.kanaele[o + 7];
+      const hoehe = M.kanaele[o + 8];
+      quer.set(M.kanaele[o + 9], M.kanaele[o + 10], M.kanaele[o + 11]);
+      dir.subVectors(b, a);
+      const len = dir.length() || 1e-4;
+      dir.divideScalar(len);
+      // Querachse gegen die Kanalachse orthonormieren, dann die dritte dazu.
+      quer.addScaledVector(dir, -quer.dot(dir));
+      if (quer.lengthSq() < 1e-12) quer.set(1, 0, 0).addScaledVector(dir, -dir.x);
+      quer.normalize();
+      dritte.crossVectors(quer, dir).normalize();
+      pos.addVectors(a, b).multiplyScalar(0.5);
+      mat4.makeBasis(quer, dir, dritte);
+      quat.setFromRotationMatrix(mat4);
+      scl.set(breite, len, hoehe);
       mesh.setMatrixAt(n, mat4.compose(pos, quat, scl));
     });
     mesh.instanceMatrix.needsUpdate = true;

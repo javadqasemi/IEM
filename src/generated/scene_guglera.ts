@@ -36,8 +36,17 @@ export type Modell = {
   };
   /** Farbe, Deckkraft und Bauphase je Körperart. */
   kategorien: { id: string; label: string; color: string; opacity: number; phase: string }[];
-  /** Medien der Leitungen, Farben wie im Hero-Schnitt. */
-  medien: { id: string; label: string; short: string; gewerk: string; color: string }[];
+  /**
+   * Medien der Leitungen, Farben wie im Hero-Schnitt. `deckkraft` ist ein
+   * Faktor auf die Deckkraft, die der Aufrufer setzt: bei den Medien 1, bei der
+   * Dämmung deutlich darunter — sie liegt als Hülle über dem Rohr und würde es
+   * sonst zudecken. Die Reihenfolge ist gebunden, `ModelScene` greift für die
+   * Stifte auf dem Zeichentisch über feste Indizes zu.
+   */
+  medien: {
+    id: string; label: string; short: string; gewerk: string;
+    color: string; deckkraft: number;
+  }[];
   KOERPER_STRIDE: number;
   /**
    * Ein Körper je acht Zahlen: Kategorie, Mitte x/y/z, Grösse b/h/t, Drehung
@@ -47,10 +56,25 @@ export type Modell = {
   koerper: number[];
   STRANG_STRIDE: number;
   /**
-   * Eine Leitung je acht Zahlen: Medium, von x/y/z, nach x/y/z, Radius. Die
-   * Achse steht als IfcDistributionPort an beiden Enden im Modell.
+   * Ein rundes Leitungsstück je acht Zahlen: Medium, von x/y/z, nach x/y/z,
+   * Radius. Ein Formstück steht hier als mehrere Stücke: ein Bogen als Zug
+   * entlang seiner Krümmung, ein T-Stück als ein Ast je Anschluss. Die Ecke ist
+   * der Schnittpunkt der Portachsen, der Krümmungsradius folgt aus der
+   * Tangentenlänge — beides gerechnet, nicht geschätzt.
    */
   straenge: number[];
+  KANAL_STRIDE: number;
+  /**
+   * Ein rechteckiges Leitungsstück je zwölf Zahlen: Medium, von x/y/z, nach
+   * x/y/z, Breite, Höhe, und die Querachse x/y/z, an der die Breite liegt.
+   *
+   * Rechteckkanäle sind bewusst keine Zylinder. Als Rohr mit „flächengleichem"
+   * Ersatzradius gezeichnet kam ein 500 × 500er auf 39 % seines Querschnitts,
+   * und die echte Geometrie lag im Median 0,185 m ausserhalb des gezeichneten
+   * Körpers. Die Querachse stammt aus der Portplatzierung, damit der Kanal im
+   * Raum so liegt wie im Modell und nicht bloss ungefähr.
+   */
+  kanaele: number[];
   /**
    * Decken als echtes Dreiecksnetz, je drei Zahlen ein Eckpunkt. Ein Quader
    * über einer Geschossdecke füllt die Schächte und verdeckt damit die
@@ -75,7 +99,13 @@ export type Modell = {
    * die keine Regel hinterlegt ist.
    */
   inventar: {
-    gezeichnet: { quelle: string; klasse: string; als: string; n: number }[];
+    /**
+     * `n` zählt Bauteile, `teile` die Körper daraus. Für alles ausser
+     * Formstücken ist das dasselbe; ein Bogen wird zu mehreren Körpern, ein
+     * T-Stück zu einem je Ast. Die Bildunterschrift der Szene nennt Bauteile,
+     * also `n` — sonst gäbe sie Rohrstücke als Bauteile aus.
+     */
+    gezeichnet: { quelle: string; klasse: string; als: string; n: number; teile: number }[];
     nichtGezeichnet: { klasse: string; grund: string; n: number }[];
   };
 };

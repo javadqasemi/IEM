@@ -1,4 +1,4 @@
-# CAD
+﻿# CAD
 
 Zwei Werkzeugketten, die nichts miteinander zu tun haben:
 
@@ -81,16 +81,86 @@ exportierten Inventar: 9'734 sind `IfcDistributionPort` (ein Anschlusspunkt,
 kein Bauteil), 1'041 führen in der Quelle keine Geometrie, 410 sind Öffnungen
 und werden durch das Fenster oder die Tür darin dargestellt.
 
-Zwei Darstellungen: Rohre, Kanäle und Formstücke als Zylinder aus Achse und
-Radius — ein Rohr *ist* ein Zylinder, und die Achse steht ohnehin als
-`IfcDistributionPort` im Modell. Alles andere als gedrehter Quader über der
+Drei Darstellungen: runde Rohre als Zylinder aus Achse und Radius — ein Rohr
+*ist* ein Zylinder, und die Achse steht ohnehin als `IfcDistributionPort` im
+Modell. Rechteckkanäle als Quader entlang ihrer Achse, mit Breite, Höhe und der
+Querachse aus der Portplatzierung. Alles andere als gedrehter Quader über der
 kleinsten umschliessenden Grundfläche. **Ausnahme Decken:** die bleiben ein
 echtes Dreiecksnetz, sonst füllt ein Quader die Schächte und verdeckt genau
 die Steigstränge, wegen derer die Szene existiert.
 
+**Ein Formstück ist kein Zylinder.** Eine frühere Fassung zog durch jedes
+Leitungsbauteil einen Zylinder zwischen den zwei entferntesten Anschlüssen.
+Gemessen an der Quelle war das an vier Stellen falsch: 1'691 Formstücke der
+Heizung sind zu 89 % echte 90°-Bögen und wurden zur Sehne; 255 Bauteile mit drei
+oder vier Anschlüssen verloren den Abzweig; 694 Rechteckkanäle wurden rund
+gezeichnet, mit `hypot(s1,s2)/4` als „flächengleichem" Radius (ein 500 × 500er
+kam damit auf 39 % seines Querschnitts); und 2'110 Formstücke bekamen 30 mm
+Notradius, obwohl ihre Weite unter `Tech-DN` beziehungsweise `Tech-DN1/2/3` im
+Modell steht — sie wurde nur nicht gelesen.
+
+Jetzt trägt jeder Anschluss seine Richtung bei, die Portachsen schneiden sich in
+der Bauteilmitte, und von dort zieht jeder Anschluss seinen eigenen Ast. Bei
+zwei Anschlüssen wird daraus der Bogen; sein Krümmungsradius folgt aus der
+Tangentenlänge, die Feinheit der Zerlegung aus seiner Grösse. Die Weite erbt über
+`IfcRelConnectsPorts` vom angeschlossenen Rohr, weshalb auch ein reduziertes
+T-Stück je Ast die richtige bekommt. Nennweite → Aussendurchmesser über eine
+Tabelle aus den Rohren derselben Datei, die beides führen.
+
+Gemessene Abweichung der echten Netze vom gezeichneten Körper (p95 quer,
+Median): Lüftungskanäle 0,107 m → 0,000, Lüftungsformstücke 0,185 m → 0,060,
+Schalldämpfer 0,107 m → 0,025. **Nach jeder Änderung an den Leitungsregeln neu
+messen.**
+
+**Es gibt keine analytische Rohrgeometrie.** Jedes Leitungsbauteil ist ein
+`IfcFaceBasedSurfaceModel` in einer `MappedRepresentation` — kein
+`IfcSweptDiskSolid`, kein Profil, keine Leitkurve. Achse plus Radius ist also
+immer eine *Rekonstruktion*, und richtig geprüft wird sie nur gegen das Netz.
+Instanzieren bringt ebenfalls nichts: 5'283 Katalogeinträge auf 4'484
+Heizungsbauteile, jeder genau einmal benutzt.
+
+**Die Dämmung gehört zum Netz und wird jetzt gezeichnet.** 723 Heizungs- und
+305 Lüftungsbauteile führen `Tech-Insulation thickness (mm)` mit 20 bis 100 mm,
+im IFC als zweiter Repräsentationskörper — daher die Bauteile mit zwei bis vier
+Items. Gedämmt ist ein Rohr im Median **2,99-mal**, im Extrem **5,46-mal** so
+dick wie blank; ohne Dämmung sehen die Stränge neben einem IFC-Betrachter
+schlicht zu dünn aus. Sie geht als eigenes Medium `daemmung` heraus.
+**Wer gezeichnete Geometrie gegen das Quellnetz misst, muss die Dämmung vorher
+abziehen** — sonst misst er sie als Fehler.
+
+**Ein T-Stück ist kein Bogen, und die Portzahl lügt darüber.** Von 322
+Heizungs-T-Stücken führen nur 201 drei Ports. Rund 120 führen zwei, und zwei
+senkrechte Ports sehen exakt aus wie ein Bogen — wer das glaubt, rundet eine
+scharfe Ecke ab und verliert den Durchgang. Weitere 115 führen nur den
+Durchgang, ihre Achsen schneiden sich nie, und der Abzweig verschwindet ganz.
+`Tech-DN3` ist das verlässliche Signal für „drei Wege"; der fehlende Schenkel
+kommt dann aus dem Netz (`fehlender_ast` beziehungsweise `abzweig_aus_netz`).
+Gerundet wird nur, wenn `Tech-Product type` wirklich *Bogen* sagt. Der p95-
+Fehler bezogen auf den Rohrradius fiel damit von 1,55 auf **0,00** (T-Stück)
+und von 1,29 auf **0,00** (reduziert); 90°-Bögen liegen bei 0,11.
+
 Rund ein Sechstel der Leitungsbauteile führt nur einen Anschluss. Deren Achse
 kommt aus der ersten Hauptachse des Netzes; ohne diesen Rückfall fielen 650
-Rohre und 118 Kanäle aus der Leitungsdarstellung heraus.
+Rohre und 118 Kanäle aus der Leitungsdarstellung heraus. Die Weite kommt auch
+dort aus dem Property-Set, wenn es eine führt — die Streubreite der Punktwolke
+ist an einem angeschnittenen Bogen deutlich zu gross.
+
+`inventar` zählt **Bauteile**, `teile` die Körper daraus: 7'786 Bauteile werden
+zu 10'156 Körpern, dazu kommen 1'475 Dämmhüllen. Die Bildunterschrift der Szene
+nennt Bauteile und liest deshalb `n`.
+
+**Zehn Medien in den Farben des Planers.** `SYSTEM_ZU_MEDIUM` trennt, was das
+Modell trennt: Aussenluft ist keine Zuluft (63 Bauteile), Fortluft keine Abluft
+(43), Bestand kein Neubau (205). Die Tabelle steht bewusst hier und nicht in
+`IS.SYSTEME` — daran hängt der Hero-Schnitt, der weiterhin zusammenfasst.
+
+Die Farben stammen aus `IfcStyledItem` der Quelldateien: Vorlauf `#ff0000`,
+Rücklauf `#0000ff`, beide *bestehend* `#000000`, Kaltwasser VL `#00ffff` und RL
+`#6600cc`, Zuluft `#ff0000`, Abluft `#ffcc00`, Aussenluft `#66ff33`, Fortluft
+`#993300`. **Zwei Kollisionen stehen so in der Quelle** — Vorlauf und Zuluft
+teilen dasselbe Rot, die beiden Bestandssysteme dasselbe Schwarz. Nicht ohne
+Rückfrage „korrigieren". Einzige Abweichung ist die Dämmung: grau statt in der
+Rohrfarbe, sonst bräuchte die Legende zwanzig Felder.
 
 **Die Daten liegen als JSON-Ressource neben dem Modul, nicht darin.** Das ist
 keine Stilfrage: 62'000 Zahlen als Array-Literal sind ebenso viele AST-Knoten,

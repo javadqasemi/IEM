@@ -532,11 +532,16 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
       desk.add(keyboard);
 
       // Coloured lines on the screen: the plan being drawn, in the colours of
-      // the media it will become.
-      [0, 3, 2].forEach((m, i) => {
+      // the media it will become. Addressed by id, not by position — the media
+      // list grew from five to eleven when the scene stopped folding Aussenluft
+      // into Zuluft, and fixed indices would have silently drawn the wrong
+      // three colours here.
+      ["heizwasser_vl", "zuluft", "kaltwasser_vl"].forEach((id, i) => {
+        const medium = M.medien.find((m) => m.id === id);
+        if (!medium) return;
         const bar = new THREE.Mesh(
           new THREE.BoxGeometry(0.66, 0.045, 0.01),
-          propMat([1, 0.12, 0.12], new THREE.Color(M.medien[m].color).getHex()),
+          propMat([1, 0.12, 0.12], new THREE.Color(medium.color).getHex()),
         );
         bar.position.set(-0.08, 1.3 - i * 0.16, 0.99);
         bar.rotation.x = 0.12;
@@ -737,7 +742,7 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
         ref={host}
         className="absolute inset-0"
         role="img"
-        aria-label="Dreidimensionales Modell des Projekts Guglera in Giffers, zusammengesetzt aus den IFC-Fachmodellen für Architektur, Heizung und Lüftung: Planer am Rechner, Installateur in der Heizzentrale, Nutzer im Obergeschoss, mit den Leitungen für Vor- und Rücklauf, Zu- und Abluft und Kaltwasser. Der Ablauf ist daneben als Text beschrieben."
+        aria-label="Dreidimensionales Modell eines Projekts, zusammengesetzt aus den IFC-Fachmodellen für Architektur, Heizung und Lüftung: Planer am Rechner, Installateur in der Heizzentrale, Nutzer im Obergeschoss, mit den Leitungen für Vor- und Rücklauf, Zu- und Abluft und Kaltwasser. Der Ablauf ist daneben als Text beschrieben."
       />
 
       {/* Labels ride above the canvas. `data-anchor` is the 3D point each one
@@ -838,7 +843,7 @@ export function ModelScene({ act, running }: { act: Act; running: boolean }) {
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between border-t border-line bg-surface/80 px-4 py-2.5 backdrop-blur-sm">
         <span className="eyebrow text-muted">
-          Guglera, Giffers · IFC
+          IFC
           {model ? ` · ${model.bauteile.toLocaleString("de-CH")} Bauteile` : ""}
         </span>
         <span className="eyebrow hidden text-muted sm:inline">
