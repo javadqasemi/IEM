@@ -183,7 +183,7 @@ function CodeDialog({ onOk }: { onOk: () => void }) {
               href="tel:+41782485859"
               className="text-brand-blue underline decoration-line underline-offset-4 hover:text-brand-bronze"
             >
-              +41 782 248 58 59
+              +41 78 248 58 59
             </a>
           </p>
         </div>
