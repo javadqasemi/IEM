@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { CodeGate } from "./components/CodeGate";
 import { StelleDetail, StelleNichtGefunden } from "./components/StelleDetail";
 import { openings } from "./content/iem";
 import "./styles/globals.css";
@@ -21,6 +22,6 @@ document.title = opening ? `${opening.detail.titel} — IEM AG` : "Stelle nicht 
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {opening ? <StelleDetail opening={opening} /> : <StelleNichtGefunden />}
+    <CodeGate>{opening ? <StelleDetail opening={opening} /> : <StelleNichtGefunden />}</CodeGate>
   </StrictMode>,
 );
