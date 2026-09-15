@@ -1,19 +1,13 @@
 import type { CSSProperties } from "react";
 import { Wordmark } from "./Wordmark";
 import { SocialIcon } from "./SocialIcon";
-import { facts, navItems, offices, socials } from "@/content/iem";
-
-const company = [
-  { label: "Über uns", href: "#ueber-uns" },
-  // Not in `navItems` — the header has six slots and Über uns took this one's.
-  // The footer is where it stays reachable by name.
-  { label: "Ablauf", href: "#ablauf" },
-  { label: "Team", href: "#team" },
-  { label: "Karriere", href: "#karriere" },
-  { label: "Kontakt", href: "#kontakt" },
-];
+import { resolveTokens, useContent } from "@/content/iem";
 
 export function Footer() {
+  const content = useContent();
+  const { footer, navItems, offices, socials } = content;
+  const t = (s: string) => resolveTokens(s, content);
+
   return (
     <footer className="tick-rule mt-8 bg-surface">
       {/* The social rail sits outside the 12-column grid rather than inside it:
@@ -50,19 +44,14 @@ export function Footer() {
                   height follows from the viewBox (142:56). */}
               <div className="flex w-fit flex-col gap-3">
                 <Wordmark className="!w-[90%] text-brand-navy" />
-                <p className="text-sm leading-relaxed text-muted">
-                  Ingenieurbüro für Energie- und Messtechnik.
-                </p>
+                <p className="text-sm leading-relaxed text-muted">{footer.tagline}</p>
               </div>
-              <p className="text-sm leading-relaxed text-muted">
-                Gebäudetechnik-Planung für Neubau und Sanierung — Thun und Bern, seit{" "}
-                {facts.founded}.
-              </p>
+              <p className="text-sm leading-relaxed text-muted">{t(footer.blurb)}</p>
             </div>
           </div>
 
           <div className="flex flex-col gap-3 lg:col-span-2">
-            <h2 className="eyebrow text-muted">Dienstleistungen</h2>
+            <h2 className="eyebrow text-muted">{footer.serviceColumnTitle}</h2>
             <ul className="flex flex-col gap-2 text-sm">
               {navItems.map((i) => (
                 <li key={i.label}>
@@ -75,9 +64,9 @@ export function Footer() {
           </div>
 
           <div className="flex flex-col gap-3 lg:col-span-2">
-            <h2 className="eyebrow text-muted">Unternehmen</h2>
+            <h2 className="eyebrow text-muted">{footer.companyColumnTitle}</h2>
             <ul className="flex flex-col gap-2 text-sm">
-              {company.map((i) => (
+              {footer.companyLinks.map((i) => (
                 <li key={i.label}>
                   <a href={i.href} className="text-ink transition-colors hover:text-brand-bronze">
                     {i.label}
@@ -109,7 +98,7 @@ export function Footer() {
         {/* Vertical rail, pinned to the top-right. `self-start` keeps it level
             with the wordmark instead of stretching down the whole footer. */}
         <ul
-          aria-label="IEM AG in sozialen Netzwerken"
+          aria-label={footer.socialRailLabel}
           className="flex shrink-0 flex-col gap-2.5 self-start"
         >
           {socials.map((s) => (
@@ -118,7 +107,7 @@ export function Footer() {
                 href={s.href}
                 target="_blank"
                 rel="noreferrer noopener"
-                aria-label={`IEM AG auf ${s.label}`}
+                aria-label={`${footer.socialLinkPrefix} ${s.label}`}
                 className="social-btn"
                 style={{ "--sc": s.color } as CSSProperties}
               >
@@ -131,10 +120,13 @@ export function Footer() {
 
       <div className="border-t border-line">
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-2 px-6 py-6 lg:flex-row lg:px-10">
-          <p className="eyebrow text-muted">© 2026 IEM AG · Thun · Bern</p>
+          <p className="eyebrow text-muted">{t(footer.copyright)}</p>
           <p className="eyebrow flex gap-4 text-muted">
-            <a href="#" className="hover:text-ink">Datenschutz</a>
-            <a href="#" className="hover:text-ink">Impressum</a>
+            {footer.legalLinks.map((l) => (
+              <a key={l.label} href={l.href} className="hover:text-ink">
+                {l.label}
+              </a>
+            ))}
           </p>
         </div>
       </div>

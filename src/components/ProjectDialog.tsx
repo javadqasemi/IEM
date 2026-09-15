@@ -1,8 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Badge } from "./Badge";
-import { disciplines, inHLKSE, type projects } from "@/content/iem";
-
-type Project = (typeof projects)[number];
+import { inHLKSE, useContent, type Project } from "@/content/iem";
 
 /**
  * "Bearbeitete Fachgebiete" arrives from iem.ch as one comma-separated string,
@@ -117,6 +115,7 @@ export function ProjectDialog({
   project: Project | null;
   onClose: () => void;
 }) {
+  const { disciplines, projectDialogLabels: L } = useContent();
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -131,11 +130,11 @@ export function ProjectDialog({
   const d = project.details;
   const fach = d?.leistungen ? splitFachgebiete(d.leistungen) : null;
   const rows: [string, ReactNode][] = [
-    ["Bauherrschaft", d?.bauherr],
-    ["Architektur", d?.architekt],
-    ["Realisierung", project.years],
+    [L.bauherr, d?.bauherr],
+    [L.architekt, d?.architekt],
+    [L.realisierung, project.years],
     [
-      "Bearbeitete Fachgebiete",
+      L.leistungen,
       fach ? (
         <span className="flex flex-col gap-y-1">
           {fach.lead.length ? <TradeLine items={fach.lead} /> : null}
@@ -148,9 +147,9 @@ export function ProjectDialog({
         </span>
       ) : null,
     ],
-    ["Gesamt-Bausumme", d?.bausummeTotal],
-    ["Bausumme Fachgebiete", d?.bausummeFach],
-    ["Energiestandard", d?.energiestandard],
+    [L.bausummeTotal, d?.bausummeTotal],
+    [L.bausummeFach, d?.bausummeFach],
+    [L.energiestandard, d?.energiestandard],
   ];
 
   return (
@@ -186,7 +185,7 @@ export function ProjectDialog({
         <button
           type="button"
           onClick={onClose}
-          aria-label="Schliessen"
+          aria-label={L.schliessen}
           className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-surface/90 text-muted ring-1 ring-line backdrop-blur-sm transition-colors hover:text-ink hover:ring-line-strong"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
@@ -225,7 +224,7 @@ export function ProjectDialog({
         </dl>
 
         <div className="flex flex-col gap-2.5 border-t border-line pt-5">
-          <span className="eyebrow text-muted">Gewerke</span>
+          <span className="eyebrow text-muted">{L.gewerke}</span>
           {/* Same HLKSE order as the trade line above and as the cards in the
               register — one project's tags must not read in two orders. */}
           <ul className="flex flex-wrap gap-1.5">
@@ -239,17 +238,20 @@ export function ProjectDialog({
           </ul>
         </div>
 
+        {/* The sourcing line. It is what lets a reader check the figures
+            above, so the link stays a link — the label and the target are
+            editable, the fact that there is one is not. */}
         <p className="text-[12px] leading-snug text-muted">
-          Angaben gemäss{" "}
+          {L.quellePrefix}{" "}
           <a
-            href="https://www.iem.ch/referenzen"
+            href={L.quelleHref}
             target="_blank"
             rel="noreferrer"
             className="text-brand-blue underline decoration-line-strong underline-offset-2 hover:text-brand-bronze"
           >
-            iem.ch/referenzen
+            {L.quelleLabel}
           </a>
-          .
+          {L.quelleSuffix}
         </p>
       </div>
     </dialog>

@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { groupResults, projectId, searchSite, type SearchResult } from "@/lib/search";
+import { useContent } from "@/content/iem";
 
 /**
  * Thumbnail for the kinds that carry one. Text-only kinds render nothing, and
@@ -71,13 +72,18 @@ export function SiteSearch({
   /** Lets the mobile menu close itself once a result is chosen. */
   onNavigate?: () => void;
 }) {
+  const content = useContent();
+  const L = content.siteSearchLabels;
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const listId = useId();
 
-  const results = useMemo(() => searchSite(query), [query]);
+  // `content` in the deps so a publish re-runs the search against the new
+  // index rather than leaving stale hits in an open panel. `searchSite` builds
+  // that index at most once per content version — see `indexFor`.
+  const results = useMemo(() => searchSite(query, content), [query, content]);
   const grouped = useMemo(() => groupResults(results), [results]);
 
   // The cursor indexes `results`, so it has to come back in range whenever the
@@ -146,8 +152,8 @@ export function SiteSearch({
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder="Suchen"
-        aria-label="Website durchsuchen"
+        placeholder={L.platzhalter}
+        aria-label={L.label}
         aria-expanded={showPanel}
         aria-controls={listId}
         aria-autocomplete="list"
@@ -161,7 +167,7 @@ export function SiteSearch({
         <button
           type="button"
           onClick={() => setQuery("")}
-          aria-label="Suche zurücksetzen"
+          aria-label={L.zuruecksetzen}
           className="absolute right-2.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink"
         >
           <svg
@@ -182,10 +188,10 @@ export function SiteSearch({
         <div className="absolute right-0 z-50 mt-2 w-[min(92vw,26rem)] overflow-hidden rounded-lg bg-surface shadow-card ring-1 ring-line">
           {results.length === 0 ? (
             <p className="px-4 py-5 text-center text-[13px] text-muted">
-              Nichts gefunden für „{query.trim()}“.
+              {L.leer.replace("{query}", query.trim())}
             </p>
           ) : (
-            <ul id={listId} role="listbox" aria-label="Suchergebnisse" className="max-h-[70vh] overflow-y-auto py-1.5">
+            <ul id={listId} role="listbox" aria-label={L.ergebnisse} className="max-h-[70vh] overflow-y-auto py-1.5">
               {grouped.map((group) => (
                 <li key={group.kind}>
                   <p className="eyebrow px-4 pb-1 pt-3 text-muted">{group.kind}</p>

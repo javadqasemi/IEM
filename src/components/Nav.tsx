@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { Button } from "./Button";
 import { SiteSearch } from "./SiteSearch";
 import { Wordmark } from "./Wordmark";
-import { navItems, offices } from "@/content/iem";
+import { useContent } from "@/content/iem";
 
 export function Nav() {
+  const { navItems, offices, navLabels } = useContent();
   const [open, setOpen] = useState(false);
   const [lifted, setLifted] = useState(false);
 
@@ -30,16 +31,23 @@ export function Nav() {
       }`}
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-6 lg:px-10">
-        <a href="#top" className="group flex items-center gap-3" aria-label="IEM AG — Startseite">
+        <a href="#top" className="group flex items-center gap-3" aria-label={navLabels.home}>
           <Wordmark className="h-5 text-brand-navy transition-colors group-hover:text-brand-blue" />
+          {/* Stored as lines rather than one string with a `<br>`: the break is
+              a layout decision about a two-line lockup beside the mark, and
+              putting markup in the content would let an editor emit raw HTML
+              into the header. */}
           <span className="hidden border-l border-line pl-3 text-[11px] leading-tight text-muted sm:inline">
-            Energie- und
-            <br />
-            Messtechnik
+            {navLabels.strapline.map((line, i) => (
+              <span key={line}>
+                {i > 0 && <br />}
+                {line}
+              </span>
+            ))}
           </span>
         </a>
 
-        <nav aria-label="Hauptnavigation" className="hidden items-center gap-1 md:flex">
+        <nav aria-label={navLabels.primary} className="hidden items-center gap-1 md:flex">
           {navItems.map((item) => (
             <a
               key={item.label}
@@ -67,7 +75,7 @@ export function Nav() {
             aria-controls="mobile-nav"
             className="inline-flex h-9 w-9 items-center justify-center rounded-md ring-1 ring-line transition-colors hover:bg-surface-2 md:hidden"
           >
-            <span className="sr-only">{open ? "Menü schliessen" : "Menü öffnen"}</span>
+            <span className="sr-only">{open ? navLabels.menuClose : navLabels.menuOpen}</span>
             <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.5">
               {open ? (
                 <path d="M3 3l10 10M13 3L3 13" />
@@ -84,7 +92,7 @@ export function Nav() {
 
       {open && (
         <div id="mobile-nav" className="border-t border-line bg-base md:hidden">
-          <nav aria-label="Hauptnavigation mobil" className="mx-auto flex max-w-7xl flex-col px-6 py-2">
+          <nav aria-label={navLabels.mobile} className="mx-auto flex max-w-7xl flex-col px-6 py-2">
             {navItems.map((item) => (
               <a
                 key={item.label}

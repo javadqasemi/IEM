@@ -14,3 +14,17 @@ src/**/*.js
 # Real client models and drawings (Guglera, Giffers) — not ours to publish, and
 # nothing in the build needs them: the components they generate are committed.
 ifc/
+
+# Python bytecode from the cad/ toolchain. Regenerated on every run and tied to
+# the interpreter version it was written by.
+__pycache__/
+*.py[cod]
+
+# Environment files. `.env.example` is the committed template; everything else
+# holds real secrets. `*.local` above already covers `.env.local`.
+.env
+.env.production
+.env.*.local
+
+# Runtime data: uploads, generated media, job-application dossiers.
+var/

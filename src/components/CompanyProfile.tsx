@@ -1,4 +1,4 @@
-import { companyFacts, leitbild } from "@/content/iem";
+import { companyFactsOf, useContent } from "@/content/iem";
 
 /**
  * The two halves of iem.ch/ueber-uns that the rest of this page could not carry:
@@ -12,13 +12,19 @@ import { companyFacts, leitbild } from "@/content/iem";
  */
 
 export function CompanyProfile() {
+  const content = useContent();
+  const { leitbild, ueberUnsLabels } = content;
+  // Derived from `facts` rather than stored, so editing the headcount in the
+  // dashboard moves the hero, the team heading and this row together.
+  const companyFacts = companyFactsOf(content);
+
   return (
     <div className="grid gap-12 lg:grid-cols-12 lg:gap-10">
       {/* Leitbild. Four statements of equal weight, so they get equal boxes —
           this is the one block on the page where a 2×2 grid is the honest
           shape rather than the default one. */}
       <div className="flex flex-col gap-6 lg:col-span-7">
-        <h3 className="eyebrow text-muted">Leitbild</h3>
+        <h3 className="eyebrow text-muted">{ueberUnsLabels.leitbild}</h3>
         <ul className="grid gap-px overflow-hidden rounded-lg bg-line ring-1 ring-line sm:grid-cols-2">
           {leitbild.map((l) => (
             <li key={l.title} className="flex flex-col gap-3 bg-surface p-6">
@@ -35,7 +41,7 @@ export function CompanyProfile() {
           of term/definition pairs — and it gives assistive tech the pairing for
           free, which a two-column grid of <span>s would not. */}
       <div className="flex flex-col gap-6 lg:col-span-5">
-        <h3 className="eyebrow text-muted">Fakten über IEM</h3>
+        <h3 className="eyebrow text-muted">{ueberUnsLabels.fakten}</h3>
         <dl className="flex flex-col border-t border-line">
           {companyFacts.map((r) => (
             <div
@@ -47,9 +53,7 @@ export function CompanyProfile() {
             </div>
           ))}
         </dl>
-        <p className="text-[13px] leading-relaxed text-muted">
-          Alle Angaben veröffentlicht auf iem.ch/ueber-uns.
-        </p>
+        <p className="text-[13px] leading-relaxed text-muted">{ueberUnsLabels.quelle}</p>
       </div>
     </div>
   );

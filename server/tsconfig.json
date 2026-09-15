@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "moduleResolution": "node",
+    "declaration": false,
+    "removeComments": false,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    // Pinned. Without it TypeScript infers the common root of every file in
+    // the program, and `prisma/seed.ts` reaches up into the site package for
+    // its seed content — which silently moved the build output to
+    // `dist/server/src/main.js` and broke `npm start`. The seed is excluded
+    // from this program for the same reason; `npm run typecheck` checks it
+    // separately through `tsconfig.seed.json`.
+    "rootDir": "./src",
+    "baseUrl": "./",
+    /**
+     * Off, and it has to stay off while `nest-cli.json` sets
+     * `deleteOutDir: true`. The two together are silently broken: the build
+     * wipes `dist`, then TypeScript consults the incremental state, concludes
+     * every file is already emitted, and writes nothing — reporting success
+     * the whole way. The first build works, every build after it produces an
+     * empty `dist` and a `Cannot find module dist/main` at startup.
+     *
+     * This project is ~40 files; a full compile is about two seconds.
+     */
+    "incremental": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,7 +1,18 @@
 import type { Config } from "tailwindcss";
 
 export default {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  /**
+   * The **public site only**. `src/admin` is excluded on purpose.
+   *
+   * Tailwind emits one stylesheet per CSS entry, and `globals.css` is the one
+   * the visitor downloads. Scanning the dashboard here would put several
+   * hundred admin-only utilities into it — classes no page on the site ever
+   * uses — and quietly grow the public payload. The dashboard has its own
+   * config and its own stylesheet (`tailwind.admin.config.ts`,
+   * `src/admin/admin.css`), which reuses this file's `theme` so both stay on
+   * the same tokens.
+   */
+  content: ["./index.html", "./stelle.html", "./src/*.{ts,tsx}", "./src/{components,lib,content,styles,generated}/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
@@ -15,7 +26,7 @@ export default {
         "line-strong": "#BFCAD9",
 
         // The real IEM brand, read off the logo and the live site's CSS
-        // custom properties. See CLAUDE.md before changing any of these.
+        // custom properties. See docs/ARCHITECTURE.md before changing any of these.
         brand: {
           navy: "#003882", // logo fill — primary actions, dark panels
           blue: "#2C5691", // --sitecolor — links and interactive text on paper

@@ -1,0 +1,18 @@
+node_modules/
+dist/
+
+# Incremental build state. There are two, and they must stay two: a
+# `tsc --noEmit` typecheck records "nothing needs emitting", so sharing one
+# file with the build makes the next `nest build` emit no `dist` at all and
+# still report success.
+*.tsbuildinfo
+
+# Real configuration. `.env.example` is the committed template; this file holds
+# the JWT secret, the database password and the SMTP credentials.
+.env
+.env.*
+!.env.example
+
+# Uploaded media and — under `bewerbungen/` — job-application dossiers.
+# Personal data: never commit it, and keep backups of it out of the repo too.
+var/

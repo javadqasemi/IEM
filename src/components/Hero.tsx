@@ -3,7 +3,7 @@ import { openBewerbung } from "./BewerbungButton";
 import { Button } from "./Button";
 import { HeroModel } from "./HeroModel";
 import { KPI } from "./KPI";
-import { facts, phases, projects } from "@/content/iem";
+import { resolveTokens, useContent, type SiteContent } from "@/content/iem";
 
 /**
  * The page's opening, over a moving backdrop: the Guglera coordination model
@@ -27,10 +27,16 @@ import { facts, phases, projects } from "@/content/iem";
  *    the blueprint grid. Nothing in the layout depends on the canvas.
  */
 export function Hero() {
+  const content = useContent();
+  const { hero } = content;
   // Which SIA phase the backdrop is showing. Owned here rather than inside the
   // canvas because the readout is DOM — it gets the page's real typography and
   // is legible to a screen reader, which a sprite in the scene would not be.
   const [phase, setPhase] = useState(0);
+
+  // Copy carries `{token}` placeholders for the figures the page computes, so
+  // an editor can rewrite the sentence without freezing the number inside it.
+  const t = (s: string) => resolveTokens(s, content);
 
   return (
     <section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-24">
@@ -72,58 +78,57 @@ export function Hero() {
       <div className="relative mx-auto max-w-7xl px-6 lg:px-10">
         <div className="flex max-w-2xl flex-col gap-7 animate-fade-up">
           <p className="eyebrow flex flex-wrap items-center gap-x-3 gap-y-1 text-muted">
-            <span className="text-brand-blue">Thun · Bern</span>
+            <span className="text-brand-blue">{hero.eyebrowPlace}</span>
             <span aria-hidden className="h-px w-6 bg-line-strong" />
-            <span>Ingenieurbüro seit {facts.founded}</span>
+            <span>{t(hero.eyebrowSince)}</span>
           </p>
 
-          <h1 className="font-display text-display-xl font-bold text-ink">
-            Wir planen Gebäudetechnik. Und messen nach.
-          </h1>
+          <h1 className="font-display text-display-xl font-bold text-ink">{t(hero.title)}</h1>
 
-          <p className="max-w-xl text-lg leading-relaxed text-muted">
-            Heizung, Lüftung, Klima und Sanitär für Neubau und Sanierung —
-            herstellerneutral geplant, dynamisch simuliert und am fertigen
-            Gebäude mit eigenen Messgeräten überprüft.
-          </p>
+          <p className="max-w-xl text-lg leading-relaxed text-muted">{t(hero.lead)}</p>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Button size="lg" href="#kontakt" trailing="→">
-              Kontaktiere
-            </Button>
-            {/* Opens the form hosted down in `JobRegister` over the
-                `iem:open-bewerbung` seam, so the hero neither owns the dialog
-                nor has to scroll the reader to Karriere to reach it. */}
-            <Button size="lg" variant="mark" onClick={() => openBewerbung()}>
-              Bewerben
-            </Button>
-            <Button size="lg" variant="secondary" href="#referenzen">
-              Referenzen ansehen
-            </Button>
+            {hero.ctas.map((c) =>
+              // `action` CTAs fire a custom-event seam instead of navigating.
+              // The only one today opens the form hosted down in `JobRegister`
+              // over `iem:open-bewerbung`, so the hero neither owns the dialog
+              // nor has to scroll the reader to Karriere to reach it.
+              c.action === "bewerbung" ? (
+                <Button
+                  key={c.label}
+                  size="lg"
+                  variant={c.variant}
+                  onClick={() => openBewerbung()}
+                >
+                  {c.label}
+                </Button>
+              ) : (
+                <Button
+                  key={c.label}
+                  size="lg"
+                  variant={c.variant}
+                  href={t(c.href ?? "#")}
+                  trailing={c.trailing}
+                >
+                  {c.label}
+                </Button>
+              ),
+            )}
           </div>
 
-          <PhasenAnzeige aktiv={phase} />
+          <PhasenAnzeige aktiv={phase} phases={content.phases} prefix={hero.phasePrefix} />
         </div>
 
         <dl className="tick-rule mt-16 grid grid-cols-2 gap-8 pt-10 sm:mt-20 sm:grid-cols-4">
-          <KPI
-            value={String(new Date().getFullYear() - facts.founded)}
-            label="Jahre Ingenieurbüro"
-            note={`gegründet ${facts.foundedLong}`}
-          />
-          <KPI
-            value={String(facts.headcount)}
-            label="Mitarbeitende"
-            note="inkl. Lernende"
-            tone="navy"
-          />
-          <KPI value="2" label="Standorte" note={`Thun, Bern seit ${facts.bernSince}`} />
-          <KPI
-            value={String(projects.length)}
-            label="Referenzprojekte"
-            note="öffentlich dokumentiert"
-            tone="energy"
-          />
+          {hero.kpis.map((k) => (
+            <KPI
+              key={k.label}
+              value={t(k.value)}
+              label={k.label}
+              note={t(k.note)}
+              tone={k.tone}
+            />
+          ))}
         </dl>
       </div>
 
@@ -139,7 +144,15 @@ export function Hero() {
  * without that a screen reader gets a caption that silently changes every three
  * and a half seconds.
  */
-function PhasenAnzeige({ aktiv }: { aktiv: number }) {
+function PhasenAnzeige({
+  aktiv,
+  phases,
+  prefix,
+}: {
+  aktiv: number;
+  phases: SiteContent["phases"];
+  prefix: string;
+}) {
   return (
     <div className="flex flex-col gap-2 pt-1">
       <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -157,13 +170,13 @@ function PhasenAnzeige({ aktiv }: { aktiv: number }) {
         ))}
       </ol>
       <p aria-live="polite" className="eyebrow text-muted">
-        SIA {aktuellName(aktiv)}
+        {prefix} {aktuellName(aktiv, phases)}
       </p>
     </div>
   );
 }
 
-function aktuellName(i: number) {
+function aktuellName(i: number, phases: SiteContent["phases"]) {
   const p = phases[Math.min(i, phases.length - 1)];
-  return `${p.no} · ${p.title}`;
+  return p ? `${p.no} · ${p.title}` : "";
 }

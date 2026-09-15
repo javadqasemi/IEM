@@ -1,0 +1,296 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from "@nestjs/common";
+import { WorkflowState } from "@prisma/client";
+import {
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from "class-validator";
+import { Type } from "class-transformer";
+import { ContentService } from "./content.service";
+import {
+  ClientIp,
+  CurrentUser,
+  Public,
+  RequirePermissions,
+  type AuthUser,
+  type AuthedRequest,
+} from "../common/decorators";
+
+/* ---- DTOs -------------------------------------------------------- */
+
+export class CreateEntryDto {
+  @IsString() typeKey!: string;
+  @IsOptional() @IsString() @MaxLength(120) key?: string;
+  data!: unknown;
+  @IsOptional() @IsInt() @Min(0) position?: number;
+}
+
+export class UpdateEntryDto {
+  data!: unknown;
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
+export class ReorderDto {
+  @IsString() typeKey!: string;
+  @IsArray() @IsString({ each: true }) ids!: string[];
+}
+
+export class SubmitDto {
+  @IsOptional() @IsString() @MaxLength(1000) message?: string;
+}
+
+export class DecisionDto {
+  @IsIn(["APPROVED", "REJECTED"]) decision!: "APPROVED" | "REJECTED";
+  @IsOptional() @IsString() @MaxLength(1000) note?: string;
+}
+
+export class PublishDto {
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
+export class ListQuery {
+  @IsOptional() @IsString() typeKey?: string;
+  @IsOptional() @IsIn(Object.values(WorkflowState)) status?: WorkflowState;
+  @IsOptional() @IsString() search?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) perPage?: number;
+}
+
+/* ---- Controller -------------------------------------------------- */
+
+@Controller("content")
+export class ContentController {
+  constructor(private readonly content: ContentService) {}
+
+  private ctx(req: AuthedRequest, ip: string | null) {
+    return { ip, userAgent: req.headers["user-agent"] ?? null };
+  }
+
+  /* ---- The public endpoint ------------------------------------- */
+
+  /**
+   * The live site document.
+   *
+   * The **only** unauthenticated route in the CMS, and the one the public site
+   * calls on every page load. It serves a single stored row: no joins, no
+   * per-collection queries, and nothing an editor is working on.
+   */
+  @Public()
+  @Get("published")
+  published() {
+    return this.content.published();
+  }
+
+  /* ---- Types --------------------------------------------------- */
+
+  @Get("types")
+  @RequirePermissions("contentType.read")
+  listTypes() {
+    return this.content.listTypes();
+  }
+
+  @Get("types/:key")
+  @RequirePermissions("contentType.read")
+  getType(@Param("key") key: string) {
+    return this.content.getType(key);
+  }
+
+  /* ---- Entries ------------------------------------------------- */
+
+  @Get("entries")
+  @RequirePermissions("content.read")
+  list(@Query() query: ListQuery) {
+    return this.content.listEntries(query);
+  }
+
+  @Get("entries/:id")
+  @RequirePermissions("content.read")
+  get(@Param("id") id: string) {
+    return this.content.getEntry(id);
+  }
+
+  @Post("entries")
+  @RequirePermissions("content.create")
+  create(
+    @Body() dto: CreateEntryDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.createEntry(dto, user, this.ctx(req, ip));
+  }
+
+  @Patch("entries/:id")
+  @RequirePermissions("content.update")
+  update(
+    @Param("id") id: string,
+    @Body() dto: UpdateEntryDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.updateEntry(id, dto, user, this.ctx(req, ip));
+  }
+
+  @Delete("entries/:id")
+  @HttpCode(204)
+  @RequirePermissions("content.delete")
+  remove(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.deleteEntry(id, user, this.ctx(req, ip));
+  }
+
+  @Post("entries/:id/restore")
+  @RequirePermissions("content.archive")
+  restore(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.restoreEntry(id, user, this.ctx(req, ip));
+  }
+
+  @Post("entries/:id/duplicate")
+  @RequirePermissions("content.duplicate")
+  duplicate(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.duplicateEntry(id, user, this.ctx(req, ip));
+  }
+
+  @Post("entries/reorder")
+  @HttpCode(204)
+  @RequirePermissions("content.reorder")
+  reorder(
+    @Body() dto: ReorderDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.reorder(dto.typeKey, dto.ids, user, this.ctx(req, ip));
+  }
+
+  /* ---- Versions ------------------------------------------------ */
+
+  @Get("entries/:id/versions")
+  @RequirePermissions("content.history")
+  versions(@Param("id") id: string) {
+    return this.content.listVersions(id);
+  }
+
+  @Get("entries/:id/diff")
+  @RequirePermissions("content.history")
+  diff(
+    @Param("id") id: string,
+    @Query("from") from: string,
+    @Query("to") to: string,
+  ) {
+    return this.content.diff(id, Number(from), Number(to));
+  }
+
+  @Post("entries/:id/rollback/:version")
+  @RequirePermissions("content.rollback")
+  rollback(
+    @Param("id") id: string,
+    @Param("version") version: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.rollback(id, Number(version), user, this.ctx(req, ip));
+  }
+
+  /* ---- Workflow ------------------------------------------------ */
+
+  @Post("entries/:id/submit")
+  @HttpCode(204)
+  @RequirePermissions("content.submit")
+  submit(
+    @Param("id") id: string,
+    @Body() dto: SubmitDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.submitForReview(id, dto.message, user, this.ctx(req, ip));
+  }
+
+  @Get("reviews")
+  @RequirePermissions("content.read")
+  reviews() {
+    return this.content.listPendingReviews();
+  }
+
+  @Post("reviews/:id/decide")
+  @HttpCode(204)
+  @RequirePermissions("content.approve")
+  decide(
+    @Param("id") id: string,
+    @Body() dto: DecisionDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.decideReview(id, dto.decision, dto.note, user, this.ctx(req, ip));
+  }
+
+  /* ---- Publishing ---------------------------------------------- */
+
+  @Post("publish")
+  @RequirePermissions("content.publish")
+  publish(
+    @Body() dto: PublishDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.publish(dto.note, user, this.ctx(req, ip));
+  }
+
+  /** The draft document, for the dashboard's live preview of the real page. */
+  @Get("preview")
+  @RequirePermissions("content.preview")
+  preview() {
+    return this.content.preview();
+  }
+
+  @Get("snapshots")
+  @RequirePermissions("content.history")
+  snapshots() {
+    return this.content.listSnapshots();
+  }
+
+  @Post("snapshots/:version/restore")
+  @RequirePermissions("content.rollback", "content.publish")
+  restoreSnapshot(
+    @Param("version") version: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.restoreSnapshot(Number(version), user, this.ctx(req, ip));
+  }
+}

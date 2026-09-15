@@ -11,13 +11,20 @@ import { Button } from "./components/Button";
 import { JobRegister } from "./components/JobRegister";
 import { ProfisMark } from "./components/ProfisMark";
 import { Footer } from "./components/Footer";
-import { facts, offices, sponsorships } from "@/content/iem";
+import { resolveTokens, useContent, type SectionCopy } from "@/content/iem";
 
 export function App() {
+  const content = useContent();
+  const { offices, sponsorships, sections, contact, teamImage, appLabels } = content;
+  // Copy carries `{token}` placeholders for the figures the page derives — see
+  // `src/content/derive.ts`. Section headings go through this so a sentence
+  // like "Seit über {jahrzehnte} Jahren" stays computed while staying editable.
+  const t = (s: string) => resolveTokens(s, content);
+
   return (
     <div id="top" className="min-h-screen">
-      <a href="#leistungen" className="skip-link">
-        Zum Inhalt springen
+      <a href={appLabels.skipHref} className="skip-link">
+        {appLabels.skipLabel}
       </a>
 
       <Nav />
@@ -26,50 +33,32 @@ export function App() {
         <Hero />
 
         <Section id="leistungen">
-          <SectionHeader
-            eyebrow="Dienstleistungen"
-            title="Fünf Fachbereiche, ein Ansprechpartner."
-            description="Wir planen Gebäudetechnik gewerkeübergreifend — und bleiben bis zur Abnahme im Projekt."
-          />
+          <SectionHeader {...header(sections.leistungen, t)} />
           <div className="mt-12">
             <ServiceIndex />
           </div>
         </Section>
 
         <Section id="ablauf" tinted>
-          <SectionHeader
-            eyebrow="Ablauf"
-            title="Wo wir einsteigen — und wann wir aufhören."
-            description="Meist im Vorprojekt, spätestens zur Ausschreibung. Aufgehört wird nach der Einregulierung, wenn die Anlage gemessen ist."
-          />
+          <SectionHeader {...header(sections.ablauf, t)} />
           <div className="mt-12">
             <Bauablauf />
           </div>
         </Section>
 
         <Section id="referenzen">
-          <SectionHeader
-            eyebrow="Referenzen"
-            title="Gebaut, gemessen, abgenommen."
-            description="Ein Auszug aus den Projekten, die wir öffentlich dokumentieren — Pflege, Bildung, Gewerbe und Photovoltaik."
-          />
+          <SectionHeader {...header(sections.referenzen, t)} />
           <div className="mt-12">
             <ProjectRegister />
           </div>
         </Section>
 
         {/* iem.ch/ueber-uns, which the page had no home for: the Leitbild and
-            the register of company facts. The heading's "über 30" is computed
-            from `facts.founded` rather than typed, so it cannot go stale the
-            way the client's own page eventually will. */}
+            the register of company facts. The heading's "über 30" carries the
+            `{jahrzehnte}` token rather than a typed number, so it cannot go
+            stale the way the client's own page eventually will. */}
         <Section id="ueber-uns" tinted>
-          <SectionHeader
-            eyebrow="Über uns"
-            title={`Seit über ${
-              Math.floor((new Date().getFullYear() - facts.founded) / 10) * 10
-            } Jahren.`}
-            description={`Seit dem ${facts.foundedLong} stehen wir für massgeschneiderte Lösungen in den Bereichen Heizung, Lüftung, Klima, Sanitär und Elektro.`}
-          />
+          <SectionHeader {...header(sections.ueberUns, t)} />
           <div className="mt-12">
             <CompanyProfile />
           </div>
@@ -77,17 +66,12 @@ export function App() {
 
         <Section id="team">
           <div className="grid items-center gap-10 lg:grid-cols-12 lg:gap-8">
-            <SectionHeader
-              className="lg:col-span-6"
-              eyebrow="Team"
-              title={`${facts.headcount} Leute, zwei Büros.`}
-              description="Gebäudetechnik plant niemand allein. Das sind die Menschen, die an Ihrem Projekt arbeiten — Lernende eingerechnet."
-            />
+            <SectionHeader className="lg:col-span-6" {...header(sections.team, t)} />
             {/* The image the client heads their own team page with. */}
             <div className="overflow-hidden rounded-lg ring-1 ring-line lg:col-span-6">
               <img
-                src="/img/team/chrischonaturm.jpg"
-                alt="Aussichtsturm St. Chrischona"
+                src={teamImage.src}
+                alt={teamImage.alt}
                 loading="lazy"
                 decoding="async"
                 className="aspect-[16/9] w-full object-cover"
@@ -100,11 +84,7 @@ export function App() {
         </Section>
 
         <Section id="sponsoring" tinted>
-          <SectionHeader
-            eyebrow="Sponsoring"
-            title="Wen wir unterstützen."
-            description="Sport aus der Region und aus dem eigenen Team — vom Eishockey bis zum Gleitschirm-Testflug."
-          />
+          <SectionHeader {...header(sections.sponsoring, t)} />
           <ul className="mt-12 grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 lg:grid-cols-5">
             {sponsorships.map((s) => (
               <li key={s.name} className="group flex flex-col gap-3">
@@ -130,9 +110,7 @@ export function App() {
 
         <Section id="karriere">
           <SectionHeader
-            eyebrow="Karriere"
-            title="Wir suchen Leute, die nachrechnen."
-            description="Sieben offene Stellen in Thun und Bern. Dazu jedes Jahr Schnupperlehren — Lehrstellen sind ab Sommer 2026 alle besetzt."
+            {...header(sections.karriere, t)}
             action={<ProfisMark className="h-[150px] w-full sm:w-[280px]" />}
           />
           <div className="mt-12">
@@ -141,19 +119,16 @@ export function App() {
         </Section>
 
         <Section id="standorte">
-          <SectionHeader
-            eyebrow="Standorte"
-            title="Zwei Büros, kurze Wege."
-            description="Beide Standorte planen vollständig — Sie arbeiten mit dem Team, das näher an Ihrer Baustelle sitzt."
-          />
+          <SectionHeader {...header(sections.standorte, t)} />
           <div className="mt-12 grid gap-px overflow-hidden rounded-lg bg-line ring-1 ring-line md:grid-cols-2">
             {offices.map((o) => (
               <div key={o.city} className="flex flex-col gap-6 bg-surface p-8 sm:p-10">
                 <div className="flex items-start justify-between gap-4">
                   <h3 className="font-display text-display-md font-semibold text-ink">{o.city}</h3>
-                  <span className="eyebrow text-muted">
-                    {o.city === "Thun" ? "Hauptsitz" : "Zweigbüro"}
-                  </span>
+                  {/* Stored per office rather than inferred from the city name:
+                      the old `city === "Thun" ? …` would have mislabelled every
+                      office added after the two. */}
+                  <span className="eyebrow text-muted">{o.kind}</span>
                 </div>
                 <address className="flex flex-col gap-1 text-[15px] not-italic leading-relaxed text-muted">
                   <span className="text-ink">{o.street}</span>
@@ -172,7 +147,7 @@ export function App() {
                     rel="noreferrer"
                     trailing="↗"
                   >
-                    Anfahrt
+                    {appLabels.anfahrt}
                   </Button>
                 </div>
               </div>
@@ -194,23 +169,27 @@ export function App() {
               />
               <div className="relative flex flex-col gap-10 lg:flex-row lg:items-end lg:justify-between">
                 <div className="flex max-w-2xl flex-col gap-5">
-                  <p className="eyebrow text-brand-sand">Kontakt</p>
+                  <p className="eyebrow text-brand-sand">{contact.eyebrow}</p>
                   <h2 className="font-display text-display-lg font-semibold text-surface">
-                    Erzählen Sie uns vom Gebäude.
+                    {t(contact.title)}
                   </h2>
-                  <p className="text-lg leading-relaxed text-surface/70">
-                    Nutzung, Baujahr, was heute nicht funktioniert — das genügt
-                    für ein erstes Gespräch. Wir sagen Ihnen, welche Variante wir
-                    rechnen würden und was sie kostet.
-                  </p>
+                  <p className="text-lg leading-relaxed text-surface/70">{t(contact.body)}</p>
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row">
-                  <Button size="lg" variant="inverse" href="mailto:info@iem.ch" trailing="→">
-                    info@iem.ch
-                  </Button>
-                  <Button size="lg" variant="inverseOutline" href={offices[0].phoneHref}>
-                    {offices[0].phone}
-                  </Button>
+                  {/* Both label and href go through `t`: the phone CTA is
+                      `{telefonThun}` / `{telefonThunHref}`, so editing the
+                      office's number moves the button with it. */}
+                  {contact.ctas.map((c) => (
+                    <Button
+                      key={c.label}
+                      size="lg"
+                      variant={c.variant}
+                      href={t(c.href ?? "#")}
+                      trailing={c.trailing}
+                    >
+                      {t(c.label)}
+                    </Button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -221,6 +200,22 @@ export function App() {
       <Footer />
     </div>
   );
+}
+
+/**
+ * Turns a stored `SectionCopy` into `SectionHeader`'s props, resolving the
+ * `{token}` placeholders on the way.
+ *
+ * `eyebrow` is passed through untouched on purpose: it is a fixed label for the
+ * section, never a figure, and running it through the resolver would invite
+ * someone to put a number in the one line that indexes the page.
+ */
+function header(copy: SectionCopy, t: (s: string) => string) {
+  return {
+    eyebrow: copy.eyebrow,
+    title: t(copy.title),
+    description: t(copy.description),
+  };
 }
 
 /** Consistent section rhythm; `tinted` alternates the ground to group content. */

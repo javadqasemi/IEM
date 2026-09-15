@@ -8,15 +8,24 @@ export default defineConfig({
     alias: { "@": "/src" },
   },
   build: {
-    // Two entries: the landing page, and the job advert that opens in its own
-    // window (`stelle.html?id=…`, see `src/stelle.tsx`). The dev server picks
-    // up any HTML in the project root by itself; the build has to be told, and
-    // naming `index.html` here is required — listing only the second entry
-    // would silently drop the site.
+    // Three entries:
+    //
+    //   index   the landing page
+    //   stelle  one job advert, opened in its own window (`stelle.html?id=…`)
+    //   admin   the CMS dashboard (`src/admin/`)
+    //
+    // The dev server picks up any HTML in the project root by itself; the
+    // build has to be told, and naming `index.html` here is required —
+    // listing only the others would silently drop the site.
+    //
+    // The three do not share a stylesheet: `admin.html` pulls
+    // `src/admin/admin.css`, which selects its own Tailwind config, so the
+    // dashboard's utilities never land in the CSS a visitor downloads.
     rollupOptions: {
       input: {
         index: resolve(__dirname, "index.html"),
         stelle: resolve(__dirname, "stelle.html"),
+        admin: resolve(__dirname, "admin.html"),
       },
     },
   },

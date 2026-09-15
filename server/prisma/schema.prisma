@@ -1,0 +1,565 @@
+// IEM Enterprise CMS — data model.
+//
+// Two ideas hold the whole thing together, and everything else follows from
+// them:
+//
+// 1. **Content is typed rows, not tables.** `ContentType` describes a shape,
+//    `ContentEntry` holds one value of it as JSON, `ContentVersion` keeps every
+//    value it has ever had. The alternative — a table per section, per
+//    collection, per settings group — means a migration every time the site
+//    gains a field, which is exactly the coupling this project is trying to
+//    remove. The trade is that the database cannot enforce the shape, so the
+//    service layer validates against `ContentType.schema` before writing.
+//
+// 2. **The public site never reads the tables.** Publishing assembles one
+//    `ContentSnapshot` — a complete `SiteContent` document — and the site
+//    fetches that. So a visitor's page load is one indexed read of one row, no
+//    joins, no N+1 across 30 projects and 41 people, and an editor saving a
+//    draft cannot affect what is live.
+//
+// Everything mutable carries `deletedAt` rather than being deleted: an audit
+// trail that points at rows which no longer exist is not an audit trail.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7 no longer takes the connection string here. Migrations read it from
+// `prisma.config.ts`, and the client gets it through the `pg` driver adapter
+// constructed in `PrismaService` — which is also what removes Prisma's Rust
+// query engine from the deployment.
+datasource db {
+  provider = "postgresql"
+}
+
+// =====================================================================
+// Identity and access
+// =====================================================================
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  /// Argon2id. Null for a user who has been invited but has not set one yet.
+  passwordHash String?
+  name         String
+  avatarUrl    String?
+  status       UserStatus @default(INVITED)
+  /// Base32 TOTP secret. Null means MFA is not enrolled.
+  mfaSecret    String?
+  mfaEnabled   Boolean    @default(false)
+  locale       String     @default("de-CH")
+  lastLoginAt  DateTime?
+  /// Consecutive failed sign-ins; cleared on success. Drives lockout.
+  failedLogins Int        @default(0)
+  lockedUntil  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  roles             UserRole[]
+  refreshTokens     RefreshToken[]
+  passwordResets    PasswordReset[]
+  auditLogs         AuditLog[]
+  createdEntries    ContentEntry[]    @relation("EntryCreatedBy")
+  updatedEntries    ContentEntry[]    @relation("EntryUpdatedBy")
+  versions          ContentVersion[]
+  reviewsRequested  ReviewRequest[]   @relation("ReviewRequestedBy")
+  reviewsDecided    ReviewRequest[]   @relation("ReviewDecidedBy")
+  snapshots         ContentSnapshot[]
+  uploads           MediaAsset[]
+  settingsChanged   Setting[]
+  notifications     Notification[]
+
+  @@index([status])
+  @@index([deletedAt])
+}
+
+/// A named bundle of permissions. `isSystem` roles ship with the install and
+/// cannot be deleted — removing "Super Admin" would lock everyone out.
+model Role {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  isSystem    Boolean  @default(false)
+  /// Lower sorts first in the admin UI; also the tie-break for display.
+  rank        Int      @default(100)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+/// One capability, addressed as `resource.action` — e.g. `content.publish`.
+///
+/// Permissions are seeded from code, never created by hand: a guard checks a
+/// key that has to exist somewhere in the source anyway, so letting an admin
+/// invent `content.pubish` would only ever produce a permission that grants
+/// nothing and is never checked.
+model Permission {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  resource    String
+  action      String
+  description String?
+  /// Groups permissions into sections in the role editor.
+  category    String  @default("Allgemein")
+
+  roles RolePermission[]
+
+  @@unique([resource, action])
+  @@index([resource])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model UserRole {
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+/// One issued refresh token, stored as a hash.
+///
+/// Rows rather than a stateless token so a session can actually be revoked —
+/// "log out everywhere" and "suspend this user now" both need a server-side
+/// record to invalidate. `replacedById` chains rotations, which is what makes
+/// replay of an already-used token detectable: if a revoked token is presented
+/// and its successor has been used, the whole chain is dropped.
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique
+  userAgent    String?
+  ip           String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// =====================================================================
+// Content
+// =====================================================================
+
+enum ContentKind {
+  /// Exactly one entry — the hero, the footer, the SEO defaults.
+  SINGLETON
+  /// Many ordered entries — projects, team, openings.
+  COLLECTION
+}
+
+enum WorkflowState {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+  REJECTED
+}
+
+/// The shape of one kind of content.
+///
+/// `schema` is a field descriptor list the dashboard renders a form from and
+/// the service validates against. It is seeded from `contentTypes.ts` rather
+/// than authored in the UI: these shapes are what the React components read,
+/// so a type the code does not know about would edit nothing.
+model ContentType {
+  key         String      @id
+  kind        ContentKind
+  name        String
+  description String?
+  /// Field descriptors — see `ContentTypeSchema` in the server source.
+  schema      Json
+  /// Which `SiteContent` key the published snapshot writes this under.
+  contentKey  String
+  /// Collections only: whether the editor can reorder entries.
+  orderable   Boolean     @default(true)
+  icon        String?
+  rank        Int         @default(100)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  entries ContentEntry[]
+}
+
+/// One editable thing: a project, a person, the footer.
+///
+/// `data` is the live working copy; `ContentVersion` holds the history and
+/// `publishedData` holds what the last publish froze. Keeping the published
+/// copy on the row means a rollback of a draft cannot disturb what is live,
+/// and the snapshot builder never has to walk the version table.
+model ContentEntry {
+  id            String        @id @default(cuid())
+  typeKey       String
+  /// Stable slug, unique within the type. Singletons use the type key.
+  key           String
+  locale        String        @default("de-CH")
+  data          Json
+  publishedData Json?
+  status        WorkflowState @default(DRAFT)
+  position      Int           @default(0)
+  version       Int           @default(1)
+  createdById   String?
+  updatedById   String?
+  publishedAt   DateTime?
+  /// Set to publish automatically at a future time.
+  scheduledAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
+
+  type      ContentType      @relation(fields: [typeKey], references: [key], onDelete: Cascade)
+  createdBy User?            @relation("EntryCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?            @relation("EntryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  versions  ContentVersion[]
+  reviews   ReviewRequest[]
+
+  @@unique([typeKey, key, locale])
+  @@index([typeKey, status])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([deletedAt])
+}
+
+/// Every value an entry has ever held, so any of them can be restored and any
+/// two of them compared. Written on every save, not only on publish — "who
+/// changed this and when" has to answer for drafts too.
+model ContentVersion {
+  id        String        @id @default(cuid())
+  entryId   String
+  version   Int
+  data      Json
+  status    WorkflowState
+  note      String?
+  authorId  String?
+  createdAt DateTime      @default(now())
+
+  entry  ContentEntry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  author User?           @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  reviews ReviewRequest[]
+
+  @@unique([entryId, version])
+  @@index([entryId, createdAt])
+}
+
+enum ReviewState {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+/// An editor asking for a specific version to be published.
+///
+/// It points at the version, not the entry: approving "the entry" would
+/// approve whatever it happens to say by the time someone gets to it.
+model ReviewRequest {
+  id            String      @id @default(cuid())
+  entryId       String
+  versionId     String
+  state         ReviewState @default(PENDING)
+  requestedById String?
+  message       String?
+  decidedById   String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  entry       ContentEntry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  version     ContentVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  requestedBy User?          @relation("ReviewRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  decidedBy   User?          @relation("ReviewDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([state, createdAt])
+  @@index([entryId])
+}
+
+/// One published version of the whole site.
+///
+/// This is what `GET /api/v1/content/published` serves and what the public
+/// bundle embeds at build time. Snapshots are append-only: rolling back
+/// publishes a *new* snapshot holding the old content, so the history of what
+/// was live when stays intact.
+model ContentSnapshot {
+  id            String   @id @default(cuid())
+  version       Int      @unique
+  content       Json
+  note          String?
+  /// Set when this snapshot was produced by restoring an earlier one.
+  restoredFrom  Int?
+  publishedById String?
+  publishedAt   DateTime @default(now())
+
+  publishedBy User? @relation(fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@index([publishedAt])
+}
+
+// =====================================================================
+// Media
+// =====================================================================
+
+model MediaFolder {
+  id        String    @id @default(cuid())
+  parentId  String?
+  name      String
+  /// Full materialised path, e.g. `/team/portraits`. Unique, so a move is one
+  /// update plus a prefix rewrite rather than a recursive walk on every read.
+  path      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  parent   MediaFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children MediaFolder[] @relation("FolderTree")
+  assets   MediaAsset[]
+
+  @@index([parentId])
+}
+
+model MediaAsset {
+  id           String    @id @default(cuid())
+  folderId     String?
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  width        Int?
+  height       Int?
+  /// SHA-256 of the bytes. Lets an upload of an identical file be recognised
+  /// instead of silently duplicating it.
+  checksum     String
+  /// Alt text. Deliberately not optional in the UI for images — see the alt
+  /// policy in docs/ARCHITECTURE.md; empty string is a valid, *deliberate*
+  /// value meaning
+  /// decorative, which is different from nobody having thought about it.
+  alt          String    @default("")
+  altDecorative Boolean  @default(false)
+  caption      String?
+  copyright    String?
+  tags         String[]  @default([])
+  /// Key in the storage adapter — a path on disk or an object key in S3.
+  storageKey   String
+  version      Int       @default(1)
+  uploadedById String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  folder     MediaFolder?        @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedBy User?               @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  variants   MediaVariant[]
+  versions   MediaAssetVersion[]
+
+  @@index([folderId])
+  @@index([checksum])
+  @@index([mimeType])
+  @@index([deletedAt])
+}
+
+/// A generated derivative — the responsive `srcset` the public site is missing.
+model MediaVariant {
+  id         String @id @default(cuid())
+  assetId    String
+  label      String
+  width      Int
+  height     Int
+  format     String
+  size       Int
+  storageKey String
+
+  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, label, format])
+  @@index([assetId])
+}
+
+/// Kept so "replace image" is reversible: the bytes of every superseded
+/// version stay in storage until an admin prunes them.
+model MediaAssetVersion {
+  id         String   @id @default(cuid())
+  assetId    String
+  version    Int
+  storageKey String
+  size       Int
+  mimeType   String
+  note       String?
+  createdAt  DateTime @default(now())
+
+  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, version])
+}
+
+// =====================================================================
+// Settings, audit, notifications
+// =====================================================================
+
+/// Global configuration, one row per key.
+///
+/// `secret` marks values that must never leave the server in a list response —
+/// SMTP passwords, API keys. The service redacts them; the column exists so
+/// that rule is data rather than a hand-maintained list in code.
+model Setting {
+  key         String   @id
+  group       String
+  value       Json
+  description String?
+  secret      Boolean  @default(false)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([group])
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+  DENIED
+}
+
+/// Append-only. Nothing in the application updates or deletes these rows.
+///
+/// `actorEmail` is denormalised on purpose: the log has to stay readable after
+/// the user record is gone, and a foreign key that has been set to null tells
+/// you an action happened but not who did it.
+model AuditLog {
+  id         String       @id @default(cuid())
+  actorId    String?
+  actorEmail String?
+  action     String
+  resource   String
+  resourceId String?
+  before     Json?
+  after      Json?
+  ip         String?
+  userAgent  String?
+  outcome    AuditOutcome @default(SUCCESS)
+  message    String?
+  createdAt  DateTime     @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([resource, resourceId])
+  @@index([action])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  kind      String
+  title     String
+  body      String?
+  /// Where clicking it goes in the dashboard.
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+// =====================================================================
+// Site-facing records
+// =====================================================================
+
+enum ApplicationStatus {
+  NEW
+  IN_REVIEW
+  INTERVIEW
+  REJECTED
+  HIRED
+  WITHDRAWN
+}
+
+/// A dossier submitted through the site's application form.
+///
+/// The form already POSTs `multipart/form-data` with exactly these fields —
+/// see `BewerbungDialog`. This is the receiving end it has been waiting for.
+/// Personal data, so it carries its own retention date rather than living
+/// forever by default.
+model JobApplication {
+  id            String            @id @default(cuid())
+  openingId     String?
+  position      String
+  firstName     String
+  lastName      String
+  email         String
+  phone         String?
+  availableFrom String?
+  message       String?
+  /// `[{ filename, size, mimeType, storageKey, checksum }]`.
+  files         Json              @default("[]")
+  status        ApplicationStatus @default(NEW)
+  note          String?
+  ip            String?
+  userAgent     String?
+  /// When this record and its files are due for deletion.
+  retainUntil   DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([status, createdAt])
+  @@index([openingId])
+  @@index([retainUntil])
+}
+
+model Redirect {
+  id          String   @id @default(cuid())
+  from        String   @unique
+  to          String
+  statusCode  Int      @default(301)
+  enabled     Boolean  @default(true)
+  hits        Int      @default(0)
+  lastHitAt   DateTime?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([enabled])
+}

@@ -1,16 +1,13 @@
 import {
-  companyFacts,
-  disciplines,
-  leitbild,
-  offices,
-  openings,
-  projects,
-  services,
-  team,
+  companyFactsOf,
+  disciplineOrder,
+  getContent,
   type Member,
+  type Project,
+  type SiteContent,
 } from "@/content/iem";
 
-export type Project = (typeof projects)[number];
+export type { Project };
 
 /**
  * Fold case and strip diacritics so "muller" finds "Müller", "sanitar" finds
@@ -88,7 +85,7 @@ export function projectId(p: Project) {
  * the Referenzen section's own box, so a term that finds a project in the
  * header finds it in the register too.
  */
-export function projectTerms(p: Project) {
+export function projectTerms(p: Project, content: SiteContent = getContent()) {
   return [
     p.name,
     p.place,
@@ -99,13 +96,17 @@ export function projectTerms(p: Project) {
     p.details?.architekt,
     p.details?.leistungen,
     p.details?.energiestandard,
-    ...p.disciplines.map((k) => disciplines[k].label),
+    ...p.disciplines.map((k) => content.disciplines[k]?.label),
   ].filter(Boolean) as string[];
 }
 
 /** Token-AND match over `projectTerms`, the same rule the team search uses. */
-export function matchesProject(p: Project, tokens: string[]) {
-  const haystack = normalize(projectTerms(p).join(" "));
+export function matchesProject(
+  p: Project,
+  tokens: string[],
+  content: SiteContent = getContent(),
+) {
+  const haystack = normalize(projectTerms(p, content).join(" "));
   return tokens.every((t) => haystack.includes(t));
 }
 
@@ -121,10 +122,17 @@ function entry(r: Omit<SearchResult, "haystack" | "key"> & { extra?: (string | u
 /**
  * The page's content as one flat index.
  *
- * Built once at module load: `src/content/iem.ts` is static data, so there is
- * nothing to invalidate and no reason to rebuild it per keystroke.
+ * This used to be a module-level constant, built once, because the content was
+ * static. It is a function now that the content can be republished under the
+ * page — but it is still built once *per version*: `indexFor` caches on the
+ * content object's identity, and the store only hands out a new object when a
+ * newer snapshot actually arrives. So a keystroke never rebuilds it, and a
+ * publish always does.
  */
-export const searchIndex: SearchResult[] = [
+export function buildIndex(content: SiteContent): SearchResult[] {
+  const { disciplines, leitbild, offices, openings, projects, services, team } = content;
+  const L = content.searchLabels;
+  return [
   ...team.map((m) =>
     entry({
       id: `team:${m.name}`,
@@ -162,17 +170,19 @@ export const searchIndex: SearchResult[] = [
       project: p,
       image: p.image,
       imageAspect: "landscape",
-      extra: projectTerms(p),
+      extra: projectTerms(p, content),
     }),
   ),
-  ...Object.entries(disciplines).map(([key, d]) =>
+  // `disciplineOrder`, not `Object.keys`: the table is data now, and key order
+  // out of JSON is not something to rely on for a list a reader sees.
+  ...disciplineOrder.map((key) =>
     entry({
       id: `discipline:${key}`,
       kind: "Fachgebiete",
-      title: d.label,
-      detail: "Fachgebiet",
+      title: disciplines[key].label,
+      detail: L.fachgebiet,
       href: "#leistungen",
-      extra: [d.short],
+      extra: [disciplines[key].short],
     }),
   ),
   ...offices.map((o) =>
@@ -196,7 +206,7 @@ export const searchIndex: SearchResult[] = [
   // The company register is indexed by its *value*, not its label: nobody
   // searches "Mitgliedschaften", they search "Suissetec". So the value is the
   // title of the hit and the label is the detail line under it.
-  ...companyFacts.map((f) =>
+  ...companyFactsOf(content).map((f) =>
     entry({
       id: `fact:${f.label}`,
       kind: "Über uns",
@@ -210,12 +220,32 @@ export const searchIndex: SearchResult[] = [
       id: `leitbild:${l.title}`,
       kind: "Über uns",
       title: l.title,
-      detail: "Leitbild",
+      detail: L.leitbild,
       href: "#ueber-uns",
       extra: [l.body],
     }),
   ),
-];
+  ];
+}
+
+/**
+ * The index for a given content version, built at most once.
+ *
+ * A single slot rather than a `WeakMap`: there is only ever one current
+ * version, and the dashboard's preview swaps between two. Holding one entry
+ * means the preview rebuilds on each toggle, which is cheap, and nothing is
+ * retained after a publish.
+ */
+let cachedContent: SiteContent | null = null;
+let cachedIndex: SearchResult[] = [];
+
+export function indexFor(content: SiteContent = getContent()): SearchResult[] {
+  if (content !== cachedContent) {
+    cachedContent = content;
+    cachedIndex = buildIndex(content);
+  }
+  return cachedIndex;
+}
 
 /**
  * Rank per token: a title that starts with the term beats one that merely
@@ -235,12 +265,17 @@ function score(result: SearchResult, tokens: string[]) {
   return total;
 }
 
-export function searchSite(query: string, limit = 12, perKind = 4): SearchResult[] {
+export function searchSite(
+  query: string,
+  content: SiteContent = getContent(),
+  limit = 12,
+  perKind = 4,
+): SearchResult[] {
   const tokens = tokenize(query);
   if (!tokens.length) return [];
 
   const scored: { result: SearchResult; rank: number }[] = [];
-  for (const result of searchIndex) {
+  for (const result of indexFor(content)) {
     const rank = score(result, tokens);
     if (rank !== null) scored.push({ result, rank });
   }

@@ -1,4 +1,4 @@
-import { phases } from "@/content/iem";
+import { useContent } from "@/content/iem";
 
 /**
  * The SIA 112 phase numbers, laid out as stations on a measurement rule. The
@@ -6,6 +6,7 @@ import { phases } from "@/content/iem";
  * exactly which deliverable and which fee stage is meant.
  */
 export function PhaseTrack({ active }: { active?: readonly string[] }) {
+  const { phases, phaseTrack } = useContent();
   const lit = (no: string) => active !== undefined && active.includes(no);
 
   return (
@@ -15,7 +16,7 @@ export function PhaseTrack({ active }: { active?: readonly string[] }) {
         <span className="h-2 w-px bg-line-strong" />
         <span className="h-px flex-1 bg-line-strong" />
         <span className="eyebrow whitespace-nowrap text-muted">
-          IEM begleitet alle Phasen
+          {phaseTrack.bracketLabel}
         </span>
         <span className="h-px flex-1 bg-line-strong" />
         <span className="h-2 w-px bg-line-strong" />
@@ -62,9 +63,7 @@ export function PhaseTrack({ active }: { active?: readonly string[] }) {
         })}
       </ol>
 
-      <p className="text-[13px] text-muted">
-        Phasenbezeichnungen nach SIA 112. Bei Photovoltaik planen wir nach SIA 108.
-      </p>
+      <p className="text-[13px] text-muted">{phaseTrack.footnote}</p>
     </div>
   );
 }

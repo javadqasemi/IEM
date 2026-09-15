@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ModelScene } from "./ModelScene";
 import { PhaseTrack } from "./PhaseTrack";
 import { cn } from "@/lib/cn";
-import { bauakte } from "@/content/iem";
+import { useContent } from "@/content/iem";
 
 /**
  * The Ablauf section: the model, the three people who touch it, and the SIA
@@ -22,6 +22,7 @@ import { bauakte } from "@/content/iem";
 const DWELL = 7000;
 
 export function Bauablauf() {
+  const { bauakte, ablaufControls } = useContent();
   const [act, setAct] = useState<0 | 1 | 2>(0);
   // The plant starts running when the third act begins — the building is
   // handed over working. Switching it off is the visitor's move, and it is the
@@ -91,7 +92,7 @@ export function Bauablauf() {
               announcing three bare numbers would have nothing to go on. */}
           <div
             role="group"
-            aria-label="Ablauf abspielen"
+            aria-label={ablaufControls.groupLabel}
             className="flex flex-wrap gap-2 lg:shrink-0"
           >
             {bauakte.map((a, i) => {
@@ -149,10 +150,10 @@ export function Bauablauf() {
                     running ? "bg-brand-sand" : "bg-muted",
                   )}
                 />
-                {running ? "Anlage läuft" : "Anlage aus"}
+                {running ? ablaufControls.running : ablaufControls.stopped}
               </button>
               <span className="text-[13px] text-muted">
-                {running ? "Ausschalten" : "Einschalten"}
+                {running ? ablaufControls.turnOff : ablaufControls.turnOn}
               </span>
             </div>
           )}

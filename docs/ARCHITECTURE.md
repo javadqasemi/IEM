@@ -1,12 +1,26 @@
-﻿# CLAUDE.md
+﻿# Architecture and decisions
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+The decisions and failure modes that are not visible from the code. `README.md`
+covers the same ground for a newcomer — quick start, brand summary, layout,
+known limitations. This file adds the *why*, and the traps: read it before
+changing colour, content, the hero, or anything in `src/content/`.
 
 ## Project context
 
-This repo is a **redesign sketch / component library** for the IEM AG website (https://www.iem.ch — Ingenieurbüro für Energie- und Messtechnik, Thun/Bern). It is not the production site; it is a concept implementation of a proposed redesign.
+This repo is a **redesign of the IEM AG website plus the CMS that runs it** (https://www.iem.ch — Ingenieurbüro für Energie- und Messtechnik, Thun/Bern). It is not the production site; it is a concept implementation of a proposed redesign, now with a real content-management platform behind it.
 
-`README.md` covers the same ground for a human reader (quick start, brand summary, layout, known limitations). This file adds the decisions and failure modes that aren't visible from the code — read it before changing colour, content or the hero.
+Three parts, three `package.json` files' worth of concerns:
+
+| Part | Where | What it is |
+| --- | --- | --- |
+| **The public site** | `index.html`, `stelle.html`, `src/` | The design. Unchanged by the CMS work and meant to stay that way. |
+| **The dashboard** | `admin.html`, `src/admin/` | A third Vite entry. Its own React root, its own stylesheet, its own Tailwind config. |
+| **The API** | `server/` | NestJS + Prisma + PostgreSQL. Separate `package.json` and `node_modules`. |
+
+**The design is locked.** The CMS replaced where the content comes from, not what the page looks like. Two mechanisms hold that in place and both are load-bearing:
+
+- The site's first paint comes from a content snapshot **embedded in the bundle**, so there are no loading states, no skeletons and no layout shift — see "The content layer".
+- The dashboard has its **own Tailwind config and stylesheet**, so its utilities never reach the CSS a visitor downloads — see "Two Tailwind configs".
 
 The design is **light mode only** — a navy-tinted "technical paper" ground (`base #F6F8FB`), chosen deliberately over the earlier dark build. Don't reintroduce a dark theme or a `dark:` variant without asking.
 
@@ -85,14 +99,24 @@ User-facing copy is **German** (Swiss DE conventions: apostrophe-thousands `1'45
 
 ## Stack & commands
 
-Vite + React 18 + TypeScript + Tailwind v3.
+Frontend: Vite + React 18 + TypeScript + Tailwind v3. API: NestJS 11 + Prisma 7 + PostgreSQL.
 
 ```bash
+# ---- Frontend (repo root) ----
 npm install
-npm run dev       # vite dev server
-npm run build     # tsc -b && vite build
-npm run preview   # serve dist/
+npm run dev         # vite dev server — serves all three entries on :5173
+npm run build       # tsc -b && vite build  → index, stelle, admin
+npm run preview     # serve dist/
+npm run typecheck   # tsc -b only
+
+# ---- API (server/, its own package.json and node_modules) ----
+npm run setup       # install + migrate + seed, in one go
+npm run server:dev  # nest start --watch on :3000
+npm run server:seed # reconcile permissions/types/settings, fill an empty DB
+npm run db:studio   # Prisma Studio
 ```
+
+`server/` needs a `.env` (copy `server/.env.example`) and a reachable PostgreSQL. The frontend needs `.env.local` only if you want it to talk to the API — see "The content layer" for what happens when you don't.
 
 There is no test runner, linter, or formatter configured. Don't introduce one unprompted.
 
@@ -122,7 +146,20 @@ See `cad/README.md`, and the Hero and Ablauf sections below for how the parts co
 
 ### Verifying a change
 
-With no test suite, `npm run build` is the only automated gate — it runs `tsc -b` first, so it catches type errors and nothing else. Anything visual has to be looked at.
+With no test suite, `npm run build` is the only automated gate on the frontend — it runs `tsc -b` first, so it catches type errors and nothing else. `npm --prefix server run typecheck` is the equivalent for the API, and it checks the seed separately (`tsconfig.seed.json`) because the seed reaches into the site package and would otherwise move the build's `rootDir`.
+
+**The strongest check available without a browser is to render the page in Node.** `react-dom/server` will happily render `App` — the 3D backdrop is imported inside an effect, and effects do not run during `renderToStaticMarkup`, so no WebGL is needed. Bundle a throwaway entry with esbuild (already present via Vite) and assert against the HTML:
+
+```powershell
+npx esbuild smoke.tsx --bundle --platform=node --format=cjs --outfile=smoke.cjs `
+  --jsx=automatic --alias:@=src --alias:react=node_modules/react `
+  --alias:react-dom=node_modules/react-dom --loader:.css=empty `
+  --define:import.meta.env=SHIM --banner:js="const SHIM = {};"
+```
+
+Two things make it work: `--loader:.css=empty` (the components import `globals.css`) and shimming `import.meta.env`, which only Vite provides. This is how the CMS migration was verified to have changed nothing — the same headline, the same 30 project cards, the same 41 names, the same resolved `tel:` href. It also catches the one failure this content model can produce that types cannot: an unresolved `{token}` reaching the DOM.
+
+The same trick mounts the dashboard, which additionally needs a `globalThis.window` stub with `location.origin` on it.
 
 On the IFC side, `python cad/build_svg_ifc.py` is its own gate: it **exits non-zero if a value flag's rule matches no component**, and prints the value and position it chose for each of the three. Move the section plane or narrow the band and it will tell you which flag fell off the drawing rather than silently emitting a section with two labels.
 
@@ -134,7 +171,7 @@ On the sample-project side there are three more gates, all worth running after a
 - `python -m ezdxf audit cad/out/*.dxf` — checks the drawing.
 - `python cad/verify_ifc.py` — rebuilds the IFC geometry and asserts its dimensions back against `model.py`.
 
-`npm run dev` serves on port 5173. **Check the dev server's own output after a change**, not just the browser: a Tailwind or PostCSS failure in `globals.css` returns HTTP 500 for the stylesheet, which fails the whole module graph and renders a *blank white page* with no console hint about the real cause. Fetching `http://localhost:5173/src/styles/globals.css` and checking for a 500 is the fastest way to distinguish "CSS broke" from "component broke".
+`npm run dev` serves all three entries on port 5173 — `/`, `/stelle.html?id=…` and `/admin.html`. **Check the dev server's own output after a change**, not just the browser: a Tailwind or PostCSS failure in `globals.css` returns HTTP 500 for the stylesheet, which fails the whole module graph and renders a *blank white page* with no console hint about the real cause. Fetching `http://localhost:5173/src/styles/globals.css` and checking for a 500 is the fastest way to distinguish "CSS broke" from "component broke". The dashboard has its own stylesheet with the same failure mode — `http://localhost:5173/src/admin/admin.css`.
 
 If you screenshot the page in headless Chromium, two traps:
 
@@ -151,7 +188,17 @@ Path alias: `@/*` → `src/*` (configured in both `tsconfig.json` and `vite.conf
 
 Single-page showcase. `src/App.tsx` composes the landing page. There is no routing — sections are anchor-linked, in page order: `#leistungen`, `#ablauf`, `#referenzen`, `#ueber-uns`, `#team`, `#sponsoring`, `#karriere`, `#standorte`, `#kontakt`.
 
-**There is a second entry point, and it is not a route.** `stelle.html` + `src/stelle.tsx` render one job advert as a page of its own, opened from the Karriere cards' `Detail →` chip as `/stelle.html?id=<opening id>` in a new window. It is a separate Vite input (`build.rollupOptions.input` in `vite.config.ts` — **`index.html` has to stay listed there**, or the site itself drops out of the build), and it mounts its own React root, so nothing on it can rely on the landing page's custom-event seams. `StelleDetail` hosts `BewerbungDialog` directly for exactly that reason; `openBewerbung`'s listener lives in the other root. The dev server picks the file up on its own — only the build config needs telling. If you add a third page, add it there too.
+**There are three entry points and none of them is a route.** `vite.config.ts` lists all three under `build.rollupOptions.input` — **`index.html` has to stay listed there**, or the site itself drops out of the build. The dev server picks up root HTML on its own; only the build config needs telling.
+
+| Entry | File | Root |
+| --- | --- | --- |
+| Site | `index.html` → `src/main.tsx` | `App` inside `CodeGate` |
+| Job advert | `stelle.html` → `src/stelle.tsx` | `StelleSeite` inside `CodeGate` |
+| Dashboard | `admin.html` → `src/admin/main.tsx` | `App` inside `ToastProvider` + `AuthProvider` |
+
+`stelle.html?id=<opening id>` opens from the Karriere cards' `Detail →` chip in a new window. It mounts its own React root, so nothing on it can rely on the landing page's custom-event seams: `StelleDetail` hosts `BewerbungDialog` directly for exactly that reason, because `openBewerbung`'s listener lives in the other root.
+
+The advert is also picked **inside a component**, not at module scope as it once was. The openings list is published content now — resolving it once on import would pin that window to whatever the bundle was built with and ignore a vacancy edited or withdrawn since.
 
 A window rather than a dialog on purpose: a job advert is the thing on this page most likely to be forwarded, printed or left open in a tab, and a modal has no address to send. An unknown `?id=` renders `StelleNichtGefunden` rather than a blank page — positions get filled and links outlive them.
 
@@ -165,8 +212,9 @@ Component layering:
 - **Compositions** (`SectionHeader`, `ServiceIndex`, `Bauablauf`, `PhaseTrack`, `ProjectRegister`, `TeamGrid`, `CompanyProfile`, `JobRegister`, `ProfisMark`, `Hero`, `Nav`, `Footer`) — built from primitives, carry IEM-specific layout decisions.
 - **`Wordmark`** — the IEM logo as inline SVG, filled with `currentColor`. Use it rather than setting "IEM" as type.
 - **Generated** — `SchnittGuglera` (the hero's section, from `cad/build_svg_ifc.py`) and `src/generated/scene_guglera.json` + `.ts` (the 3D model, from `cad/build_scene_ifc.py`), plus two the page no longer renders: `SchnittAA` (from `cad/build_svg.py`) and `src/generated/scene.ts` (from `cad/build_scene.py`). **Never edit any of them by hand**; the next generator run overwrites them. `ModelScene` reads the JSON and must not carry a dimension of its own.
-- **Content** (`src/content/iem.ts`) — disciplines, services, SIA phases, `bauakte`, projects, team, sponsorships, offices, `leitbild`, `companyFacts`, company `facts`, nav. All page copy and data lives here, not inline in components. It is the single file to edit for a content change.
+- **Content** (`src/content/`) — five files, described under "The content layer". `iem.ts` is still what the rest of `src/` imports.
 - **Showcase** (`App.tsx`) — wires compositions to content.
+- **Dashboard** (`src/admin/`) — its own component library in `src/admin/ui/`, layered the same way. It imports exactly two things from the site: `Wordmark` and `cn`. Nothing in `src/components/` may import from `src/admin/`.
 
 Four components hold state: `ProjectRegister` (filter + open dialog), `TeamGrid` (filter), `JobRegister` (category) and `Bauablauf` (act + plant on/off). The filters all expose themselves as `aria-pressed` buttons with an `aria-live` count — keep that pattern if you add another.
 
@@ -176,6 +224,57 @@ Four components hold state: `ProjectRegister` (filter + open dialog), `TeamGrid`
 - **The count is spelled out** ("4 von 6"), so two lines can be compared without reading either list.
 
 **No `01 / 02 / 03` in front of the rows.** It was in the sketch this design was chosen from and it is deliberately not in the build — see "Structural devices".
+
+## The content layer
+
+The page's data used to be module constants in `src/content/iem.ts`. It is now a value in a store, seeded from the bundle and replaced by whatever the dashboard has published. Five files:
+
+| File | Job |
+| --- | --- |
+| `schema.ts` | The contract — types and closed sets. **No data.** The server depends on the same shapes. |
+| `defaults.ts` | One complete `SiteContent`: boot snapshot, offline fallback, database seed. |
+| `store.ts` | Which value is current, and how a published one arrives. |
+| `derive.ts` | Figures the page computes, and the `{token}` syntax that lets copy carry them. |
+| `iem.ts` | The public entry — what the rest of `src/` imports. |
+
+**Why the first paint never waits.** The store starts already full, seeded with `defaultContent`, so the first frame is byte-for-byte what the static build produced: no skeleton, no spinner, no layout shift. `hydrate()` is called *after* the render is queued (see `main.tsx`) and swaps in a newer snapshot if there is one. With `VITE_CMS_API` unset it is a no-op and the site never makes a request. **Do not gate the render on it** — that single change would put a spinner where the headline is, which is the one thing the CMS migration was not allowed to do.
+
+**Why an external store and not a context.** Three things need the content and only one is inside a component tree: the page, the search index in `@/lib/search` (built at module scope), and the job advert's separate React root. `useSyncExternalStore` gives components a subscription and `getContent()` gives everything else a plain read.
+
+**The rule for anything added later.** Editable copy → a field on `SiteContent`, read through `useContent()`. Structure — a union, a sort order, a key — → an export from `schema.ts`, never in the database. `Tone` and `DisciplineKey` map to Tailwind classes and to `disciplineOrder`; letting the CMS invent one would produce a class that does not exist.
+
+### `{token}` placeholders keep derived figures derived
+
+The hero's "32 Jahre", the Über-uns heading's "Seit über 30 Jahren", "Sieben offene Stellen", the footer's copyright year — all of those were expressions in JSX. Moving copy into a database would normally flatten them into typed-out numbers, and typed-out numbers go stale.
+
+So copy carries `{jahre}`, `{jahrzehnte}`, `{stellenWort}`, `{jahr}` and the rest, and `resolveTokens` substitutes them at render. An editor can rewrite the sentence around a token freely; the value inside it stays computed from `facts`, `projects` and `openings`. The full list is `tokenHelp` in `derive.ts`, which is also what the dashboard shows as insertable chips.
+
+**An unknown token is left standing**, not blanked — `{jahrzente}` renders as itself, visible in the preview. Blanking it would silently delete a number from a published page, which is the failure this whole mechanism exists to prevent.
+
+Note the two *other* brace syntaxes, which are not this one and do not resolve here: `BewerbungDialog`'s `fill()` substitutes `{name}`/`{groesse}` from the file at hand, and several label blocks carry `{query}`/`{kategorie}` that the component fills from the reader's own input. They are deliberately separate so an editor cannot put a headcount in a file-size error.
+
+### Two Tailwind configs
+
+`tailwind.config.ts` scans the **public site only**; `tailwind.admin.config.ts` scans `src/admin` and is selected by `@config` at the top of `src/admin/admin.css`. The admin config imports the base `theme` rather than restating it, so the dashboard is on the same tokens and they cannot drift.
+
+This is not tidiness. Tailwind emits one stylesheet per CSS entry, and `globals.css` is the one the visitor downloads — scanning the dashboard there would add several hundred admin-only utilities to it. The split is verifiable: `globals-B1c5Zfq1.css` has the same content hash it had before the dashboard existed. **If you widen `content` in `tailwind.config.ts` to `./src/**`, you undo this and the public CSS grows.**
+
+## The CMS
+
+`server/` is a NestJS API over PostgreSQL. Two ideas hold it together:
+
+1. **Content is typed rows, not tables.** `ContentType` describes a shape, `ContentEntry` holds one value of it as JSON, `ContentVersion` keeps every value it has ever had. A table per section would mean a migration every time the site gains a field. The trade is that the database cannot enforce the shape, so `content.validator.ts` validates every write against `content-types.ts`.
+2. **The public site never reads those tables.** Publishing assembles one `ContentSnapshot` — a complete `SiteContent` document — and the site fetches that. One indexed read, no joins, and an editor's draft cannot reach a visitor.
+
+`server/src/content/content-types.ts` is the content model: it renders the dashboard's forms, validates writes, and its `contentKey` tells the snapshot builder which `SiteContent` field to write. **Adding a field to the site means adding it in three places** — `schema.ts`, `defaults.ts`, and here — and `snapshot.builder.ts`'s `REQUIRED_KEYS` is the check that catches you forgetting: an incomplete document fails the publish rather than blanking a section in production.
+
+Two content types write *loose* keys rather than an object, marked by a `__`-prefixed `contentKey`: `jobTexts` spreads its three strings and `contactEmail` unwraps its single value. `buildSnapshot` and `prisma/seed.ts` are inverses of each other and both handle those explicitly — change one and change the other.
+
+**Permissions are defined in code, not data.** `server/src/rbac/permissions.catalog.ts` is the source of truth; the seeder reconciles the table against it and *reports* orphans rather than deleting them. Super Admin short-circuits on the **role key**, not on holding every permission — a role that merely listed them all would stop being omnipotent the moment a new one was added, which is exactly when you least want the only account that can fix things to lose access.
+
+**Only Super Admin holds `content.publish`** in the seeded roles. That is the approval workflow the spec asked for: an editor submits, a manager approves, publishing stays with the owner. `TRANSITIONS` in `content.service.ts` is the state table — read it rather than tracing the methods.
+
+`server/prisma/seed.ts` fills an empty database **from the site's own `defaults.ts`**, so a fresh install comes up as the real website rather than as an empty CMS, and there is no second transcription of 30 projects and 41 people to keep in step. It is idempotent: re-running never overwrites an editor's work.
 
 ### Custom events are the seam between sections
 

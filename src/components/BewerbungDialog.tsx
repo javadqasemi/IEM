@@ -1,9 +1,20 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "./Button";
-import { openings } from "@/content/iem";
+import { useContent, type BewerbungCopy } from "@/content/iem";
 
-const SPONTAN = "Spontanbewerbung";
-const MAIL = "info@iem.ch";
+/**
+ * Fills `{name}`-style placeholders in a copy string.
+ *
+ * Local to this file and separate from `resolveTokens` in the content module:
+ * those tokens name figures derived from the site's own data, these name the
+ * file or field the message is about. Keeping them apart means an editor
+ * cannot accidentally put a headcount in a file-size error.
+ */
+function fill(text: string, values: Record<string, string | number>) {
+  return text.replace(/\{(\w+)\}/g, (whole, key: string) =>
+    key in values ? String(values[key]) : whole,
+  );
+}
 
 /**
  * Where an uploaded dossier goes. Unset in this repo — see `src/vite-env.d.ts`.
@@ -38,8 +49,13 @@ type Values = {
   nachricht: string;
 };
 
+/**
+ * A blank form. `position` is filled in from the copy when the dialog opens,
+ * not here — the default is editable content now, so a module constant would
+ * freeze whatever the bundle shipped with.
+ */
 const EMPTY: Values = {
-  position: SPONTAN,
+  position: "",
   vorname: "",
   nachname: "",
   email: "",
@@ -59,14 +75,14 @@ function looksLikeEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 }
 
-function validate(v: Values, mode: Mode, files: File[]): Errors {
+function validate(v: Values, mode: Mode, files: File[], L: BewerbungCopy): Errors {
   const e: Errors = {};
-  if (!v.vorname.trim()) e.vorname = "Bitte Vornamen angeben.";
-  if (!v.nachname.trim()) e.nachname = "Bitte Nachnamen angeben.";
-  if (!v.email.trim()) e.email = "Bitte E-Mail-Adresse angeben.";
-  else if (!looksLikeEmail(v.email)) e.email = "Diese Adresse ist unvollständig.";
+  if (!v.vorname.trim()) e.vorname = L.fehlerVorname;
+  if (!v.nachname.trim()) e.nachname = L.fehlerNachname;
+  if (!v.email.trim()) e.email = L.fehlerEmail;
+  else if (!looksLikeEmail(v.email)) e.email = L.fehlerEmailUngueltig;
   if (mode === "upload" && files.length === 0) {
-    e.dateien = "Bitte mindestens eine Datei anhängen.";
+    e.dateien = L.fehlerDateien;
   }
   return e;
 }
@@ -76,28 +92,28 @@ function validate(v: Values, mode: Mode, files: File[]): Errors {
  * sending. A mail link cannot carry attachments, which is exactly why the
  * upload option exists next to it rather than instead of it.
  */
-function mailtoHref(v: Values, files: File[]) {
+function mailtoHref(v: Values, files: File[], L: BewerbungCopy, mail: string) {
   const subject = `${v.position} — ${v.vorname} ${v.nachname}`.trim();
   const body = [
-    `Position: ${v.position}`,
-    `Name: ${v.vorname} ${v.nachname}`,
-    `E-Mail: ${v.email}`,
-    v.telefon.trim() ? `Telefon: ${v.telefon}` : null,
-    v.verfuegbar.trim() ? `Verfügbar ab: ${v.verfuegbar}` : null,
+    `${L.mailFeldPosition}: ${v.position}`,
+    `${L.mailFeldName}: ${v.vorname} ${v.nachname}`,
+    `${L.mailFeldEmail}: ${v.email}`,
+    v.telefon.trim() ? `${L.mailFeldTelefon}: ${v.telefon}` : null,
+    v.verfuegbar.trim() ? `${L.mailFeldVerfuegbar}: ${v.verfuegbar}` : null,
     "",
-    v.nachricht.trim() || "(keine Nachricht)",
+    v.nachricht.trim() || L.mailKeineNachricht,
     // Named in the body as well, so the applicant and IEM both notice if an
     // attachment was forgotten in the mail client.
     ...(files.length
-      ? ["", `Beilagen: ${files.map((f) => f.name).join(", ")}`]
+      ? ["", `${L.mailFeldBeilagen}: ${files.map((f) => f.name).join(", ")}`]
       : []),
     "",
-    "— Gesendet über das Bewerbungsformular auf iem.ch",
+    L.mailSignatur,
   ]
     .filter((l) => l !== null)
     .join("\n");
 
-  return `mailto:${MAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return `mailto:${mail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
 /**
@@ -105,7 +121,12 @@ function mailtoHref(v: Values, files: File[]) {
  * upload progress. A 20 MB dossier on a site connection is long enough that a
  * button with no feedback reads as broken.
  */
-function postDossier(url: string, data: FormData, onProgress: (pct: number) => void) {
+function postDossier(
+  url: string,
+  data: FormData,
+  onProgress: (pct: number) => void,
+  L: BewerbungCopy,
+) {
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
@@ -115,12 +136,10 @@ function postDossier(url: string, data: FormData, onProgress: (pct: number) => v
     xhr.addEventListener("load", () =>
       xhr.status >= 200 && xhr.status < 300
         ? resolve()
-        : reject(new Error(`Der Server hat mit ${xhr.status} geantwortet.`)),
+        : reject(new Error(fill(L.fehlerServer, { status: xhr.status }))),
     );
-    xhr.addEventListener("error", () =>
-      reject(new Error("Die Verbindung ist abgebrochen.")),
-    );
-    xhr.addEventListener("abort", () => reject(new Error("Der Upload wurde abgebrochen.")));
+    xhr.addEventListener("error", () => reject(new Error(L.fehlerVerbindung)));
+    xhr.addEventListener("abort", () => reject(new Error(L.fehlerAbbruch)));
     xhr.send(data);
   });
 }
@@ -134,6 +153,7 @@ function Field({
   hint,
   error,
   required,
+  optionalLabel,
   children,
 }: {
   id: string;
@@ -141,6 +161,7 @@ function Field({
   hint?: string;
   error?: string;
   required?: boolean;
+  optionalLabel: string;
   children: ReactNode;
 }) {
   return (
@@ -152,7 +173,7 @@ function Field({
             ✳
           </span>
         ) : (
-          <span className="normal-case tracking-normal text-muted/70">(optional)</span>
+          <span className="normal-case tracking-normal text-muted/70">{optionalLabel}</span>
         )}
       </label>
       {children}
@@ -196,6 +217,7 @@ export function BewerbungDialog({
   position?: string;
   onClose: () => void;
 }) {
+  const { openings, bewerbung: L, contactEmail } = useContent();
   const ref = useRef<HTMLDialogElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const uid = useId();
@@ -218,11 +240,11 @@ export function BewerbungDialog({
       // Seed the position on open rather than in `useState`: the host stays
       // mounted between openings, so an initial value would only ever apply to
       // the first one.
-      setValues((v) => ({ ...v, position: position ?? SPONTAN }));
+      setValues((v) => ({ ...v, position: position ?? L.spontan }));
       el.showModal();
     }
     if (!open && el.open) el.close();
-  }, [open, position]);
+  }, [open, position, L.spontan]);
 
   // Esc closes the element without React hearing about it, so the reset hangs
   // off `onClose` rather than off the open prop.
@@ -252,16 +274,20 @@ export function BewerbungDialog({
 
     for (const f of Array.from(incoming)) {
       if (next.length >= MAX_FILES) {
-        rejected = `Mehr als ${MAX_FILES} Dateien gehen nicht — die übrigen wurden nicht übernommen.`;
+        rejected = fill(L.fehlerZuViele, { max: MAX_FILES });
         break;
       }
       if (next.some((x) => x.name === f.name && x.size === f.size)) continue;
       if (f.size > MAX_FILE_BYTES) {
-        rejected = `„${f.name}" ist ${formatBytes(f.size)} gross. Pro Datei sind ${formatBytes(MAX_FILE_BYTES)} möglich.`;
+        rejected = fill(L.fehlerZuGross, {
+          name: f.name,
+          groesse: formatBytes(f.size),
+          limit: formatBytes(MAX_FILE_BYTES),
+        });
         continue;
       }
       if (next.reduce((s, x) => s + x.size, 0) + f.size > MAX_TOTAL_BYTES) {
-        rejected = `Zusammen sind höchstens ${formatBytes(MAX_TOTAL_BYTES)} möglich.`;
+        rejected = fill(L.fehlerGesamt, { limit: formatBytes(MAX_TOTAL_BYTES) });
         continue;
       }
       next.push(f);
@@ -273,7 +299,7 @@ export function BewerbungDialog({
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const found = validate(values, mode, files);
+    const found = validate(values, mode, files, L);
     setErrors(found);
 
     const first = Object.keys(found)[0];
@@ -283,7 +309,7 @@ export function BewerbungDialog({
     }
 
     if (mode === "mail") {
-      window.location.href = mailtoHref(values, files);
+      window.location.href = mailtoHref(values, files, L, contactEmail);
       setStatus("mail");
       return;
     }
@@ -296,10 +322,10 @@ export function BewerbungDialog({
     setStatus("sending");
     setProgress(0);
     try {
-      await postDossier(ENDPOINT, data, setProgress);
+      await postDossier(ENDPOINT, data, setProgress, L);
       setStatus("done");
     } catch (err) {
-      setFailure(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setFailure(err instanceof Error ? err.message : L.fehlerUnbekannt);
       setStatus("failed");
     }
   }
@@ -322,16 +348,16 @@ export function BewerbungDialog({
           who it goes to, and where. */}
       <div className="flex items-start justify-between gap-4 bg-brand-navy px-6 py-5 sm:px-8">
         <div className="flex flex-col gap-1">
-          <p className="eyebrow text-brand-sand">IEM AG · Thun / Bern</p>
+          <p className="eyebrow text-brand-sand">{L.titelblock}</p>
           <h2 id={id("title")} className="font-display text-2xl font-semibold text-surface">
-            Bewerbung
+            {L.titel}
           </h2>
         </div>
         <button
           type="button"
           onClick={handleClose}
           disabled={busy}
-          aria-label="Schliessen"
+          aria-label={L.schliessen}
           className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-surface/70 ring-1 ring-surface/25 transition-colors hover:bg-surface/10 hover:text-surface disabled:opacity-40"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
@@ -342,14 +368,19 @@ export function BewerbungDialog({
 
       {status === "done" ? (
         <div className="flex animate-fade-up flex-col gap-4 p-6 sm:p-8">
-          <p className="font-display text-xl font-semibold text-ink">Bewerbung ist angekommen.</p>
+          <p className="font-display text-xl font-semibold text-ink">{L.doneTitel}</p>
           <p className="text-[15px] leading-relaxed text-muted">
-            {files.length === 1 ? "Eine Datei" : `${files.length} Dateien`} übermittelt
-            {" "}({formatBytes(totalBytes)}). Eine Bestätigung geht an {values.email}. Wir melden uns
-            innert weniger Tage.
+            {fill(L.doneText, {
+              dateien:
+                files.length === 1
+                  ? L.doneEineDatei
+                  : fill(L.doneMehrereDateien, { n: files.length }),
+              groesse: formatBytes(totalBytes),
+              email: values.email,
+            })}
           </p>
           <div className="pt-2">
-            <Button onClick={handleClose}>Schliessen</Button>
+            <Button onClick={handleClose}>{L.schliessen}</Button>
           </div>
         </div>
       ) : status === "mail" ? (
@@ -357,17 +388,12 @@ export function BewerbungDialog({
           {/* Deliberately not "Bewerbung gesendet": nothing has been sent yet,
               and telling an applicant otherwise is the worst thing this form
               could do. */}
-          <p className="font-display text-xl font-semibold text-ink">
-            Ihr Mailprogramm sollte jetzt offen sein.
-          </p>
-          <p className="text-[15px] leading-relaxed text-muted">
-            Die Bewerbung ist vorbereitet, aber noch nicht abgeschickt — sie geht erst raus, wenn
-            Sie im Mailprogramm auf Senden klicken.
-          </p>
+          <p className="font-display text-xl font-semibold text-ink">{L.mailTitel}</p>
+          <p className="text-[15px] leading-relaxed text-muted">{L.mailText}</p>
 
           {files.length > 0 ? (
             <div className="flex flex-col gap-2 rounded-md bg-surface-2 p-4">
-              <p className="text-[14px] font-medium text-ink">Diese Dateien noch anhängen:</p>
+              <p className="text-[14px] font-medium text-ink">{L.mailDateienTitel}</p>
               <ul className="flex flex-col gap-1">
                 {files.map((f) => (
                   <li key={`${f.name}-${f.size}`} className="flex justify-between gap-3 text-[14px]">
@@ -380,24 +406,22 @@ export function BewerbungDialog({
               </ul>
             </div>
           ) : (
-            <p className="text-[15px] leading-relaxed text-muted">
-              Hängen Sie dort Ihr Dossier an: Lebenslauf, Zeugnisse, Diplome.
-            </p>
+            <p className="text-[15px] leading-relaxed text-muted">{L.mailKeineDateien}</p>
           )}
           <p className="text-[15px] leading-relaxed text-muted">
-            Hat sich nichts geöffnet, schicken Sie die Unterlagen direkt an{" "}
+            {L.mailFallbackPrefix}{" "}
             <a
-              href={`mailto:${MAIL}`}
+              href={`mailto:${contactEmail}`}
               className="font-medium text-brand-blue underline decoration-line-strong underline-offset-4 hover:text-brand-bronze"
             >
-              {MAIL}
+              {contactEmail}
             </a>
-            .
+            {L.mailFallbackSuffix}
           </p>
           <div className="flex flex-col gap-3 pt-2 sm:flex-row">
-            <Button onClick={handleClose}>Schliessen</Button>
+            <Button onClick={handleClose}>{L.schliessen}</Button>
             <Button variant="secondary" onClick={() => setStatus("idle")}>
-              Angaben nochmals ansehen
+              {L.mailNochmals}
             </Button>
           </div>
         </div>
@@ -405,12 +429,12 @@ export function BewerbungDialog({
         <form ref={formRef} noValidate onSubmit={onSubmit} className="flex flex-col gap-6 p-6 sm:p-8">
           {/* Same aria-pressed pair the reference and team filters use. */}
           <div className="flex flex-col gap-2">
-            <span className="eyebrow text-muted">Wie möchten Sie bewerben?</span>
-            <div role="group" aria-label="Art der Bewerbung" className="grid gap-2 sm:grid-cols-2">
+            <span className="eyebrow text-muted">{L.modusFrage}</span>
+            <div role="group" aria-label={L.modusGroupLabel} className="grid gap-2 sm:grid-cols-2">
               {(
                 [
-                  ["upload", "Dossier hochladen", "Dateien direkt an IEM übermitteln"],
-                  ["mail", "Per E-Mail senden", "Formular im Mailprogramm öffnen"],
+                  ["upload", L.modusUploadLabel, L.modusUploadNote],
+                  ["mail", L.modusMailLabel, L.modusMailNote],
                 ] as const
               ).map(([value, label, note]) => {
                 const isActive = mode === value;
@@ -430,21 +454,23 @@ export function BewerbungDialog({
                   >
                     <span className="text-[15px] font-medium">{label}</span>
                     <span className={`text-[13px] ${isActive ? "text-brand-sand" : "text-muted"}`}>
-                      {disabled ? "Noch nicht eingerichtet" : note}
+                      {disabled ? L.modusNichtEingerichtet : note}
                     </span>
                   </button>
                 );
               })}
             </div>
             {!ENDPOINT ? (
-              <p className="text-[13px] leading-snug text-muted">
-                Der Upload braucht einen Server, der die Dateien entgegennimmt. Bis der eingerichtet
-                ist, führt der E-Mail-Weg vollständig zum Ziel.
-              </p>
+              <p className="text-[13px] leading-snug text-muted">{L.modusHinweis}</p>
             ) : null}
           </div>
 
-          <Field id={id("position")} label="Position" required>
+          <Field
+            id={id("position")}
+            label={L.feldPosition}
+            required
+            optionalLabel={L.optional}
+          >
             <select
               id={id("position")}
               value={values.position}
@@ -452,7 +478,7 @@ export function BewerbungDialog({
               disabled={busy}
               className={`${fieldBase} cursor-pointer ring-line`}
             >
-              <option value={SPONTAN}>{SPONTAN}</option>
+              <option value={L.spontan}>{L.spontan}</option>
               {openings.map((o) => (
                 <option key={o.role} value={o.role}>
                   {o.role} · {o.place}
@@ -462,7 +488,13 @@ export function BewerbungDialog({
           </Field>
 
           <div className="tick-rule grid gap-5 pt-6 sm:grid-cols-2">
-            <Field id={id("vorname")} label="Vorname" required error={errors.vorname}>
+            <Field
+              id={id("vorname")}
+              label={L.feldVorname}
+              required
+              error={errors.vorname}
+              optionalLabel={L.optional}
+            >
               <input
                 id={id("vorname")}
                 value={values.vorname}
@@ -475,7 +507,13 @@ export function BewerbungDialog({
               />
             </Field>
 
-            <Field id={id("nachname")} label="Nachname" required error={errors.nachname}>
+            <Field
+              id={id("nachname")}
+              label={L.feldNachname}
+              required
+              error={errors.nachname}
+              optionalLabel={L.optional}
+            >
               <input
                 id={id("nachname")}
                 value={values.nachname}
@@ -488,7 +526,13 @@ export function BewerbungDialog({
               />
             </Field>
 
-            <Field id={id("email")} label="E-Mail" required error={errors.email}>
+            <Field
+              id={id("email")}
+              label={L.feldEmail}
+              required
+              error={errors.email}
+              optionalLabel={L.optional}
+            >
               <input
                 id={id("email")}
                 type="email"
@@ -503,7 +547,7 @@ export function BewerbungDialog({
               />
             </Field>
 
-            <Field id={id("telefon")} label="Telefon">
+            <Field id={id("telefon")} label={L.feldTelefon} optionalLabel={L.optional}>
               <input
                 id={id("telefon")}
                 type="tel"
@@ -516,7 +560,12 @@ export function BewerbungDialog({
               />
             </Field>
 
-            <Field id={id("verfuegbar")} label="Verfügbar ab" hint="z. B. sofort oder 1. März 2027">
+            <Field
+              id={id("verfuegbar")}
+              label={L.feldVerfuegbar}
+              hint={L.feldVerfuegbarHint}
+              optionalLabel={L.optional}
+            >
               <input
                 id={id("verfuegbar")}
                 value={values.verfuegbar}
@@ -535,13 +584,13 @@ export function BewerbungDialog({
               overlooks a missing attachment. */}
           <div className="flex flex-col gap-2">
             <span className="eyebrow flex items-baseline gap-1.5 text-muted">
-              Dossier
+              {L.dossier}
               {mode === "upload" ? (
                 <span className="text-brand-bronze" aria-hidden>
                   ✳
                 </span>
               ) : (
-                <span className="normal-case tracking-normal text-muted/70">(optional)</span>
+                <span className="normal-case tracking-normal text-muted/70">{L.optional}</span>
               )}
             </span>
 
@@ -581,12 +630,12 @@ export function BewerbungDialog({
                     : "border-line-strong bg-surface hover:border-brand-navy/40 hover:bg-surface-2"
               }`}
             >
-              <span className="text-[15px] font-medium text-ink">
-                Dateien hierher ziehen oder auswählen
-              </span>
+              <span className="text-[15px] font-medium text-ink">{L.dossierZiehen}</span>
               <span className="text-[13px] text-muted">
-                PDF, Word oder Bild · max. {MAX_FILES} Dateien ·{" "}
-                {formatBytes(MAX_FILE_BYTES)} pro Datei
+                {fill(L.dossierRegeln, {
+                  max: MAX_FILES,
+                  proDatei: formatBytes(MAX_FILE_BYTES),
+                })}
               </span>
             </label>
 
@@ -611,7 +660,7 @@ export function BewerbungDialog({
                       type="button"
                       disabled={busy}
                       onClick={() => setFiles((list) => list.filter((x) => x !== f))}
-                      aria-label={`${f.name} entfernen`}
+                      aria-label={fill(L.dateiEntfernen, { name: f.name })}
                       className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
                     >
                       <svg viewBox="0 0 16 16" width="11" height="11" fill="none" aria-hidden>
@@ -630,25 +679,27 @@ export function BewerbungDialog({
 
             {files.length > 0 ? (
               <p className="eyebrow text-muted">
-                {files.length} von {MAX_FILES} · {formatBytes(totalBytes)} von{" "}
-                {formatBytes(MAX_TOTAL_BYTES)}
+                {fill(L.dateiZaehler, {
+                  n: files.length,
+                  max: MAX_FILES,
+                  bytes: formatBytes(totalBytes),
+                  gesamt: formatBytes(MAX_TOTAL_BYTES),
+                })}
               </p>
             ) : null}
 
             {mode === "mail" && files.length > 0 ? (
               // Says plainly that the mail client is what carries them — the
               // files are picked here, but a mailto: cannot attach anything.
-              <p className="text-[13px] leading-snug text-muted">
-                Diese Dateien werden in der Mail namentlich aufgeführt. Anhängen müssen Sie sie im
-                Mailprogramm selbst — eine Mail-Verknüpfung kann keine Anhänge mitgeben.
-              </p>
+              <p className="text-[13px] leading-snug text-muted">{L.mailAnhangHinweis}</p>
             ) : null}
           </div>
 
           <Field
             id={id("nachricht")}
-            label="Nachricht"
-            hint="Was Sie mitbringen und warum IEM."
+            label={L.feldNachricht}
+            hint={L.feldNachrichtHint}
+            optionalLabel={L.optional}
           >
             <textarea
               id={id("nachricht")}
@@ -664,7 +715,7 @@ export function BewerbungDialog({
           {busy ? (
             <div className="flex flex-col gap-2" aria-live="polite">
               <div className="flex items-baseline justify-between">
-                <span className="eyebrow text-muted">Wird übermittelt</span>
+                <span className="eyebrow text-muted">{L.wirdUebermittelt}</span>
                 <span className="font-mono text-[12px] tnum text-brand-blue">{progress}%</span>
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
@@ -679,16 +730,16 @@ export function BewerbungDialog({
           {status === "failed" ? (
             // Says what went wrong and what to do instead, rather than "Fehler".
             <div className="flex flex-col gap-2 rounded-md bg-surface-2 p-4" aria-live="assertive">
-              <p className="text-[14px] font-medium text-ink">Der Upload ist nicht durchgekommen.</p>
+              <p className="text-[14px] font-medium text-ink">{L.failedTitel}</p>
               <p className="text-[14px] leading-relaxed text-muted">
-                {failure} Versuchen Sie es nochmals, oder schicken Sie die Unterlagen an{" "}
+                {failure} {L.failedPrefix}{" "}
                 <a
-                  href={`mailto:${MAIL}`}
+                  href={`mailto:${contactEmail}`}
                   className="font-medium text-brand-blue underline decoration-line-strong underline-offset-4 hover:text-brand-bronze"
                 >
-                  {MAIL}
+                  {contactEmail}
                 </a>
-                .
+                {L.failedSuffix}
               </p>
             </div>
           ) : null}
@@ -698,14 +749,14 @@ export function BewerbungDialog({
               <span className="text-brand-bronze" aria-hidden>
                 ✳
               </span>{" "}
-              Pflichtfeld
+              {L.pflichtfeld}
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button type="button" variant="secondary" disabled={busy} onClick={handleClose}>
-                Abbrechen
+                {L.abbrechen}
               </Button>
               <Button type="submit" trailing="→" disabled={busy}>
-                {busy ? "Wird gesendet …" : "Senden"}
+                {busy ? L.wirdGesendet : L.senden}
               </Button>
             </div>
           </div>

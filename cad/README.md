@@ -53,7 +53,8 @@ Gebäudelängsachse verteilen.
 Aus `IfcSystem`: Vor-/Rücklauf → `disc-heat`, Zu-/Abluft → `disc-air`,
 Kaltwasser → `disc-water`. Der jeweilige Rücklauf trägt dieselbe Gewerkfarbe
 mit halber Deckkraft; ein zweiter Farbton je Gewerk wäre ein Token, das eine
-Richtung und keine Disziplin benennt (siehe CLAUDE.md, „Two colour groups").
+Richtung und keine Disziplin benennt (siehe docs/ARCHITECTURE.md, „Two colour
+groups").
 
 ## Wertfahnen
 

@@ -1,0 +1,15 @@
+{
+  // Typechecks the Prisma seed and the CLI config, which the build deliberately
+  // excludes: the seed imports the site package's `defaults.ts` so that the
+  // database is seeded from the same copy the static build shipped, and pulling
+  // that file into the build program moves `rootDir` above `server/`.
+  //
+  // Nothing here is emitted — the seed runs through `tsx`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "incremental": false
+  },
+  "include": ["src/**/*", "prisma/**/*", "prisma.config.ts"]
+}

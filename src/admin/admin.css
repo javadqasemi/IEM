@@ -1,0 +1,122 @@
+/**
+ * The dashboard's stylesheet.
+ *
+ * `@config` points Tailwind at `tailwind.admin.config.ts`, whose `content`
+ * covers only `src/admin`. That is what keeps the dashboard's several hundred
+ * utilities out of `globals.css` — the stylesheet every visitor to the public
+ * site downloads. The two configs share one `theme`, so the tokens cannot
+ * drift apart.
+ *
+ * The component classes below are the ones repeated often enough that spelling
+ * them out at every call site would be the thing that makes the markup
+ * unreadable. Everything else stays as utilities.
+ */
+@config "../../tailwind.admin.config.ts";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-base font-sans text-[15px] text-ink antialiased;
+  }
+
+  /* The same focus treatment as the site. Written as plain CSS rather than
+     `@apply ring-brand-navy/40`, because `@apply` with an opacity modifier on
+     a custom colour resolves inconsistently — the dev server throws while the
+     build passes, and a failing stylesheet renders a blank page. This has
+     bitten the site twice; see docs/ARCHITECTURE.md. */
+  :focus-visible {
+    outline: 2px solid #003882;
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: rgba(0, 56, 130, 0.16);
+  }
+
+  /* Tabular figures wherever a number is meant to line up in a column. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Scrollbars inside panels, so a data grid does not get the OS's full-width
+     one cutting through the layout. */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #bfcad9 transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background-color: #bfcad9;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* The mono uppercase label. Same signature as the site's `.eyebrow`. */
+  .eyebrow {
+    @apply font-mono text-[11px] uppercase tracking-ultra-wide;
+  }
+
+  /* One row of a data table. `group` so the row actions can appear on hover. */
+  .cell {
+    @apply px-4 py-3 text-left align-middle;
+  }
+
+  .field-label {
+    @apply eyebrow flex items-baseline gap-1.5 text-muted;
+  }
+
+  /* Every text input, select and textarea. One class so a change to the focus
+     ring or the disabled state cannot apply to three of the four. */
+  .field-input {
+    @apply w-full rounded-md bg-surface px-3 py-2 text-[14px] text-ink ring-1 ring-line
+           transition-colors placeholder:text-muted/60 hover:ring-line-strong
+           focus:outline-none focus:ring-2 focus:ring-brand-navy
+           disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-muted;
+  }
+
+  .field-input-error {
+    @apply ring-brand-bronze hover:ring-brand-bronze focus:ring-brand-bronze;
+  }
+
+  .panel {
+    @apply rounded-lg bg-surface ring-1 ring-line;
+  }
+
+  /* The skip link, positioned off screen until focused. */
+  .skip-link {
+    @apply sr-only;
+  }
+  .skip-link:focus {
+    @apply not-sr-only fixed left-4 top-4 z-[100] rounded-md bg-brand-navy px-4 py-2
+           text-surface shadow-card;
+  }
+}
+
+/* Motion preference, honoured globally as on the site. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

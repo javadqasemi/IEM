@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import type { Tone } from "@/content/iem";
+import type { Tone } from "@/content/schema";
 
 /**
  * Every discipline hue is text-safe on `surface`, so label, ring and dot can all

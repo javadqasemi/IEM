@@ -2,17 +2,7 @@ import { useState } from "react";
 import { Button } from "./Button";
 import { BewerbungDialog } from "./BewerbungDialog";
 import { Wordmark } from "./Wordmark";
-import {
-  jobBewerbung,
-  jobSchluss,
-  jobUeberUns,
-  offices,
-  openings,
-} from "@/content/iem";
-
-type Opening = (typeof openings)[number];
-
-const MAIL = "info@iem.ch";
+import { useContent, type Opening } from "@/content/iem";
 
 /**
  * The Bewerbung paragraph ends on the address IEM wants the dossier sent to,
@@ -21,8 +11,8 @@ const MAIL = "info@iem.ch";
  * string, and the `endsWith` guard means a reworded advert falls back to plain
  * text instead of silently losing its last words.
  */
-function bewerbungTeile(text: string): [string, string | null] {
-  return text.endsWith(MAIL) ? [text.slice(0, -MAIL.length), MAIL] : [text, null];
+function bewerbungTeile(text: string, mail: string): [string, string | null] {
+  return text.endsWith(mail) ? [text.slice(0, -mail.length), mail] : [text, null];
 }
 
 /**
@@ -58,9 +48,11 @@ function Liste({ titel, items }: { titel: string; items: string[] }) {
 }
 
 export function StelleDetail({ opening }: { opening: Opening }) {
+  const { jobBewerbung, jobSchluss, jobUeberUns, offices, contactEmail, stelleLabels: L } =
+    useContent();
   const [open, setOpen] = useState(false);
   const d = opening.detail;
-  const [bewerbungText, bewerbungMail] = bewerbungTeile(jobBewerbung);
+  const [bewerbungText, bewerbungMail] = bewerbungTeile(jobBewerbung, contactEmail);
 
   return (
     <div className="min-h-dvh bg-base">
@@ -73,7 +65,7 @@ export function StelleDetail({ opening }: { opening: Opening }) {
               no second label of its own — one would be read out twice. */}
           <a
             href="/"
-            title="IEM AG — Startseite"
+            title={L.home}
             className="flex items-center text-brand-navy transition-colors hover:text-brand-blue"
           >
             <Wordmark className="h-5 w-auto" />
@@ -83,7 +75,7 @@ export function StelleDetail({ opening }: { opening: Opening }) {
             className="eyebrow flex items-center gap-1.5 text-brand-blue transition-colors hover:text-brand-bronze"
           >
             <span aria-hidden>←</span>
-            Alle offenen Stellen
+            {L.zurueck}
           </a>
         </div>
       </header>
@@ -100,25 +92,25 @@ export function StelleDetail({ opening }: { opening: Opening }) {
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <Button variant="mark" onClick={() => setOpen(true)}>
-              Jetzt bewerben
+              {L.jetztBewerben}
             </Button>
             <Button variant="secondary" href={opening.pdf} target="_blank" rel="noreferrer noopener">
-              Original-Inserat (PDF)
+              {L.originalPdf}
             </Button>
           </div>
         </div>
 
         <section className="tick-rule flex flex-col gap-3 pt-8">
-          <h2 className="font-display text-xl font-semibold text-ink">Über uns</h2>
+          <h2 className="font-display text-xl font-semibold text-ink">{L.ueberUns}</h2>
           <p className="max-w-prose text-[15px] leading-relaxed text-ink">{jobUeberUns}</p>
         </section>
 
-        <Liste titel="Deine Aufgaben" items={d.aufgaben} />
-        <Liste titel="Dein Profil" items={d.profil} />
-        <Liste titel="Wir bieten" items={d.bieten} />
+        <Liste titel={L.aufgaben} items={d.aufgaben} />
+        <Liste titel={L.profil} items={d.profil} />
+        <Liste titel={L.bieten} items={d.bieten} />
 
         <section className="flex flex-col gap-4 rounded-lg bg-surface p-6 ring-1 ring-line sm:p-8">
-          <h2 className="font-display text-xl font-semibold text-ink">Bewerbung</h2>
+          <h2 className="font-display text-xl font-semibold text-ink">{L.bewerbung}</h2>
           <p className="max-w-prose text-[15px] leading-relaxed text-ink">
             {bewerbungText}
             {bewerbungMail ? (
@@ -131,14 +123,14 @@ export function StelleDetail({ opening }: { opening: Opening }) {
             ) : null}
           </p>
           <p className="max-w-prose text-[15px] leading-relaxed text-ink">
-            Für Rückfragen steht Dir {d.kontakt.name} unter der Telefonnummer{" "}
+            {L.rueckfragenPrefix.replace("{name}", d.kontakt.name)}{" "}
             <a
               href={`tel:+41${d.kontakt.telefon.replace(/\D/g, "").replace(/^0/, "")}`}
               className="font-medium text-brand-blue underline decoration-line-strong underline-offset-4 hover:text-brand-bronze"
             >
               {d.kontakt.telefon}
             </a>{" "}
-            gerne zur Verfügung.
+            {L.rueckfragenSuffix}
           </p>
           <p className="max-w-prose text-[15px] leading-relaxed text-ink">{jobSchluss}</p>
           <div className="pt-1">
@@ -146,26 +138,26 @@ export function StelleDetail({ opening }: { opening: Opening }) {
                 has just finished reading should not have to scroll back up to
                 act on it. */}
             <Button variant="mark" onClick={() => setOpen(true)}>
-              Jetzt bewerben
+              {L.jetztBewerben}
             </Button>
           </div>
         </section>
 
         <footer className="flex flex-col gap-2 border-t border-line pt-6 text-[13px] leading-relaxed text-muted">
           <p>
-            Inseratstext gemäss dem von IEM veröffentlichten{" "}
+            {L.quellePrefix}{" "}
             <a
               href={opening.pdf}
               target="_blank"
               rel="noreferrer noopener"
               className="text-brand-blue underline decoration-line-strong underline-offset-2 hover:text-brand-bronze"
             >
-              Stelleninserat (PDF)
+              {L.quelleLabel}
             </a>
-            .
+            {L.quelleSuffix}
           </p>
           <p>
-            IEM AG ·{" "}
+            {L.firma} ·{" "}
             {offices.map((o, i) => (
               <span key={o.city}>
                 {i > 0 ? " · " : ""}
@@ -186,19 +178,17 @@ export function StelleDetail({ opening }: { opening: Opening }) {
 
 /** Shown when the `?id=` in the address matches no advert. */
 export function StelleNichtGefunden() {
+  const { stelleLabels: L } = useContent();
   return (
     <div className="grid min-h-dvh place-items-center bg-base px-6">
       <div className="flex max-w-md flex-col items-start gap-4">
         <Wordmark className="h-5 w-auto text-brand-navy" />
         <h1 className="font-display text-display-md font-semibold text-ink">
-          Dieses Inserat gibt es nicht.
+          {L.nichtGefundenTitel}
         </h1>
-        <p className="text-[15px] leading-relaxed text-muted">
-          Die Stelle wurde vermutlich besetzt oder die Adresse ist unvollständig. Die aktuell
-          offenen Stellen stehen auf der Karriere-Seite.
-        </p>
+        <p className="text-[15px] leading-relaxed text-muted">{L.nichtGefundenText}</p>
         <Button href="/#karriere" trailing="→">
-          Offene Stellen
+          {L.nichtGefundenCta}
         </Button>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { BewerbungButton, openBewerbung } from "./BewerbungButton";
-import { jobCategories, jobCategoryNotes, openings, type JobCategory } from "@/content/iem";
+import { jobCategories, useContent, type JobCategory } from "@/content/iem";
 
 /**
  * The vacancies in the same register form as the references: a hairline grid of
@@ -12,14 +12,18 @@ import { jobCategories, jobCategoryNotes, openings, type JobCategory } from "@/c
  * empty bodies under them would read as neglect rather than as information.
  */
 export function JobRegister() {
+  const { openings, jobCategoryNotes, jobLabels: L } = useContent();
   const [active, setActive] = useState<JobCategory>("Offene Stellen");
 
-  const shown = useMemo(() => openings.filter((o) => o.category === active), [active]);
+  const shown = useMemo(
+    () => openings.filter((o) => o.category === active),
+    [active, openings],
+  );
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div role="group" aria-label="Stellen nach Art filtern" className="flex flex-wrap gap-2">
+        <div role="group" aria-label={L.filterGroup} className="flex flex-wrap gap-2">
           {jobCategories.map((c) => {
             const isActive = c === active;
             const count = openings.filter((o) => o.category === c).length;
@@ -53,7 +57,7 @@ export function JobRegister() {
             mounted, including in a category that carries no adverts at all. */}
         <div className="flex items-center gap-4 sm:gap-5">
           <p aria-live="polite" className="eyebrow whitespace-nowrap text-muted">
-            {shown.length === 1 ? "1 Inserat" : `${shown.length} Inserate`}
+            {shown.length === 1 ? `1 ${L.inserat}` : `${shown.length} ${L.inserate}`}
           </p>
           <BewerbungButton size="sm" className="ml-auto sm:ml-0" />
         </div>
@@ -80,7 +84,7 @@ export function JobRegister() {
               <button
                 type="button"
                 onClick={() => openBewerbung(o.role)}
-                aria-label={`${o.role}: bewerben`}
+                aria-label={`${o.role}: ${L.karteBewerben}`}
                 className="flex flex-1 flex-col bg-surface text-left transition-colors duration-200 group-hover/card:bg-surface-2 focus-visible:relative focus-visible:z-10"
               >
                 <div className="relative w-full overflow-hidden">
@@ -122,7 +126,7 @@ export function JobRegister() {
                       aria-hidden
                       className="eyebrow flex shrink-0 items-center gap-1.5 self-start rounded-full bg-surface px-2.5 py-1 text-brand-navy ring-1 ring-line transition-colors duration-200 group-hover/card:bg-brand-navy group-hover/card:text-surface group-hover/card:ring-brand-navy group-focus-within/card:bg-brand-navy group-focus-within/card:text-surface group-focus-within/card:ring-brand-navy"
                     >
-                      Bewerben
+                      {L.bewerben}
                       <span className="transition-transform duration-200 group-hover/card:translate-x-0.5">
                         →
                       </span>
@@ -146,10 +150,10 @@ export function JobRegister() {
                 href={`/stelle.html?id=${o.id}`}
                 target="_blank"
                 rel="noreferrer noopener"
-                aria-label={`Stelleninserat ${o.role} lesen`}
+                aria-label={L.detailLabel.replace("{rolle}", o.role)}
                 className="eyebrow absolute right-2.5 top-2.5 z-10 rounded-full bg-surface/90 px-2 py-1 text-brand-blue backdrop-blur-sm transition-colors hover:bg-surface hover:text-brand-bronze"
               >
-                Detail →
+                {L.detail}
               </a>
             </li>
           ))}
@@ -166,7 +170,7 @@ export function JobRegister() {
             onClick={() => openBewerbung(active)}
             className="eyebrow flex items-center gap-1.5 text-brand-blue transition-colors hover:text-brand-bronze"
           >
-            {active} anfragen
+            {L.anfragen.replace("{kategorie}", active)}
             <span aria-hidden>→</span>
           </button>
         </div>

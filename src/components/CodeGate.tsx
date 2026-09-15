@@ -12,7 +12,21 @@ import { cn } from "@/lib/cn";
  * mehr nicht. Wer echten Schutz braucht, setzt ihn beim Server an (Basic Auth
  * o. ä.), nicht hier.
  */
-const CODE = "753159";
+/**
+ * The code, from the build environment.
+ *
+ * **Unset means no gate at all** — `CodeGate` renders its children straight
+ * through. That is the right default for a production deployment: the site is
+ * public, and a build that shipped a preview gate with a code the owner does
+ * not know would lock them out of their own website.
+ *
+ * It stays a *display* barrier either way. The value is compiled into the
+ * bundle and is findable in seconds with the developer tools, and the page is
+ * still fully retrievable over the network. It keeps casual visitors out of an
+ * unfinished preview, nothing more. Real protection belongs at the server —
+ * HTTP Basic Auth or an access-controlled host — not here.
+ */
+const CODE = import.meta.env.VITE_ACCESS_CODE ?? "";
 const LAENGE = CODE.length;
 
 /**
@@ -42,6 +56,10 @@ function freigeben() {
 
 export function CodeGate({ children }: { children: ReactNode }) {
   const [offen, setOffen] = useState(freigegeben);
+  // No code configured, no gate. Checked before the state is consulted so a
+  // build that drops the gate cannot leave anyone stuck behind a stale
+  // sessionStorage entry from an earlier one.
+  if (!CODE) return <>{children}</>;
   if (offen) return <>{children}</>;
   return <CodeDialog onOk={() => setOffen(true)} />;
 }

@@ -1,5 +1,5 @@
 import { cn } from "@/lib/cn";
-import { disciplines, services, type DisciplineKey, type Tone } from "@/content/iem";
+import { disciplineOrder, useContent, type Tone } from "@/content/iem";
 
 /**
  * The five service lines as a full-width register: one band per line, a
@@ -37,9 +37,18 @@ const farben: Record<Tone, string> = {
   model: "bg-disc-model",
 };
 
-const allDisciplines = Object.keys(disciplines) as DisciplineKey[];
+/**
+ * The complete discipline list, in HLKSE order.
+ *
+ * It comes from `disciplineOrder` rather than `Object.keys(disciplines)`: the
+ * table is data now, and object key order is whatever the database or the JSON
+ * parser handed back. The order is structural — see `schema.ts`.
+ */
+const allDisciplines = disciplineOrder;
 
 export function ServiceIndex() {
+  const { disciplines, services, serviceLabels } = useContent();
+
   return (
     <ul className="flex flex-col border-t border-line">
       {services.map((s) => (
@@ -69,9 +78,9 @@ export function ServiceIndex() {
 
             <div className="flex flex-col gap-3 lg:col-span-5">
               <h4 className="eyebrow flex items-baseline gap-2 text-muted">
-                Fachgebiete
+                {serviceLabels.fachgebiete}
                 <span className="font-mono text-[11px] normal-case tracking-normal text-ink/70 tnum">
-                  {s.disciplines.length} von {allDisciplines.length}
+                  {s.disciplines.length} {serviceLabels.von} {allDisciplines.length}
                 </span>
               </h4>
 
@@ -103,7 +112,7 @@ export function ServiceIndex() {
                         {disciplines[k].short}
                       </span>
                       <span className="sr-only">
-                        {dabei ? "enthalten" : "nicht enthalten"}
+                        {dabei ? serviceLabels.enthalten : serviceLabels.nichtEnthalten}
                       </span>
                     </li>
                   );
