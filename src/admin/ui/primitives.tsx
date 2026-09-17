@@ -35,14 +35,14 @@ type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "subtle";
 type ButtonSize = "sm" | "md" | "lg";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-brand-navy text-surface hover:bg-brand-navy/90 active:translate-y-px",
+  primary: "bg-brand-navy text-inverse hover:bg-brand-navy/90 active:translate-y-px",
   secondary:
     "bg-surface text-ink ring-1 ring-line hover:bg-surface-2 hover:ring-line-strong active:translate-y-px",
   ghost: "bg-transparent text-muted hover:bg-surface-2 hover:text-ink",
   // Destructive actions use bronze, not a red from outside the palette. It is
   // the darkest warm tone in the brand family and reads as "careful" against
   // the navy without introducing a colour the identity does not own.
-  danger: "bg-brand-bronze text-surface hover:bg-brand-bronze/90 active:translate-y-px",
+  danger: "bg-brand-bronze text-inverse hover:bg-brand-bronze/90 active:translate-y-px",
   subtle: "bg-surface-2 text-ink hover:bg-line active:translate-y-px",
 };
 
@@ -307,7 +307,7 @@ export type BadgeTone =
 
 const BADGE_TONES: Record<BadgeTone, string> = {
   neutral: "bg-surface-2 text-muted ring-line",
-  navy: "bg-brand-navy/[0.08] text-brand-navy ring-brand-navy/20",
+  navy: "bg-accent/[0.08] text-accent ring-accent/20",
   gold: "bg-disc-power/[0.10] text-disc-power ring-disc-power/25",
   bronze: "bg-brand-bronze/[0.10] text-brand-bronze ring-brand-bronze/25",
   energy: "bg-disc-energy/[0.10] text-disc-energy ring-disc-energy/25",
@@ -496,8 +496,8 @@ export function Checkbox({
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-line-strong text-brand-navy
-                   focus:ring-2 focus:ring-brand-navy focus:ring-offset-0 disabled:cursor-not-allowed"
+        className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-line-strong text-accent
+                   focus:ring-2 focus:ring-accent focus:ring-offset-0 disabled:cursor-not-allowed"
       />
       <label htmlFor={id} className="flex cursor-pointer flex-col gap-0.5">
         <span className="text-[14px] leading-tight text-ink">{label}</span>
@@ -539,10 +539,25 @@ export function Toggle({
           checked ? "bg-brand-navy" : "bg-line-strong",
         )}
       >
+        {/*
+          `left-0.5` is load-bearing, not decoration.
+
+          Without a horizontal anchor both `left` and `right` are `auto`, so the
+          knob is placed at its *static position* — where it would have sat in
+          normal flow. A `<button>` carries `text-align: center` from the user
+          agent and Tailwind's preflight does not reset it, so that position is
+          the middle of the track: the knob started centred and the transform
+          shifted it from there, which is why neither state looked right.
+
+          Anchored at 2px the geometry closes: the track is 36×20 and the knob
+          16, so off leaves 2px at the left, and `translate-x-4` (16px) puts it
+          at 18px — 2px from the right. Symmetric, and both numbers stay on the
+          spacing scale.
+        */}
         <span
           className={cn(
-            "absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow-sm transition-transform",
-            checked ? "translate-x-4" : "translate-x-0.5",
+            "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow-sm transition-transform",
+            checked ? "translate-x-4" : "translate-x-0",
           )}
         />
       </button>
@@ -630,7 +645,7 @@ export function Tabs<T extends string>({
             className={cn(
               "-mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-[14px] font-medium transition-colors",
               isActive
-                ? "border-brand-navy text-ink"
+                ? "border-accent text-ink"
                 : "border-transparent text-muted hover:border-line-strong hover:text-ink",
             )}
           >

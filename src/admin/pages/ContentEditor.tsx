@@ -163,7 +163,7 @@ export function ContentEditorPage({
               </Button>
               {!isNew && can("content.history") ? (
                 <Button variant="secondary" onClick={() => setShowVersions(true)}>
-                  Verlauf ({entry?.versions.length ?? 0})
+                  Verlauf ({entry?.versions?.length ?? 0})
                 </Button>
               ) : null}
               {!isNew && canEdit && can("content.submit") && status === "DRAFT" ? (

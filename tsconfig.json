@@ -19,7 +19,26 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] }
+    "paths": { "@/*": ["src/*"] },
+    /**
+     * Browser types only — no `node`, even though `@types/node` is installed
+     * for the test program and the config files.
+     *
+     * Without this, `tsc` pulls in every `@types/*` package it can find, and
+     * the application code would typecheck against `fs`, `process` and
+     * `Buffer`. Those resolve at compile time and are simply absent at
+     * runtime, so the mistake ships as a blank page rather than as an error —
+     * which is the failure this codebase's whole comment culture exists to
+     * pre-empt. The tests get them back through `tsconfig.test.json`.
+     */
+    "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  /**
+   * Tests are a separate program (`tsconfig.test.json`), because they legitimately
+   * read files off disk — the contrast test parses `admin.css` rather than
+   * restating the palette — and that needs Node types the application must not
+   * have. `npm run typecheck` runs both.
+   */
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

@@ -259,7 +259,7 @@ function AssetTile({
     <div
       className={cn(
         "group relative overflow-hidden rounded-lg bg-surface ring-1 transition-shadow",
-        selected ? "ring-2 ring-brand-navy" : "ring-line hover:shadow-card",
+        selected ? "ring-2 ring-accent" : "ring-line hover:shadow-card",
       )}
     >
       <button type="button" onClick={onOpen} className="block w-full text-left">
@@ -301,7 +301,7 @@ function AssetTile({
             checked={selected}
             onChange={onToggle}
             aria-label={`${asset.filename} auswählen`}
-            className="h-4 w-4 cursor-pointer rounded border-line-strong bg-surface text-brand-navy focus:ring-2 focus:ring-brand-navy"
+            className="h-4 w-4 cursor-pointer rounded border-line-strong bg-surface text-accent focus:ring-2 focus:ring-accent"
           />
         </label>
       ) : null}
@@ -422,8 +422,8 @@ export function UploadDialog({
           className={cn(
             "flex cursor-pointer flex-col items-center gap-1 rounded-md border border-dashed px-6 py-8 text-center transition-colors",
             dragging
-              ? "border-brand-navy bg-brand-navy/[0.04]"
-              : "border-line-strong bg-surface hover:border-brand-navy/40 hover:bg-surface-2",
+              ? "border-accent bg-accent/[0.04]"
+              : "border-line-strong bg-surface hover:border-accent/40 hover:bg-surface-2",
           )}
         >
           {file ? (

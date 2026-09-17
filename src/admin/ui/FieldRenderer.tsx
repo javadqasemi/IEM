@@ -218,7 +218,7 @@ function OneField({
                 className={cn(
                   "rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-50",
                   on
-                    ? "bg-brand-navy text-surface"
+                    ? "bg-brand-navy text-inverse"
                     : "bg-surface text-muted ring-1 ring-line hover:text-ink hover:ring-line-strong",
                 )}
               >
@@ -374,21 +374,40 @@ function ImageField({
 }) {
   const [broken, setBroken] = useState(false);
   return (
-    <div className="flex items-start gap-3">
-      <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md bg-surface-2 ring-1 ring-line">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+      {/*
+        The preview at 336×252, which is 20× the area of the 64×64 thumbnail
+        this replaced. A thumbnail that size answers "is there an image" and
+        nothing else; at this size an editor can actually see whether they
+        picked the right photo, which is the only question the field exists to
+        answer. It is the first thing in the row, with the path and the library
+        button beside it, so the image leads and the plumbing follows.
+
+        Full width on a phone and stacked, because 336px beside a text input
+        does not fit a narrow column — the same reflow `PageHeader` uses.
+      */}
+      <div className="grid aspect-[4/3] w-full shrink-0 place-items-center overflow-hidden rounded-lg bg-surface-2 ring-1 ring-line sm:w-[21rem]">
         {value && !broken ? (
           <img
             src={value}
             alt=""
-            className="h-full w-full object-cover"
+            // `object-contain`, not `cover`. Cropping is right for a thumbnail
+            // and wrong for a preview: half these fields hold portraits
+            // (`team.photo`) and the rest landscapes, and a preview that cuts
+            // the head off a portrait to fill a 4:3 box is worse than one with
+            // bars beside it.
+            className="h-full w-full object-contain"
             onError={() => setBroken(true)}
             onLoad={() => setBroken(false)}
           />
         ) : (
           // A broken path is shown as broken rather than as a blank box — an
           // editor who mistypes a path should find out here, not from the
-          // published page.
-          <span className="text-[10px] text-muted">{value ? "fehlt" : "—"}</span>
+          // published page. Now that there is room for words, it says which of
+          // the two it is instead of "fehlt" against a dash.
+          <span className="px-4 text-center text-[13px] text-muted">
+            {value ? "Bild nicht gefunden" : "Kein Bild gewählt"}
+          </span>
         )}
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -452,7 +471,7 @@ function TokenHint({
             {tokens.map((t) => (
               <li key={t.token}>
                 <button type="button" onClick={() => onInsert(t.token)} title={t.meaning}>
-                  <Badge tone="navy" className="cursor-pointer font-mono hover:ring-brand-navy/40">
+                  <Badge tone="navy" className="cursor-pointer font-mono hover:ring-accent/40">
                     {t.token}
                   </Badge>
                 </button>

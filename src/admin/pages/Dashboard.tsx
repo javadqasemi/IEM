@@ -51,7 +51,7 @@ export function DashboardPage() {
 
       {/* ---- Waiting on someone ---- */}
       {data && (data.content.inReview > 0 || ready > 0) ? (
-        <div className="flex flex-wrap items-center gap-4 rounded-lg bg-brand-navy px-5 py-4 text-surface">
+        <div className="flex flex-wrap items-center gap-4 rounded-lg bg-brand-navy px-5 py-4 text-inverse">
           <p className="min-w-0 flex-1 text-[14px] leading-snug">
             {data.content.inReview > 0 ? (
               <>
@@ -73,7 +73,7 @@ export function DashboardPage() {
             <Button
               size="sm"
               href="#/freigaben"
-              className="bg-surface text-brand-navy hover:bg-brand-sand"
+              className="bg-surface text-accent hover:bg-brand-sand"
             >
               Zur Prüfung
             </Button>

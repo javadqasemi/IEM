@@ -286,11 +286,16 @@ export function PublishPage() {
   const [restore, setRestore] = useState<number | null>(null);
 
   const pending = useAsync(() => api.entries({ status: "APPROVED", perPage: 200 }), []);
+  const diff = useAsync(() => api.pendingChanges(), []);
   const snapshots = useAsync(() => api.snapshots(), []);
   const publish = useMutation(api.publish);
   const restoreSnapshot = useMutation(api.restoreSnapshot);
 
   const ready = pending.data?.items ?? [];
+  // What publishing would actually change — not the same as how many entries
+  // are approved. See `PendingChanges` in `lib/api.ts`.
+  const changes = diff.data?.changes ?? [];
+  const differs = diff.data?.changed ?? false;
 
   return (
     <>
@@ -300,20 +305,62 @@ export function PublishPage() {
         description="Beim Veröffentlichen werden alle freigegebenen Einträge eingefroren und als ein Stand der Website gespeichert. Entwürfe bleiben aussen vor."
       />
 
+      {/*
+        Driven by the document comparison, not by the count of approved
+        entries. Those are different questions, and the gap between them was a
+        real fault: deleting a team member marks the row deleted and leaves its
+        status alone, so it never becomes `APPROVED`. This card used to read
+        "nothing is approved" and disable the button, while the live site still
+        showed the person and only publishing would remove them.
+      */}
       <Card
-        title={`${ready.length} freigegebene ${ready.length === 1 ? "Änderung" : "Änderungen"}`}
+        title={
+          differs
+            ? `${changes.length} ${changes.length === 1 ? "Bereich weicht" : "Bereiche weichen"} von der Website ab`
+            : "Website ist auf dem aktuellen Stand"
+        }
         description={
-          ready.length
-            ? "Diese Einträge gehen mit der nächsten Veröffentlichung live."
-            : "Zurzeit ist nichts freigegeben."
+          differs
+            ? "Diese Bereiche sehen nach dem Veröffentlichen anders aus als jetzt auf der Website."
+            : "Der Entwurf und der veröffentlichte Stand stimmen überein. Veröffentlichen würde nichts ändern."
         }
         action={
           can("content.publish") ? (
-            <Button variant="primary" disabled={!ready.length} onClick={() => setConfirm(true)}>
+            <Button variant="primary" disabled={!differs} onClick={() => setConfirm(true)}>
               Jetzt veröffentlichen
             </Button>
           ) : null
         }
+      >
+        {diff.loading ? (
+          <Skeleton className="h-24" />
+        ) : differs ? (
+          <ul className="flex flex-col divide-y divide-line">
+            {changes.map((c) => (
+              <li key={c.key} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5">
+                <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{c.label}</span>
+                {c.live !== null && c.next !== null && c.live !== c.next ? (
+                  <span className="shrink-0 font-mono text-[13px] tnum text-muted">
+                    {c.live} → <span className="text-ink">{c.next}</span>
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-[13px] text-muted">geändert</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-[14px] leading-relaxed text-muted">
+            {diff.data?.liveVersion
+              ? `Die Website zeigt Version ${diff.data.liveVersion}.`
+              : "Es wurde noch nichts veröffentlicht."}
+          </p>
+        )}
+      </Card>
+
+      <Card
+        title={`${ready.length} freigegebene ${ready.length === 1 ? "Änderung" : "Änderungen"}`}
+        description="Bearbeitete Einträge, die den Freigabeschritt durchlaufen haben. Löschungen und Umsortierungen erscheinen hier nicht — sie stehen oben."
       >
         {pending.loading ? (
           <Skeleton className="h-24" />
@@ -386,7 +433,7 @@ export function PublishPage() {
         open={confirm}
         onClose={() => setConfirm(false)}
         title="Veröffentlichen"
-        description={`${ready.length} freigegebene ${ready.length === 1 ? "Änderung wird" : "Änderungen werden"} live geschaltet.`}
+        description={`${changes.length} ${changes.length === 1 ? "Bereich wird" : "Bereiche werden"} auf der Website aktualisiert: ${changes.map((c) => c.label).join(", ")}.`}
         size="sm"
         busy={publish.busy}
         footer={
@@ -412,6 +459,7 @@ export function PublishPage() {
                 setNote("");
                 setConfirm(false);
                 pending.reload();
+                diff.reload();
                 snapshots.reload();
               }}
             >

@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ContentTypeRow, type EntryRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { attachVisibilitySwitches, buildEntryIndex } from "../lib/inlineEdit";
 import { Link, navigate } from "../lib/router";
 import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
 import { useToast } from "../ui/toast";
@@ -15,6 +16,159 @@ import {
   Skeleton,
 } from "../ui/primitives";
 import { DataView, WorkflowBadge, formatDateTime, relativeTime, type Column } from "../ui/data";
+
+/* ================================================================== */
+/* The site itself, embedded                                           */
+/* ================================================================== */
+
+/**
+ * The published website, in an iframe.
+ *
+ * **An iframe rather than the site's components.** It would be possible to
+ * import `App` from the site and render it here, and it would be the wrong
+ * thing twice over: `admin/main.tsx` states that the dashboard shares nothing
+ * with the site's bundle but the theme tokens, `Wordmark` and `cn`, and doing
+ * it would pull the whole site in behind it — including the three.js chunk
+ * that `ModelScene` goes to the trouble of importing dynamically so it lands
+ * in its own file. An iframe costs the dashboard bundle nothing and is not a
+ * copy of the site at all: it *is* the site, the same build a visitor gets,
+ * rendering the same published snapshot. There is nothing here to drift.
+ *
+ * It shows `/` — the same target as "Website ansehen" at the foot of the rail
+ * — so this works in development, where the dev server holds both entries, and
+ * in production, where one host serves `index.html` and `admin.html`.
+ *
+ * Two things worth knowing. The frame loads the real site, three.js and all,
+ * so this page is heavier than the rest of the dashboard; and it shows the
+ * *published* document, so a saved-but-unreleased edit will not appear in it —
+ * which is the honest answer to "what does the website look like", and the
+ * same separation the whole CMS is built on. There is no reload control: a
+ * fresh publish shows up on the next visit to this page, or on F5.
+ *
+ * `CodeGate` is not a problem: with no `VITE_ACCESS_CODE` in the build it
+ * renders straight through. With one set, the frame shows the code dialog
+ * until the session is unlocked — and because it is the same origin,
+ * unlocking it in either place unlocks both.
+ */
+function SitePreview() {
+  const frame = useRef<HTMLIFrameElement>(null);
+  const toast = useToast();
+
+  const entries = useAsync(
+    () => api.entries({ perPage: 500 }).then((p) => p.items).catch(() => [] as EntryRow[]),
+    [],
+  );
+
+  /**
+   * Which entries are switched off, held here rather than re-fetched.
+   *
+   * The switch has to answer instantly — that is the whole point of it — so
+   * the state flips locally and the request follows. A failed request puts it
+   * back and says so, which is the only case where the two can disagree.
+   */
+  const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!entries.data) return;
+    setHidden(Object.fromEntries(entries.data.map((e) => [e.id, Boolean(e.hidden)])));
+  }, [entries.data]);
+
+  const index = useMemo(() => buildEntryIndex(entries.data ?? []), [entries.data]);
+
+  // Read through a ref so the effect below does not re-attach the overlay on
+  // every toggle — re-attaching mid-click would drop the button out from
+  // under the cursor.
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+
+  const toggle = useCallback(
+    (entryId: string, label: string, next: boolean) => {
+      setHidden((h) => ({ ...h, [entryId]: next }));
+      api.setEntryVisibility(entryId, next).catch((err) => {
+        setHidden((h) => ({ ...h, [entryId]: !next }));
+        toast.error(
+          `„${label}" konnte nicht umgeschaltet werden.`,
+          err instanceof Error ? err.message : undefined,
+        );
+      });
+    },
+    [toast],
+  );
+
+  /**
+   * Attaching is an effect, not a click handler, because the frame can reload
+   * under us — following a link, or React remounting it — and the switches
+   * have to come back when it does. `load` fires on every document the frame
+   * shows, so this re-runs for each and the cleanup unwinds the previous one.
+   */
+  useEffect(() => {
+    const el = frame.current;
+    if (!el || index.size === 0) return;
+
+    let detach: (() => void) | null = null;
+    const attach = () => {
+      detach?.();
+      // Same origin, so this is readable. A cross-origin frame throws here
+      // rather than silently doing nothing, which is the honest failure.
+      const doc = el.contentDocument;
+      if (!doc?.body) return;
+      detach = attachVisibilitySwitches(doc, {
+        index,
+        isHidden: (id) => Boolean(hiddenRef.current[id]),
+        onToggle: (hit, next) => toggle(hit.entryId, hit.label, next),
+      });
+    };
+
+    attach();
+    el.addEventListener("load", attach);
+    return () => {
+      el.removeEventListener("load", attach);
+      detach?.();
+    };
+  }, [index, toggle]);
+
+  const off = Object.values(hidden).filter(Boolean).length;
+
+  return (
+    /*
+      `-mx-4 lg:-mx-8` cancels the gutter `AdminLayout` puts on `<main>`, so the
+      frame sits flush with the edges of the content column instead of being
+      inset by it. The site inside keeps its own `px-6 lg:px-10` — that gutter
+      belongs to the website and is part of what the preview is showing. Only
+      the dashboard's own padding is taken back, which is why the numbers stop
+      stacking: 32px of shell plus 40px of site became 40px of site.
+
+      The values must stay in step with `<main>`. If its padding changes, this
+      changes with it, or the frame will either leave a strip of ground beside
+      it or push a scrollbar onto the page.
+    */
+    <section className="panel -mx-4 overflow-hidden lg:-mx-8">
+      {/* A line of orientation, not a control. The switches live on the
+          content itself; this only says they are there and keeps the count of
+          what is currently switched off in view, because a hidden entry
+          disappears from the page at the next publish and would otherwise be
+          hard to remember. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-4 py-2">
+        <p className="min-w-0 flex-1 truncate text-[13px] text-muted">
+          Auf einen Eintrag zeigen — der Schalter nimmt ihn von der Website oder stellt ihn zurück.
+        </p>
+        {off > 0 ? (
+          <span className="shrink-0 rounded-full bg-brand-bronze/10 px-2.5 py-0.5 text-[12px] font-medium text-brand-bronze">
+            {off} ausgeschaltet · wirkt mit dem nächsten Veröffentlichen
+          </span>
+        ) : null}
+      </div>
+      <iframe
+        ref={frame}
+        src="/"
+        title="Vorschau der Website"
+        // No `sandbox`: the frame is our own origin and the site needs its own
+        // scripts to render at all. Sandboxing it would show a dead page — and
+        // the edit mode reads `contentDocument`, which a sandbox would forbid.
+        className="block h-[min(70vh,44rem)] min-h-[28rem] w-full border-0 bg-surface"
+      />
+    </section>
+  );
+}
 
 /* ================================================================== */
 /* The index of content types                                          */
@@ -61,6 +215,8 @@ export function ContentIndexPage() {
         title="Alles, was auf der Website steht"
         description="Jeder Abschnitt, jede Karte, jedes Bild und jede Beschriftung. Änderungen gehen als Entwurf in die Freigabe und werden erst mit dem Veröffentlichen sichtbar."
       />
+
+      <SitePreview />
 
       {types.loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

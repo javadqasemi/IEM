@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { cn } from "@/lib/cn";
 import { api, type ApplicationRow, type SettingRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { THEME_CHOICES, useTheme } from "../lib/theme";
 import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
 import { useToast } from "../ui/toast";
 import {
@@ -135,7 +136,7 @@ export function ApplicationsPage() {
                 aria-pressed={status === o.value}
                 className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
                   status === o.value
-                    ? "bg-ink text-surface"
+                    ? "bg-ink text-inverse"
                     : "bg-surface text-muted ring-1 ring-line hover:text-ink hover:ring-line-strong"
                 }`}
               >
@@ -845,6 +846,72 @@ export function AuditPage() {
 /* Profile                                                             */
 /* ================================================================== */
 
+/**
+ * The appearance control.
+ *
+ * On the **profile** page rather than in Einstellungen, and the split is the
+ * point: `/einstellungen` holds settings stored on the server that change the
+ * system for everyone, while this is stored in this browser and changes nothing
+ * for anyone else. Putting a per-browser preference among the SMTP host and the
+ * retention period would invite an operator to expect it to travel with their
+ * account, which it does not.
+ *
+ * Radio buttons rather than a toggle, because there are three states. A toggle
+ * would force "system" to be spelled some other way, and "follows the machine"
+ * is both the default and the one most people want.
+ */
+function ThemeCard() {
+  const { choice, resolved, setChoice } = useTheme();
+  const name = useId();
+
+  return (
+    <Card
+      title="Darstellung"
+      description="Gilt nur in diesem Browser. Die Einstellung wird nicht mit dem Konto gespeichert."
+    >
+      <fieldset className="flex flex-col gap-1">
+        <legend className="sr-only">Farbschema</legend>
+        {THEME_CHOICES.map((option) => {
+          const id = `${name}-${option.value}`;
+          const active = choice === option.value;
+          return (
+            <label
+              key={option.value}
+              htmlFor={id}
+              className={cn(
+                "flex cursor-pointer items-start gap-3 rounded-md px-3 py-2.5 transition-colors",
+                active ? "bg-accent/[0.07]" : "hover:bg-surface-2",
+              )}
+            >
+              <input
+                id={id}
+                type="radio"
+                name={name}
+                value={option.value}
+                checked={active}
+                onChange={() => setChoice(option.value)}
+                className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer border-field text-accent focus:ring-2 focus:ring-accent"
+              />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-[14px] leading-tight text-ink">
+                  {option.label}
+                  {option.value === "system" ? (
+                    // Which way "automatic" currently resolves is the one thing
+                    // the label cannot say by itself, and it is what a reader
+                    // checks when the choice does not look like it did anything.
+                    <span className="text-muted"> · zurzeit {resolved === "dark" ? "dunkel" : "hell"}</span>
+                  ) : null}
+                </span>
+                <span className="text-[12px] leading-snug text-muted">{option.hint}</span>
+              </span>
+            </label>
+          );
+        })}
+      </fieldset>
+    </Card>
+  );
+}
+
 export function ProfilePage() {
   const { user, reload } = useAuth();
   const toast = useToast();
@@ -883,6 +950,8 @@ export function ProfilePage() {
             <Pair label="Zuletzt angemeldet">{formatDateTime(user.lastLoginAt)}</Pair>
           </dl>
         </Card>
+
+        <ThemeCard />
 
         <Card
           title="Passwort ändern"

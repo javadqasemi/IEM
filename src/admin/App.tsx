@@ -3,7 +3,9 @@ import { api } from "./lib/api";
 import { useAuth } from "./lib/auth";
 import { match, useRoute } from "./lib/router";
 import { useAsync } from "./lib/useAsync";
-import { AdminLayout, type NavItem } from "./layout/AdminLayout";
+import { AdminLayout } from "./layout/AdminLayout";
+import { buildNavigation } from "./lib/navigation";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { Button, EmptyState, Spinner } from "./ui/primitives";
 import { LoginPage } from "./pages/Login";
 import { DashboardPage } from "./pages/Dashboard";
@@ -28,7 +30,7 @@ import { ApplicationsPage, AuditPage, ProfilePage, SettingsPage } from "./pages/
  * more useful than a blanket "kein Zugriff".
  */
 export function App() {
-  const { user, loading } = useAuth();
+  const { user, loading, canAny } = useAuth();
   const route = useRoute();
 
   // Counts for the rail's badges. Only fetched once signed in, and failures
@@ -45,78 +47,38 @@ export function App() {
     [user?.id],
   );
 
-  const nav = useMemo<NavItem[]>(
-    () => [
-      {
-        to: "/",
-        label: "Übersicht",
-        permissions: ["system.health", "content.read"],
-        icon: <Glyph d="M3 9.5 9 4l6 5.5M4.5 8.5V14h9V8.5" />,
-      },
-      {
-        to: "/inhalte",
-        label: "Inhalte",
-        permissions: ["content.read"],
-        icon: <Glyph d="M3.5 3.5h11v11h-11zM6 6.5h6M6 9h6M6 11.5h3.5" />,
-      },
-      {
-        to: "/freigaben",
-        label: "Freigaben",
-        permissions: ["content.approve", "content.read"],
-        badge: reviews.data?.length,
-        icon: <Glyph d="M3.5 9l3.5 3.5 6-7" />,
-      },
-      {
-        to: "/veroeffentlichen",
-        label: "Veröffentlichen",
-        permissions: ["content.publish", "content.history"],
-        icon: <Glyph d="M9 13.5V4M5.5 7.5 9 4l3.5 3.5" />,
-      },
-      {
-        to: "/medien",
-        label: "Medien",
-        permissions: ["media.read"],
-        icon: <Glyph d="M3.5 4.5h11v9h-11zM3.5 11l3-3 3 3 2-2 2.5 2.5" />,
-      },
-      {
-        to: "/bewerbungen",
-        label: "Bewerbungen",
-        permissions: ["application.read"],
-        badge: applications.data?.byStatus?.NEW,
-        icon: <Glyph d="M3.5 5.5h11v8h-11zM3.5 5.5 9 10l5.5-4.5" />,
-      },
-      {
-        to: "/benutzer",
-        label: "Benutzer",
-        permissions: ["user.read"],
-        icon: <Glyph d="M9 8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3.5 14c0-2.5 2.5-4 5.5-4s5.5 1.5 5.5 4" />,
-      },
-      {
-        to: "/rollen",
-        label: "Rollen",
-        permissions: ["role.read"],
-        icon: <Glyph d="M9 3.5 14 6v4c0 2.5-2.5 4-5 4.5C6.5 14 4 12.5 4 10V6Z" />,
-      },
-      {
-        to: "/einstellungen",
-        label: "Einstellungen",
-        permissions: ["settings.read"],
-        icon: <Glyph d="M9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM9 2.5v2M9 13.5v2M2.5 9h2M13.5 9h2M4.4 4.4l1.4 1.4M12.2 12.2l1.4 1.4M13.6 4.4l-1.4 1.4M5.8 12.2l-1.4 1.4" />,
-      },
-      {
-        to: "/audit",
-        label: "Audit-Log",
-        permissions: ["audit.read"],
-        icon: <Glyph d="M3.5 3.5h11v11h-11zM6 7h6M6 10h6" />,
-      },
-    ],
-    [reviews.data, applications.data],
+  /**
+   * The content types the menu's Website groups are made of.
+   *
+   * Fetched here rather than inside the rail so the whole shell has one owner
+   * for it. Failing quietly is right: an empty list costs the Website groups,
+   * and the operational entries — where someone would go to find out *why* the
+   * server is unhappy — still render.
+   */
+  const types = useAsync(
+    () => (user ? api.contentTypes().catch(() => []) : Promise.resolve([])),
+    [user?.id],
+  );
+
+  const sections = useMemo(
+    () =>
+      buildNavigation({
+        types: types.data ?? [],
+        // The context's `canAny` takes varargs; the menu passes an array, and
+        // an item naming no permission is open to anyone signed in.
+        canAny: (permissions) => permissions.length === 0 || canAny(...permissions),
+        badges: {
+          reviews: reviews.data?.length,
+          applications: applications.data?.byStatus?.NEW,
+        },
+      }),
+    [types.data, reviews.data, applications.data, canAny],
   );
 
   if (loading) {
     return (
       <div className="grid min-h-dvh place-items-center bg-base">
-        <Spinner className="h-6 w-6 text-brand-navy" />
+        <Spinner className="h-6 w-6 text-accent" />
         <span className="sr-only">Sitzung wird geprüft …</span>
       </div>
     );
@@ -124,7 +86,13 @@ export function App() {
 
   if (!user) return <LoginPage />;
 
-  return <AdminLayout nav={nav}>{renderRoute(route.path)}</AdminLayout>;
+  return (
+    <AdminLayout sections={sections}>
+      {/* Keyed on the path so navigating away remounts the boundary and clears
+          a caught error — the rail stays usable while one screen is broken. */}
+      <ErrorBoundary key={route.path}>{renderRoute(route.path)}</ErrorBoundary>
+    </AdminLayout>
+  );
 }
 
 function renderRoute(path: string) {
@@ -163,24 +131,5 @@ function renderRoute(path: string) {
         </Button>
       }
     />
-  );
-}
-
-/** A 18×18 stroked glyph, sized and coloured by its parent. */
-function Glyph({ d }: { d: string }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 18 18"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d={d} />
-    </svg>
   );
 }

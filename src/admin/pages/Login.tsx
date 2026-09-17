@@ -30,7 +30,7 @@ export function LoginPage() {
     <div className="grid min-h-dvh place-items-center bg-base px-6 py-12">
       <div className="flex w-full max-w-sm flex-col gap-8">
         <div className="flex flex-col items-start gap-3">
-          <Wordmark className="h-6 w-auto text-brand-navy" />
+          <Wordmark className="h-6 w-auto text-accent" />
           <p className="eyebrow text-muted">Dashboard</p>
         </div>
 

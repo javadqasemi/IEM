@@ -117,7 +117,7 @@ export function DataTable<T>({
                   checked={allSelected}
                   onChange={toggleAll}
                   aria-label="Alle auswählen"
-                  className="h-4 w-4 cursor-pointer rounded border-line-strong text-brand-navy focus:ring-2 focus:ring-brand-navy"
+                  className="h-4 w-4 cursor-pointer rounded border-line-strong text-accent focus:ring-2 focus:ring-accent"
                 />
               </th>
             ) : null}
@@ -170,7 +170,7 @@ export function DataTable<T>({
                 className={cn(
                   "border-b border-line last:border-0 transition-colors",
                   onRowClick && "cursor-pointer hover:bg-surface-2/60",
-                  selectable && selection!.has(key) && "bg-brand-navy/[0.04]",
+                  selectable && selection!.has(key) && "bg-accent/[0.04]",
                 )}
               >
                 {selectable ? (
@@ -180,7 +180,7 @@ export function DataTable<T>({
                       checked={selection!.has(key)}
                       onChange={() => toggleOne(key)}
                       aria-label="Zeile auswählen"
-                      className="h-4 w-4 cursor-pointer rounded border-line-strong text-brand-navy focus:ring-2 focus:ring-brand-navy"
+                      className="h-4 w-4 cursor-pointer rounded border-line-strong text-accent focus:ring-2 focus:ring-accent"
                     />
                   </td>
                 ) : null}
@@ -271,7 +271,7 @@ export function KpiCard({
 }) {
   const toneText: Record<BadgeTone, string> = {
     neutral: "text-ink",
-    navy: "text-brand-navy",
+    navy: "text-accent",
     gold: "text-disc-power",
     bronze: "text-brand-bronze",
     energy: "text-disc-energy",

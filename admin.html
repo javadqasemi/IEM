@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#003882" />
     <!--
       The dashboard is a private tool, not a page anyone should find. The site
@@ -11,6 +11,41 @@
     -->
     <meta name="robots" content="noindex, nofollow" />
     <title>IEM Dashboard</title>
+
+    <!--
+      Sets the theme before the first paint.
+
+      This has to be a blocking inline script in `<head>`, and that is the
+      whole reason it is not in `main.tsx`: the module bundle is deferred, so
+      React does not run until after the document has painted. Setting the
+      attribute there means a reader who chose dark gets a white screen first
+      and then a dark one — the flash is worst on the slowest machine, which is
+      the one least able to afford it.
+
+      It is deliberately duplicated logic rather than an import: `useTheme`
+      owns the same three cases (`dark`, `light`, `system`), and this is the
+      one place where correctness has to beat not repeating oneself. The two
+      agree on the storage key and on what an absent value means; `theme.ts`
+      exports both as constants and its own test pins the key so the pair
+      cannot drift apart silently.
+
+      Wrapped in try/catch because `localStorage` throws outright in a private
+      window with site data blocked, and a theme preference is not worth a
+      blank dashboard.
+    -->
+    <script>
+      (function () {
+        try {
+          var choice = localStorage.getItem("iem.admin.theme") || "system";
+          var dark =
+            choice === "dark" ||
+            (choice === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.setAttribute("data-theme", "dark");
+        } catch (e) {
+          /* No stored preference reachable: the light default is already correct. */
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

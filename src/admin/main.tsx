@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
+import { RootErrorBoundary } from "./ui/ErrorBoundary";
 import { ToastProvider } from "./ui/toast";
 import "./admin.css";
 
@@ -16,13 +17,19 @@ import "./admin.css";
  * `ToastProvider` wraps `AuthProvider`, not the other way round: the auth
  * layer has no use for toasts, but a failure surfaced during session restore
  * needs somewhere to go.
+ *
+ * `RootErrorBoundary` is outermost so that a throw in the providers themselves
+ * still reaches a screen. Route-level errors are caught closer in, inside the
+ * shell — see `App.tsx`.
  */
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ToastProvider>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </ToastProvider>
+    <RootErrorBoundary>
+      <ToastProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ToastProvider>
+    </RootErrorBoundary>
   </StrictMode>,
 );

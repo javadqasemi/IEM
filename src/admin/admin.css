@@ -18,8 +18,224 @@
 @tailwind utilities;
 
 @layer base {
+  /* ====================================================================
+     Tokens
+     ====================================================================
+
+     **This block is the single source of the dashboard's palette.** The
+     Tailwind config maps every colour name to one of these variables as
+     `rgb(var(--c-x) / <alpha-value>)`, so `bg-surface`, `text-ink` and
+     `bg-brand-navy/[0.08]` all resolve through here and a theme is a
+     different set of numbers rather than a different set of classes.
+
+     Values are **space-separated RGB channels, not hex**. That is what lets
+     the alpha modifier keep working: `text-muted/70` compiles to
+     `rgb(var(--c-muted) / 0.7)`, and a hex variable cannot be given an alpha
+     that way. The dashboard uses those modifiers in about forty places, so
+     the channel form is not a preference.
+
+     `src/admin/theme.contrast.test.ts` parses this file and asserts WCAG AA
+     on the pairs listed there. If you change a number here, run the tests —
+     the point of putting the palette in one block is that its contrast can be
+     checked mechanically instead of by eye.
+
+     **The public site is deliberately untouched.** Its palette stays as
+     literal hex in `tailwind.config.ts`; it is a marketing page with one
+     appearance and no theme switch, and re-basing it would change the
+     stylesheet every visitor downloads for no benefit. The admin config
+     imports the base theme and overrides only these names. */
+
   :root {
     color-scheme: light;
+
+    /* ---- Neutrals ---------------------------------------------------- */
+    --c-base: 246 248 251; /* #F6F8FB — the page ground */
+    --c-surface: 255 255 255; /* #FFFFFF — cards, inputs, tables */
+    --c-surface-2: 237 241 247; /* #EDF1F7 — the step below a card */
+    --c-ink: 11 27 51; /* #0B1B33 — body text */
+    --c-muted: 86 101 126; /* #56657E — secondary text */
+    --c-line: 220 227 236; /* #DCE3EC — hairlines */
+    --c-line-strong: 191 202 217; /* #BFCAD9 — hairlines that must be seen */
+
+    /**
+     * The resting border of a text input, select or textarea.
+     *
+     * Its own token because it is the one border WCAG has a number for.
+     * 1.4.11 asks 3:1 for the visual boundary of a user-interface component,
+     * and `line-strong` on white is **1.66:1** — so the inputs were below the
+     * bar before any of this, and the contrast test now says so rather than
+     * leaving it to be noticed.
+     *
+     * Split out rather than darkening `line-strong` itself, which would have
+     * been the smaller diff and the wrong change: that token is also every
+     * table hairline, every divider and the empty-state glyph, none of which
+     * is a component boundary and all of which are meant to recede. A form
+     * control has to be findable; a rule between two rows does not.
+     */
+    /* Tuned against the *page ground*, not against white. An input sits on a
+       card (#FFFFFF) on most screens and directly on the ground (#F6F8FB) in a
+       toolbar, and the ground is the harder of the two — the first value tried
+       cleared 3.05:1 on white and 2.86:1 on the ground, which the test caught. */
+    --c-field-border: 127 142 164; /* #7F8EA4 — 3.33:1 on white, 3.10:1 on the ground */
+
+    /* Text that sits on a dark ground: the rail, a primary button, the navy
+       call-out panel. Split out from `surface` because the two only looked
+       like the same colour — `surface` is a *background* that has to invert
+       with the theme, while this is a *foreground* on something that stays
+       dark in both themes, so inverting it would have put dark text on the
+       navy rail. All twenty call sites were `text-surface` and are now this. */
+    --c-inverse: 255 255 255;
+
+    /* ---- Brand ------------------------------------------------------
+       Identity colours, and the one place they are allowed to differ per
+       theme. Navy at #003882 is a button on white and invisible on a dark
+       ground, so the dark theme lightens it while holding the hue. The gold
+       family already worked this way before any of this — `bronze` and
+       `sand` exist because plain gold fails AA depending on what it sits on
+       (see README) — so a per-theme value is the same idea applied to navy. */
+    /**
+     * Navy as a *background*: the primary button, the call-out panel, the
+     * active lens in the top bar. `--c-inverse` is what sits on it.
+     *
+     * Kept separate from `--c-accent` below, and the dark theme is why. In the
+     * light theme one navy does both jobs — dark text on a white card reads,
+     * and white text on a navy button reads. In the dark theme those pull
+     * apart: a colour light enough to be text on a dark card is too light to
+     * carry white text as a button. Two tokens, because it is two jobs.
+     */
+    --c-brand-navy: 0 56 130; /* #003882 */
+    --c-brand-blue: 44 86 145; /* #2C5691 */
+
+    /**
+     * Navy as a *foreground*: emphasised text, KPI figures, focus rings, the
+     * active-row marker. Identical to `--c-brand-navy` in this theme, which is
+     * why the split costs the light appearance nothing.
+     */
+    --c-accent: 0 56 130; /* #003882 */
+    --c-brand-gold: 144 129 78; /* #90814E */
+    --c-brand-bronze: 122 108 63; /* #7A6C3F */
+    --c-brand-sand: 203 184 127; /* #CBB87F */
+
+    /* ---- Discipline hues -------------------------------------------- */
+    --c-disc-heat: 162 84 42; /* #A2542A */
+    --c-disc-air: 44 86 145; /* #2C5691 */
+    --c-disc-water: 47 125 119; /* #2F7D77 */
+    --c-disc-power: 122 108 63; /* #7A6C3F */
+    --c-disc-energy: 79 122 67; /* #4F7A43 */
+    --c-disc-model: 0 56 130; /* #003882 */
+
+    /* ---- The rail ---------------------------------------------------- */
+    --c-admin-rail: 0 34 79; /* #00224F */
+    --c-admin-rail-2: 0 46 105; /* #002E69 */
+
+    /* ---- Liquid glass -------------------------------------------------
+       One place for the material's constants, because the surfaces below
+       must agree or they stop reading as the same substance.
+
+       The reference is instrument glass — the cover of a measuring device —
+       not the milky frost of a phone's control centre. That means a high
+       blur paired with *raised* saturation (the colour behind stays vivid
+       rather than washing to grey), a hard specular line on the top edge,
+       and very little bloom. IEM builds Messtechnik; the chrome should feel
+       like something calibrated. */
+    --glass-blur: 22px;
+    --glass-saturate: 170%;
+    /* The specular edge: the hairline that makes a pane look like it has a
+       thickness rather than being a coloured rectangle. */
+    --glass-edge-light: rgba(255, 255, 255, 0.85);
+    /* The two panes, as gradients, so the dark theme can restate them
+       without the rules below being duplicated. */
+    --glass-bar-fill: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(246, 248, 251, 0.72));
+    --glass-raised-fill: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.84));
+    --glass-bar-hairline: rgba(220, 227, 236, 0.9);
+    --glass-bar-shadow: rgba(11, 27, 51, 0.35);
+    --glass-raised-ring: rgba(220, 227, 236, 0.85);
+    --glass-raised-shadow: rgba(11, 27, 51, 0.32);
+    --glass-opaque-bar: #f6f8fb;
+    --glass-opaque-raised: #ffffff;
+    --focus-ring: #003882;
+    --selection: rgba(0, 56, 130, 0.16);
+    --scrollbar-thumb: #bfcad9;
+  }
+
+  /* ====================================================================
+     The dark theme
+     ====================================================================
+
+     Set by `data-theme="dark"` on `<html>`, written before first paint by
+     the inline script in `admin.html` — see the comment there. An attribute
+     rather than a media query alone, because the spec asks for an explicit
+     choice in Settings and a reader who picks "light" on a machine set to
+     dark has to get light.
+
+     The neutrals are navy-tinted rather than neutral grey, keyed to the same
+     hue as the logo, so the dark theme reads as the same product rather than
+     as a generic dark mode. The ground is *darker* than the cards, which is
+     the inverse of the light theme's relationship and the right way round:
+     in the dark, a raised surface is lighter.
+
+     Every foreground here is checked against its background by
+     `theme.contrast.test.ts`. The brand hues are lifted — navy especially —
+     because the light-theme values were chosen against white and none of
+     them clears AA against a dark ground. */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --c-base: 9 14 24; /* #090E18 — the page ground, below the cards */
+    --c-surface: 19 27 42; /* #131B2A — cards, inputs, tables */
+    --c-surface-2: 28 39 57; /* #1C2739 — the step above a card */
+    --c-ink: 231 237 246; /* #E7EDF6 — body text */
+    --c-muted: 154 168 191; /* #9AA8BF — secondary text */
+    --c-line: 39 51 72; /* #273348 — hairlines */
+    --c-line-strong: 62 79 108; /* #3E4F6C */
+    --c-field-border: 86 105 138; /* #56698A — 3.11:1 on the dark card */
+
+    /* Still white: the rail and the primary button stay dark in this theme
+       too, so this foreground does not invert with everything else. */
+    --c-inverse: 255 255 255;
+
+    /* Lifted enough that white reads on it as a button, and no further — this
+       is a background, not a foreground. */
+    --c-brand-navy: 47 99 181; /* #2F63B5 */
+    --c-brand-blue: 138 176 232; /* #8AB0E8 — interactive text */
+    /* Lifted much further, because here it *is* the foreground. `brand-navy`
+       as text on the dark card measures 2.93:1 and fails; this is the value
+       that does not. */
+    --c-accent: 138 176 232; /* #8AB0E8 */
+    --c-brand-gold: 185 165 103; /* #B9A567 */
+    --c-brand-bronze: 205 179 122; /* #CDB37A — the "careful" tone */
+    --c-brand-sand: 219 203 155; /* #DBCB9B */
+
+    --c-disc-heat: 217 138 94; /* #D98A5E */
+    --c-disc-air: 138 176 232; /* #8AB0E8 */
+    --c-disc-water: 109 195 187; /* #6DC3BB */
+    --c-disc-power: 197 176 113; /* #C5B071 */
+    --c-disc-energy: 142 196 126; /* #8EC47E */
+    --c-disc-model: 138 176 232; /* #8AB0E8 */
+
+    /* The rail sits *below* the page ground here rather than above it. In the
+       light theme it is the only dark plane and reads as a distinct object;
+       in the dark theme everything is dark, so it separates by being the
+       deepest surface on screen. */
+    --c-admin-rail: 4 8 15; /* #04080F */
+    --c-admin-rail-2: 13 22 38; /* #0D1626 */
+
+    /* Dark glass: the specular edge drops to a faint white and the fills
+       become dark and more opaque. Translucent dark over dark content needs
+       more body than translucent white over light content, or the text on the
+       bar competes with whatever scrolls beneath it. */
+    --glass-edge-light: rgba(255, 255, 255, 0.1);
+    --glass-bar-fill: linear-gradient(180deg, rgba(23, 32, 49, 0.86), rgba(14, 21, 34, 0.78));
+    --glass-raised-fill: linear-gradient(180deg, rgba(30, 41, 61, 0.96), rgba(23, 32, 49, 0.92));
+    --glass-bar-hairline: rgba(39, 51, 72, 0.9);
+    --glass-bar-shadow: rgba(0, 0, 0, 0.6);
+    --glass-raised-ring: rgba(62, 79, 108, 0.7);
+    --glass-raised-shadow: rgba(0, 0, 0, 0.55);
+    --glass-opaque-bar: #0e1522;
+    --glass-opaque-raised: #1e293d;
+    --focus-ring: #8ab0e8;
+    --selection: rgba(138, 176, 232, 0.24);
+    --scrollbar-thumb: #3e4f6c;
   }
 
   html {
@@ -34,14 +250,19 @@
      `@apply ring-brand-navy/40`, because `@apply` with an opacity modifier on
      a custom colour resolves inconsistently — the dev server throws while the
      build passes, and a failing stylesheet renders a blank page. This has
-     bitten the site twice; see docs/ARCHITECTURE.md. */
+     bitten the site twice; see docs/ARCHITECTURE.md.
+
+     Navy on white is invisible on the dark theme's ground, so the ring is a
+     variable like everything else. A focus ring nobody can see is the one
+     regression a theme must not introduce: it is the only thing a keyboard
+     user has. */
   :focus-visible {
-    outline: 2px solid #003882;
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
 
   ::selection {
-    background-color: rgba(0, 56, 130, 0.16);
+    background-color: var(--selection);
   }
 
   /* Tabular figures wherever a number is meant to line up in a column. */
@@ -53,14 +274,14 @@
      one cutting through the layout. */
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: #bfcad9 transparent;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
   .scroll-thin::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   .scroll-thin::-webkit-scrollbar-thumb {
-    background-color: #bfcad9;
+    background-color: var(--scrollbar-thumb);
     border: 3px solid transparent;
     border-radius: 999px;
     background-clip: content-box;
@@ -84,10 +305,15 @@
 
   /* Every text input, select and textarea. One class so a change to the focus
      ring or the disabled state cannot apply to three of the four. */
+  /* `ring-field` rather than `ring-line`: the resting border of a form control
+     is the one boundary WCAG 1.4.11 puts a number on, and `line` was well
+     below it. `focus:ring-accent` rather than `brand-navy` for the same reason
+     in the other theme — navy-as-background is too dark to be seen as a ring
+     on a dark card. */
   .field-input {
-    @apply w-full rounded-md bg-surface px-3 py-2 text-[14px] text-ink ring-1 ring-line
-           transition-colors placeholder:text-muted/60 hover:ring-line-strong
-           focus:outline-none focus:ring-2 focus:ring-brand-navy
+    @apply w-full rounded-md bg-surface px-3 py-2 text-[14px] text-ink ring-1 ring-field
+           transition-colors placeholder:text-muted/60 hover:ring-accent/60
+           focus:outline-none focus:ring-2 focus:ring-accent
            disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-muted;
   }
 
@@ -106,6 +332,126 @@
   .skip-link:focus {
     @apply not-sr-only fixed left-4 top-4 z-[100] rounded-md bg-brand-navy px-4 py-2
            text-surface shadow-card;
+  }
+
+  /* ================================================================== */
+  /* Liquid glass                                                        */
+  /* ================================================================== */
+
+  /*
+   * Two panes and a lens, all plain CSS — and all of them in the top bar.
+   *
+   * The effect is confined to the one place it is true: the bar is sticky and
+   * the page really does pass beneath it. Spreading the same material over the
+   * rail, the cards and the modals would make it the dashboard's wallpaper
+   * rather than a description of what is in front of what.
+   *
+   * Plain CSS rather than `@apply`, and not only out of the usual caution
+   * about opacity modifiers on custom colours: `backdrop-filter`, layered
+   * `box-shadow` and gradient fills have no utility spelling that stays
+   * readable, and the numbers have to be compared against each other to be
+   * tuned. Written out, the surfaces can be read as one material.
+   *
+   * These live in the `components` layer, which Tailwind emits *before*
+   * `utilities` — so a `bg-*` utility left on the same element would win and
+   * flatten the pane. Every call site had its `bg-` removed when it gained a
+   * `glass-` class; do the same when adding another.
+   */
+
+  /*
+   * The sticky top bar. The one pane with something real behind it — the page
+   * scrolls under it and stays visible through it.
+   *
+   * The rail is deliberately *not* glass. It sits beside the content on a wide
+   * screen rather than over it, so there is nothing moving behind it for a
+   * blur to bend, and dark glass over a flat ground is an expensive way to
+   * draw a tint. Keeping it solid also leaves the bar as the only translucent
+   * thing on screen, which is what makes the effect read as deliberate.
+   *
+   * The bottom hairline is part of the material, which is why the call site
+   * carries no `border-b`.
+   */
+  .glass-bar {
+    background: var(--glass-bar-fill);
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    box-shadow:
+      inset 0 1px 0 var(--glass-edge-light),
+      0 1px 0 var(--glass-bar-hairline),
+      0 10px 26px -18px var(--glass-bar-shadow);
+  }
+
+  /* Anything that floats: the account panel, and any menu that follows it.
+     Denser and more blurred than the bar, because it has to be readable over
+     arbitrary content rather than over the page's own ground. */
+  .glass-raised {
+    background: var(--glass-raised-fill);
+    backdrop-filter: blur(28px) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(28px) saturate(var(--glass-saturate));
+    box-shadow:
+      inset 0 1px 0 var(--glass-edge-light),
+      0 0 0 1px var(--glass-raised-ring),
+      0 20px 44px -18px var(--glass-raised-shadow);
+  }
+
+  /*
+   * The lens: the one element that is *in front of* the glass rather than
+   * being glass. The active section pill.
+   *
+   * Everything else in this system recedes; the lens is the single thing
+   * that catches the light, which is what makes "you are here" legible at a
+   * glance in a bar of otherwise transparent pills.
+   */
+  /* Built from the navy token rather than from two literals, so the lens
+     lifts with the rest of the brand in the dark theme instead of staying a
+     near-black pill on a near-black bar. */
+  .glass-lens {
+    background: linear-gradient(
+      180deg,
+      rgb(var(--c-brand-navy) / 0.94),
+      rgb(var(--c-admin-rail-2) / 0.97)
+    );
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.24),
+      0 2px 10px -3px rgb(var(--c-admin-rail) / 0.5);
+  }
+
+  /*
+   * Fallbacks, in two flavours.
+   *
+   * Without `backdrop-filter` there is no blur, so translucency would put raw
+   * page content through the chrome — every pane goes opaque instead. And a
+   * reader who has asked their OS to reduce transparency gets the same
+   * treatment, because that preference is usually about exactly this kind of
+   * text-over-texture. Both keep the specular edge: it is what the shapes are
+   * built from, and it costs nothing in legibility.
+   */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass-bar {
+      background: var(--glass-opaque-bar);
+    }
+    .glass-raised {
+      background: var(--glass-opaque-raised);
+    }
+    .glass-lens {
+      background: rgb(var(--c-brand-navy));
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .glass-bar {
+      background: var(--glass-opaque-bar);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .glass-raised {
+      background: var(--glass-opaque-raised);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .glass-lens {
+      background: rgb(var(--c-brand-navy));
+    }
   }
 }
 

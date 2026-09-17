@@ -1,0 +1,23 @@
+{
+  /**
+   * The test program.
+   *
+   * Separate from `tsconfig.json` so the application keeps browser types only.
+   * Two of these tests deliberately read files off disk — `theme.contrast.test.ts`
+   * parses the palette out of `admin.css` rather than restating it, and
+   * `theme.test.ts` checks `admin.html`'s inline script against the constants
+   * it has to duplicate — and both need `node:fs`.
+   *
+   * Letting the application share those types would mean `fs` and `process`
+   * typecheck inside a React component: they resolve at compile time and are
+   * absent at runtime, so the mistake ships as a blank page rather than as an
+   * error.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "vitest.config.ts"],
+  "exclude": []
+}
