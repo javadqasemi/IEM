@@ -47,10 +47,21 @@ export const CurrentUser = createParamDecorator(
   },
 );
 
-/** The caller's IP, honouring one proxy hop. */
+/**
+ * The caller's IP.
+ *
+ * `req.ip` alone, deliberately. This used to read `X-Forwarded-For` directly and
+ * take its first entry, which meant any client could choose the address that
+ * ended up in the audit log — on failed sign-ins and replay detections above
+ * all, which are the rows the log exists to answer questions about.
+ *
+ * Express derives `req.ip` from that header only when `trust proxy` is set, and
+ * then correctly: the left-most address that is not itself a trusted hop.
+ * `configureProxyTrust` in `main.ts` sets it from `TRUST_PROXY`. Reading `req.ip`
+ * here rather than the header keeps this decorator and the rate limiter — which
+ * has always used `req.ip` — on the same answer.
+ */
 export const ClientIp = createParamDecorator((_: unknown, ctx: ExecutionContext) => {
   const req = ctx.switchToHttp().getRequest<Request>();
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
   return req.ip ?? null;
 });

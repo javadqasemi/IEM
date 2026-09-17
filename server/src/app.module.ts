@@ -5,6 +5,7 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 
 import { CommonModule } from "./common/common.module";
+import { SharedThrottlerStorage } from "./common/throttler.storage";
 import { AllExceptionsFilter, EnvelopeInterceptor } from "./common/http";
 import { JwtAuthGuard, PermissionsGuard } from "./auth/guards";
 
@@ -43,11 +44,26 @@ import { ScheduledTasks } from "./tasks/scheduled.tasks";
   imports: [
     ConfigModule.forRoot({ isGlobal: true, cache: true }),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([
-      // The default ceiling. Individual routes tighten it — sign-in, password
-      // reset and the public application form all carry their own `@Throttle`.
-      { name: "default", ttl: 60_000, limit: 300 },
-    ]),
+    /**
+     * `forRootAsync` only so the storage can be injected.
+     *
+     * With the default in-memory store the limit is per **process**: four PM2
+     * workers turn the ten sign-in attempts a minute below into forty, silently.
+     * `SharedThrottlerStorage` puts the counters in Redis when `REDIS_URL` is
+     * set and falls back to the same in-memory behaviour when it is not — so a
+     * developer machine is unchanged and a clustered deployment gets the number
+     * it configured.
+     */
+    ThrottlerModule.forRootAsync({
+      imports: [CommonModule],
+      inject: [SharedThrottlerStorage],
+      useFactory: (storage: SharedThrottlerStorage) => ({
+        // The default ceiling. Individual routes tighten it — sign-in, password
+        // reset and the public application form all carry their own `@Throttle`.
+        throttlers: [{ name: "default", ttl: 60_000, limit: 300 }],
+        storage,
+      }),
+    }),
     CommonModule,
     MailModule,
     AuthModule,

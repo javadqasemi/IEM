@@ -16,12 +16,20 @@ import {
   type AuthedRequest,
 } from "../common/decorators";
 
-/** What the access token carries. Kept small — it is sent on every request. */
+/**
+ * What the access token carries. Kept small — it is sent on every request.
+ *
+ * There is deliberately **no token version claim**. One used to be declared here
+ * as "bumped when a user's roles change", signed as a constant `1`, and read by
+ * nothing — a claim that described a mechanism the system did not have. It also
+ * described one it does not need: `canActivate` below resolves roles and
+ * permissions from the database on every request, so a role change already takes
+ * effect on the next call rather than at the next token issue. Re-adding a
+ * version claim would only make sense alongside caching that lookup.
+ */
 export type AccessTokenPayload = {
   sub: string;
   email: string;
-  /** Token version, bumped when a user's roles change. See below. */
-  v: number;
 };
 
 /**
@@ -150,11 +158,22 @@ export class PermissionsGuard implements CanActivate {
   }
 }
 
+/**
+ * The access token, from the `Authorization` header and nowhere else.
+ *
+ * This used to fall back to an `access_token` cookie, described as something
+ * "the dashboard can also send". Nothing has ever set that cookie — the only one
+ * issued is `refresh_token`, scoped to `/api/v1/auth` — so the fallback was dead,
+ * and it was load-bearing in the wrong way: two download links were written on
+ * the belief that a plain `<a href>` would authenticate through it, and both
+ * returned 401. They now fetch with this header and save a blob instead.
+ *
+ * Keeping it header-only is also what lets every state-changing route stay free
+ * of CSRF tokens. A credential the browser does not attach automatically cannot
+ * be used by a cross-site form post.
+ */
 function bearer(req: AuthedRequest): string | null {
   const header = req.headers.authorization;
   if (header?.startsWith("Bearer ")) return header.slice(7).trim() || null;
-  // The dashboard can also send the access token as a same-site cookie, which
-  // keeps it out of JavaScript's reach on that path.
-  const cookie = (req as unknown as { cookies?: Record<string, string> }).cookies?.access_token;
-  return cookie || null;
+  return null;
 }

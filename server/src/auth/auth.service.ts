@@ -164,8 +164,10 @@ export class AuthService {
 
   private async issue(user: User, ctx: Ctx): Promise<TokenPair> {
     const ttl = this.config.get<string>("JWT_ACCESS_TTL") ?? "15m";
+    // No version claim: see `AccessTokenPayload` in `guards.ts` for why one was
+    // removed rather than implemented.
     const accessToken = await this.jwt.signAsync(
-      { sub: user.id, email: user.email, v: 1 },
+      { sub: user.id, email: user.email },
       {
         secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
         // See the note in `auth.module.ts`: `jsonwebtoken` types `expiresIn`

@@ -5,7 +5,9 @@ import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import { json, urlencoded } from "express";
+import { json, static as expressStatic, urlencoded } from "express";
+import type { NextFunction, Request, Response } from "express";
+import { resolve } from "node:path";
 import { AppModule } from "./app.module";
 import { PrismaService } from "./common/prisma.service";
 
@@ -16,6 +18,7 @@ async function bootstrap() {
 
   assertSecretsAreReal(config, logger);
   assertClusteringIsSafe(config, logger);
+  configureProxyTrust(app, config, logger);
 
   /**
    * The API is versioned in the path rather than by header. It is the version
@@ -50,6 +53,116 @@ async function bootstrap() {
   // own, larger limit.
   app.use(json({ limit: "2mb" }));
   app.use(urlencoded({ extended: true, limit: "2mb" }));
+
+  /**
+   * Uploaded media, served from disk.
+   *
+   * This was missing, and everything around it assumed it was here:
+   * `MEDIA_PUBLIC_PATH` exists, `LocalStorageAdapter.url()` hands out
+   * `/media/<key>`, the snapshot stores those paths, and the
+   * `crossOriginResourcePolicy` note above says in as many words that media is
+   * served from this process. Nothing ever mounted it, so every upload since
+   * the beginning wrote correct bytes to disk, recorded a correct URL, and
+   * produced a dead link. It is not visible from any one file, which is why it
+   * survived: the upload succeeds, the save succeeds, the publish succeeds.
+   *
+   * **The gate below is not optional.** `applications.service.ts` says its
+   * dossiers are "deliberately *not* under the media root", but it passes the
+   * key `bewerbungen/<year>/<hash>.<ext>` to this same adapter, whose root
+   * *is* `MEDIA_ROOT` — so they are sitting in `var/media` right now. Mounting
+   * the root unguarded would publish every applicant's CV to anyone who can
+   * guess a URL. The dossiers keep their one legitimate route, the
+   * permission-checked download in `ApplicationsController`.
+   *
+   * It is an allowlist rather than a `bewerbungen/` denial, and that is the
+   * whole point. A denial has to be written against `req.path`, which is *not*
+   * percent-decoded, while `express.static` decodes before it opens a file —
+   * so `/media/%62ewerbungen/…` and `/media/bewerbungen%2f2026%2f…` both walk
+   * straight past a prefix test and serve the PDF. Both were verified to leak
+   * before this replaced it. Matching the one shape that is legitimate has no
+   * such gap: `MediaService.upload` writes exactly
+   * `<year>/<slug>-<hash>.<ext>` and nothing else — media folders are a
+   * database relation, not a path — so anything that is not two segments of
+   * that shape is not a media file, whatever it is.
+   *
+   * Registered before the static handler so it runs first, and mounted with
+   * plain express rather than `useStaticAssets` so the order is the order
+   * written here rather than whenever Nest chooses to apply it.
+   */
+  const mediaRoot = resolve(config.get<string>("MEDIA_ROOT") ?? "./var/media");
+  const mediaPath = config.get<string>("MEDIA_PUBLIC_PATH") ?? "/media";
+
+  /** `<year>/<name>.<ext>`, the only shape `MediaService` ever writes. The
+      leading character cannot be a dot, which rules out `..` and dotfiles. */
+  const PUBLIC_MEDIA_KEY = /^\/\d{4}\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+
+  app.use(mediaPath, (req: Request, res: Response, next: NextFunction) => {
+    let path: string;
+    try {
+      // Decode to the same string `express.static` will resolve, so the test
+      // and the file open agree on what was asked for.
+      path = decodeURIComponent(req.path);
+    } catch {
+      // A malformed escape never names a real key.
+      res.status(400).end();
+      return;
+    }
+    if (!PUBLIC_MEDIA_KEY.test(path)) {
+      res.status(404).end();
+      return;
+    }
+    next();
+  });
+  /**
+   * Neutralises script in a served file, whatever the file turns out to be.
+   *
+   * `image/svg+xml` is an allowed upload type and SVG is XML, not a binary
+   * format with a magic number — so it is admitted on the declared type plus an
+   * `<svg>`/`<?xml` root check (`MediaService.sniff`), and neither of those
+   * stops `<script>` inside it. This process also runs with helmet's
+   * `contentSecurityPolicy` disabled, on the reasoning that it "serves JSON and
+   * file downloads, never HTML". Mounting media here made that untrue.
+   *
+   * The chain that closed: a user holding `media.upload` uploads a scripted
+   * SVG; an administrator opens it in a tab; the script runs **on this origin**,
+   * where the refresh cookie lives at `path=/api/v1/auth`; a same-origin
+   * `fetch("/api/v1/auth/refresh")` matches that path, mints an access token and
+   * acts as that administrator.
+   *
+   * `sandbox` with no allow-tokens is the load-bearing part: it puts the
+   * document in a unique opaque origin, so even script that somehow ran could
+   * not reach this origin's cookies. `default-src 'none'` stops it running in
+   * the first place. Both are inert for a raster image — there is no script
+   * context in a JPEG — so this applies to every media response rather than
+   * being conditional on a type, which is one fewer thing to get wrong when a
+   * format is added to `ALLOWED`.
+   *
+   * `nosniff` stays because the two belong together: without it a browser may
+   * decide a file is HTML despite the declared type, and re-enter exactly the
+   * case above.
+   */
+  app.use(mediaPath, (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    next();
+  });
+  app.use(
+    mediaPath,
+    expressStatic(mediaRoot, {
+      index: false,
+      dotfiles: "deny",
+      // A missing file ends here with a 404 instead of falling through to the
+      // API router, where it would come back as a JSON "route not found" for
+      // something that is plainly an image request.
+      fallthrough: false,
+      // Deliberately no long `max-age`: `MediaService.replace` overwrites a
+      // key in place (keeping the previous bytes beside it as `-v1`), so a
+      // media URL is *not* immutable. `express.static` still sends ETag and
+      // Last-Modified, so repeat loads are conditional requests rather than
+      // full transfers.
+    }),
+  );
+  logger.log(`Medien: ${mediaPath} → ${mediaRoot}`);
 
   /**
    * CORS.
@@ -155,6 +268,45 @@ function assertSecretsAreReal(config: ConfigService, logger: Logger): void {
   if (production && config.get("CORS_ORIGINS")?.includes("localhost")) {
     logger.warn("CORS_ORIGINS enthält localhost, obwohl NODE_ENV=production gesetzt ist.");
   }
+}
+
+/**
+ * Decides whether `X-Forwarded-For` may be believed.
+ *
+ * It used to be believed unconditionally: `ClientIp` read the header and took
+ * its first entry, with no proxy configured. Any client can send that header, so
+ * every IP in the audit log — including the ones on `auth.login_failed` and
+ * `auth.refresh_reuse_detected`, which is precisely what the log is read for
+ * after an incident — was attacker-chosen. Nothing failed; the values were just
+ * fiction.
+ *
+ * Express already solves this properly, so the fix is to let it: with
+ * `trust proxy` set, `req.ip` is the left-most address that is *not* a trusted
+ * hop, and with it unset `req.ip` is the socket address and the header is
+ * ignored. `ClientIp` now reads `req.ip` alone, which means this one setting
+ * decides it for the audit log and the throttler together rather than the two
+ * disagreeing.
+ *
+ * `TRUST_PROXY` takes what Express takes: a hop count (`1` behind one reverse
+ * proxy), a comma-separated list of trusted addresses or CIDR ranges, or one of
+ * `loopback` / `linklocal` / `uniquelocal`. Unset means "no proxy", which is the
+ * right default — believing the header without one is the bug.
+ */
+function configureProxyTrust(
+  app: { getHttpAdapter(): { getInstance(): { set(k: string, v: unknown): void } } },
+  config: ConfigService,
+  logger: Logger,
+): void {
+  const raw = (config.get<string>("TRUST_PROXY") ?? "").trim();
+  if (!raw) {
+    logger.log("Kein Proxy konfiguriert — X-Forwarded-For wird ignoriert (korrekt).");
+    return;
+  }
+
+  const hops = Number(raw);
+  const value: unknown = Number.isInteger(hops) && hops >= 0 ? hops : raw.split(",").map((s) => s.trim());
+  app.getHttpAdapter().getInstance().set("trust proxy", value);
+  logger.log(`TRUST_PROXY=${raw} — X-Forwarded-For wird ausgewertet.`);
 }
 
 /**
