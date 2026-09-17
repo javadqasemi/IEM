@@ -10,6 +10,16 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
 
+    "// checks": "The gates. `verify` is what to run before a commit and what CI should run.",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "// format": "Prettier is configured but the existing tree is NOT formatted, and `format` is deliberately left out of `verify`. Running it today rewrites 74 files: it would bury every future diff, destroy `git blame` on a codebase whose comments are its main documentation, and reflow hand-aligned blocks that were set that way on purpose. Use it on a file you are already rewriting, not across the repo. Reformatting everything is a decision to take once, on its own commit, with nothing else in it.",
+    "format": "prettier --write",
+    "format:check": "prettier --check .",
+    "// verify": "Both halves: the site and the API each have their own typecheck and test run.",
+    "verify": "npm run typecheck && npm run lint && npm test && npm --prefix server run typecheck && npm --prefix server run test",
     "// server": "The API lives in server/ and has its own package.json and node_modules.",
     "server:install": "npm --prefix server install",
     "server:dev": "npm --prefix server run dev",
@@ -17,7 +27,6 @@
     "server:seed": "npm --prefix server run seed",
     "db:migrate": "npm --prefix server run prisma:migrate",
     "db:studio": "npm --prefix server run prisma:studio",
-
     "// setup": "One-time: install the API, create the schema, fill it from the site's own content.",
     "setup": "npm run server:install && npm run db:migrate && npm run server:seed"
   },
@@ -28,14 +37,20 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
-    "@types/three": "^0.185.4",
+    "@eslint/js": "^9.39.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "postcss": "^8.4.49",
+    "prettier": "^3.9.7",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+    "typescript-eslint": "^8.70.0",
+    "vite": "^6.0.3",
+    "vitest": "^3.2.7"
   }
 }

@@ -14,7 +14,9 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.seed.json"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.seed.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "//overrides": [
     "Transitive packages our direct dependencies pin to versions with published",
@@ -70,6 +72,7 @@
     "@types/pg": "^8.23.1",
     "prisma": "^7.10.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   }
 }

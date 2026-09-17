@@ -55,10 +55,17 @@ comes up as the real website rather than as an empty CMS. The seed creates one S
 `SEED_ADMIN_PASSWORD` left blank it has no password and is activated through "Passwort vergessen",
 which is the right default for anything that is not a throwaway local database.
 
-There is no test runner, linter or formatter configured. `npm run build` and
-`npm --prefix server run typecheck` are the automated checks, and they only catch type errors —
-see *Verifying a change* in `docs/ARCHITECTURE.md` for how the page itself is
-smoke-tested.
+```bash
+npm run verify    # typecheck + lint + test, both halves — run this before committing
+```
+
+Vitest and ESLint were added in September 2026. Prettier is configured but the existing tree is
+deliberately **not** formatted and the check is not part of `verify`: running it rewrites 74 files,
+which would bury every future diff and destroy `git blame` on a codebase whose comments carry most
+of its documentation. Lint is narrow — rules that catch bugs, with the React Compiler rules as
+warnings rather than errors, because they fire on patterns this code chose and commented. See
+*Verifying a change* in `docs/ARCHITECTURE.md` for the `react-dom/server` smoke test, which is still
+the strongest check available without a browser.
 
 The 3D model behind the hero and in the Ablauf section is generated out of the IFC models in `ifc/`
 by a Python toolchain in `cad/`. You don't need it to run or build the site — the generated files

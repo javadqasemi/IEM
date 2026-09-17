@@ -5,11 +5,11 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { Prisma, WorkflowState, type ContentEntry } from "@prisma/client";
+import { Prisma, WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { SettingsService } from "../settings/settings.service";
-import { CONTENT_TYPES, contentTypeByKey } from "./content-types";
+import { contentTypeByKey } from "./content-types";
 import { validateEntry } from "./content.validator";
 import {
   assertComplete,

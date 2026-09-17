@@ -254,8 +254,15 @@ async function download(path: string, options: RequestOptions & { fallbackName: 
   setTimeout(() => URL.revokeObjectURL(href), 0);
 }
 
-/** `attachment; filename="Lebenslauf%20M.pdf"` → `Lebenslauf M.pdf`. */
-function filenameFrom(header: string | null): string | null {
+/**
+ * `attachment; filename="Lebenslauf%20M.pdf"` → `Lebenslauf M.pdf`.
+ *
+ * Exported for its own test. The header is written by the server for a filename
+ * an *applicant* chose, so it is the one string here shaped by someone outside
+ * the organisation — umlauts, spaces and quotes all turn up, and getting it
+ * wrong means a dossier saved as `files` with no extension.
+ */
+export function filenameFrom(header: string | null): string | null {
   if (!header) return null;
   const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
   const plain = /filename="?([^";]+)"?/i.exec(header);

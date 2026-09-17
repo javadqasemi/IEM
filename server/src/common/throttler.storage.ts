@@ -128,7 +128,21 @@ export class SharedThrottlerStorage implements ThrottlerStorage {
       return { totalHits: limit + 1, timeToExpire: left, isBlocked: true, timeToBlockExpire: left };
     }
 
-    if (!existing || existing.expiresAt <= now) {
+    /**
+     * A block that has run out also clears the counter behind it.
+     *
+     * Without this the entry keeps the hit count that caused the block while its
+     * window is still open, so the very next request is over the limit again and
+     * re-blocks — a caller that tripped the limit once would stay blocked for as
+     * long as it kept trying, which is not what any of these numbers say. The
+     * Redis path never had the bug because it `DEL`s the counter when it sets
+     * the block; this is the same decision written for the local map.
+     */
+    if (existing && existing.blockedUntil > 0 && existing.blockedUntil <= now) {
+      this.local.delete(name);
+    }
+
+    if (!existing || existing.expiresAt <= now || (existing.blockedUntil > 0 && existing.blockedUntil <= now)) {
       this.local.set(name, { hits: 1, expiresAt: now + ttl, blockedUntil: 0 });
       this.sweep(now);
       return {
