@@ -113,15 +113,38 @@
      */
     --c-accent: 0 56 130; /* #003882 */
     --c-brand-gold: 144 129 78; /* #90814E */
-    --c-brand-bronze: 122 108 63; /* #7A6C3F */
+    --c-brand-bronze: 117 104 60; /* #75683C — see the note below */
     --c-brand-sand: 203 184 127; /* #CBB87F */
 
-    /* ---- Discipline hues -------------------------------------------- */
-    --c-disc-heat: 162 84 42; /* #A2542A */
+    /**
+     * ---- Discipline hues ---------------------------------------------
+     *
+     * **A few percent darker than the site's**, and this is the one place the
+     * dashboard's palette deliberately diverges from `tailwind.config.ts`.
+     *
+     * The site's values were chosen against white and clear AA there (README
+     * records ">= 4.8:1 on surface"). The dashboard puts them somewhere the
+     * site never does: as 11px text inside a `Badge`, on a 10% wash of
+     * themselves, on a table row that darkens under the pointer. An axe pass
+     * measured the energy tone at **4.13:1** in that combination while the
+     * unit test was reporting 5.0:1 against a plain card — the test was
+     * checking a background the badge never actually sits on.
+     *
+     * The corrections are the smallest that clear 4.5:1 there, found by
+     * scaling each hue toward black one percent at a time: heat 1%, bronze and
+     * power 4%, energy 6%, water 8%. Air and the accent needed none. The hue
+     * is preserved and the shift is invisible side by side; what changes is
+     * that the badge is readable on a hovered row.
+     *
+     * `theme.contrast.test.ts` asserts the wash-on-hovered-row case, so this
+     * cannot quietly regress — and the site's own tokens are untouched, which
+     * is why its stylesheet hash is unchanged.
+     */
+    --c-disc-heat: 160 83 42; /* #A0532A */
     --c-disc-air: 44 86 145; /* #2C5691 */
-    --c-disc-water: 47 125 119; /* #2F7D77 */
-    --c-disc-power: 122 108 63; /* #7A6C3F */
-    --c-disc-energy: 79 122 67; /* #4F7A43 */
+    --c-disc-water: 43 115 109; /* #2B736D */
+    --c-disc-power: 117 104 60; /* #75683C */
+    --c-disc-energy: 74 115 63; /* #4A733F */
     --c-disc-model: 0 56 130; /* #003882 */
 
     /* ---- The rail ---------------------------------------------------- */

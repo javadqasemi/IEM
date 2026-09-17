@@ -285,7 +285,7 @@ export function KpiCard({
         {value}
       </div>
       <div className="eyebrow text-muted">{label}</div>
-      {note ? <div className="text-[12px] leading-snug text-muted/80">{note}</div> : null}
+      {note ? <div className="text-[12px] leading-snug text-muted">{note}</div> : null}
     </>
   );
 
@@ -314,7 +314,7 @@ export function KpiUnavailable({ label, reason }: { label: string; reason: strin
     <div className="flex flex-col gap-2 rounded-lg border border-dashed border-line-strong bg-surface/50 p-5">
       <div className="font-display text-[30px] font-semibold leading-none text-line-strong">—</div>
       <div className="eyebrow text-muted">{label}</div>
-      <div className="text-[12px] leading-snug text-muted/80">{reason}</div>
+      <div className="text-[12px] leading-snug text-muted">{reason}</div>
     </div>
   );
 }
@@ -481,7 +481,7 @@ export function ActivityFeed({ items }: { items: ActivityItem[] }) {
           </div>
           <time
             dateTime={item.at}
-            className="shrink-0 font-mono text-[11px] tnum text-muted/70"
+            className="shrink-0 font-mono text-[11px] tnum text-muted"
             title={new Date(item.at).toLocaleString("de-CH")}
           >
             {relativeTime(item.at)}

@@ -152,7 +152,20 @@ describe("the rail folds a group open", () => {
     at("#/");
     const html = render();
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain("Benutzer &amp; Rollen aufklappen");
+  });
+
+  it("makes a foldable group a button, not a second link to its first entry", () => {
+    /**
+     * `sectionHref` makes a group stand for its first entry, which was right
+     * when the entries were not in the rail. Folded open it put two adjacent
+     * links to `#/benutzer` in one block — the group row and the entry — which
+     * is the duplicated navigation the fold was meant to end, and it made the
+     * group answer to a page that is really one of its children. A real browser
+     * found it as a strict-mode violation on `a[href="#/benutzer"]`.
+     */
+    at("#/benutzer");
+    const html = render();
+    expect((html.match(/href="#\/benutzer"/g) ?? []).length).toBe(1);
   });
 
   it("keeps a group's entries out of the DOM while it is closed", () => {
@@ -168,7 +181,6 @@ describe("the rail folds a group open", () => {
     const html = render();
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('href="#/rollen"');
-    expect(html).toContain("Benutzer &amp; Rollen zuklappen");
   });
 
   it("marks the open entry as the current page", () => {
@@ -178,13 +190,15 @@ describe("the rail folds a group open", () => {
     expect(html).toMatch(/href="#\/rollen"[^>]*aria-current="page"/);
   });
 
-  it("does not fold a group that is a single destination", () => {
-    // "Übersicht" is one page. A disclosure on it would be a control that
-    // reveals nothing.
+  it("keeps a single destination a link, with its favourite star", () => {
+    // "Übersicht" is one page: no disclosure, and still starrable, because a
+    // star marks a page. A *group* is no longer starrable — its entries are,
+    // individually, which is both more precise and what the star was for.
     at("#/");
     const html = render();
-    const overview = html.slice(html.indexOf("Übersicht") - 400, html.indexOf("Übersicht"));
-    expect(overview).not.toContain("aufklappen");
+    expect(html).toContain('href="#/"');
+    const overview = html.slice(html.indexOf("Übersicht") - 600, html.indexOf("Übersicht"));
+    expect(overview).not.toContain('aria-expanded="');
   });
 
   it("no longer renders the entries a second time in the top bar", () => {

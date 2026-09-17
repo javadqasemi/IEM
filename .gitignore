@@ -28,3 +28,11 @@ __pycache__/
 
 # Runtime data: uploads, generated media, job-application dossiers.
 var/
+# Playwright
+e2e/report/
+e2e/shots/
+e2e/last-run.log
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

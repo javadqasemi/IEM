@@ -125,6 +125,62 @@ const PAIRS: { fg: string; bg: string; min: number; where: string }[] = [
   { fg: "accent", bg: "base", min: 3, where: "the focus ring against the ground (non-text)" },
 ];
 
+/**
+ * `Badge` sets its text on a 10% wash of the same colour, not on the card.
+ *
+ * That wash is what this test missed. Every tone was checked against `surface`
+ * and passed; on screen the text sits on `bg-<tone>/[0.10]`, which is darker
+ * than the card in the light theme and lighter in the dark one — and an axe
+ * pass measured the energy tone at **4.13:1** there while this file was
+ * reporting 5.0:1 against white.
+ *
+ * The second background is the row hover, `bg-surface-2/60`, because a badge in
+ * a table sits on a row that changes colour under the pointer. It is the worse
+ * of the two and so the one worth asserting.
+ */
+function over(fg: [number, number, number], bg: [number, number, number], alpha: number): [number, number, number] {
+  return [0, 1, 2].map((i) => Math.round(fg[i] * alpha + bg[i] * (1 - alpha))) as [
+    number,
+    number,
+    number,
+  ];
+}
+
+/**
+ * The tones `Badge` offers, by the token each one actually uses.
+ *
+ * `accent`, not `brand-navy`: the navy badge is `bg-accent/[0.08]
+ * text-accent`, because `brand-navy` is a background-only token whose dark
+ * value is chosen to carry white text and measures 2.49:1 as a foreground.
+ * Asserting the wrong one here reported a failure the component does not have.
+ */
+const BADGE_TONES = [
+  "accent",
+  "brand-bronze",
+  "disc-power",
+  "disc-energy",
+  "disc-water",
+  "disc-air",
+  "disc-heat",
+];
+
+describe.each([
+  ["light", light],
+  ["dark", dark],
+])("%s theme — badge text on its own wash", (_name, colors) => {
+  it.each(BADGE_TONES)("%s badge clears 4.5:1 on a hovered row", (tone) => {
+    const fg = colors[tone];
+    expect(fg, `--c-${tone} is not declared`).toBeDefined();
+    // The row under the badge: `surface-2` at 60% over `surface`.
+    const row = over(colors["surface-2"], colors.surface, 0.6);
+    // The badge's own wash: the tone at 10% over that row.
+    const wash = over(fg, row, 0.1);
+    expect(Number(ratio(fg, wash).toFixed(2)), `${tone} on its wash ${wash}`).toBeGreaterThanOrEqual(
+      4.5,
+    );
+  });
+});
+
 describe.each([
   ["light", light],
   ["dark", dark],

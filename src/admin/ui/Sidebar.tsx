@@ -14,16 +14,15 @@ import {
 /**
  * The rail: search, favourites, history, and the main groups.
  *
- * **Main groups only.** What is inside a group is rendered across the top of
- * that group's page by `SectionTabs`, not here. The rail therefore stays about
- * a dozen rows long however many content types exist — thirty-six entries
- * nested under folding headings was a menu you had to operate before you could
- * read it.
+ * **Groups fold open in place.** A group's entries are nested under it, one
+ * group at a time — see `SidebarGroup` for why that replaced rendering them in
+ * the shell's top bar, and for what keeps the rail short with thirty-six
+ * content types in it.
  *
- * Search still reaches every destination, including the ones the rail no longer
- * lists. That is the point of keeping it: typing "Fussbereich" is faster than
- * opening the group that holds it, and a favourite pins a specific page rather
- * than the group it lives in.
+ * Search still reaches every destination, including those inside a group that
+ * is closed. That is the point of keeping it: typing "Fussbereich" is faster
+ * than opening the group that holds it, and a favourite pins a specific page
+ * rather than the group it lives in.
  *
  * Favourites and history persist per browser in `localStorage`. Both are
  * conveniences — the menu is complete without either — so every access is
@@ -201,12 +200,9 @@ function SidebarRow({
  * - **The choice is remembered per browser**, like favourites and history, so
  *   deliberately opening a group you are not in survives a reload.
  *
- * The row is **a link and a disclosure at once**, which is the part that is easy
- * to get wrong. The label navigates to the group's first entry — every rail row
- * stays a real link, middle-clickable and bookmarkable — and a separate chevron
- * button toggles the fold. Nesting a button inside an anchor would put both out
- * of reach of a keyboard, which is the same reason the favourite star is a
- * sibling rather than a child.
+ * A foldable group's row is **a disclosure, not a link** — see the note inside
+ * on why standing for its first entry put two links to the same page in one
+ * block. A section with a single destination stays exactly the link it was.
  */
 function SidebarGroup({
   section,
@@ -223,111 +219,124 @@ function SidebarGroup({
   starred: (id: string) => boolean;
   onToggleStar: (id: string) => void;
 }) {
-  const to = sectionHref(section);
-  if (!to) return null;
-
   const active =
     (section.to ? isActive(section.to, path, section.exact) : false) ||
     section.items.some((i) => isActive(i.to, path, i.exact));
 
-  // A group with one entry is not worth a fold: the row already goes there.
+  // A group with one entry is not worth a fold: the row can simply go there.
   const foldable = section.items.length > 1;
   const panelId = `nav-group-${section.id}`;
 
-  return (
-    <li className="relative">
-      <Link
-        to={to}
-        data-nav-link
-        aria-current={active && !foldable ? "page" : undefined}
-        className={cn(ROW, active ? ROW_ACTIVE : ROW_IDLE, foldable && "pr-14")}
-      >
-        <span aria-hidden className="shrink-0 opacity-80">
-          <Glyph name={section.icon} />
-        </span>
-        <span className="min-w-0 flex-1 truncate">{section.label}</span>
-        {section.badge ? (
-          <span className="shrink-0 rounded-full bg-brand-sand px-1.5 py-0.5 font-mono text-[10px] tnum font-medium text-admin-rail">
-            {section.badge}
-          </span>
-        ) : null}
-      </Link>
-
-      {foldable ? (
+  /**
+   * A foldable group is a **disclosure, not a link**.
+   *
+   * `sectionHref` makes a group stand for its first entry, which was right when
+   * the entries were not in the rail: every row was a real destination and
+   * nothing was unreachable. With the entries folded in underneath, it puts two
+   * adjacent links to the same page in the same block — "Benutzer & Rollen" and
+   * "Benutzer" both pointing at `#/benutzer` — which is the duplicated
+   * navigation this change set out to remove, and it makes the group's own row
+   * answer to a page that is really one of its children.
+   *
+   * So the whole row toggles, and the entries inside are the links. Nothing
+   * becomes unreachable: every destination is still an anchor, still
+   * middle-clickable, still bookmarkable, one level down. It is also the
+   * pattern the spec's reference products use, and a far larger hit target
+   * than a 24px chevron.
+   */
+  if (foldable) {
+    return (
+      <li className="relative">
         <button
           type="button"
+          data-nav-link
           onClick={onToggle}
           aria-expanded={open}
           aria-controls={panelId}
-          aria-label={open ? `${section.label} zuklappen` : `${section.label} aufklappen`}
-          className="absolute right-7 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-inverse/45 transition-colors hover:bg-inverse/10 hover:text-inverse"
+          className={cn(ROW, active ? ROW_ACTIVE : ROW_IDLE)}
         >
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 12 12"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          <span aria-hidden className="shrink-0 opacity-80">
+            <Glyph name={section.icon} />
+          </span>
+          <span className="min-w-0 flex-1 truncate">{section.label}</span>
+          {section.badge ? (
+            <span className="shrink-0 rounded-full bg-brand-sand px-1.5 py-0.5 font-mono text-[10px] tnum font-medium text-admin-rail">
+              {section.badge}
+            </span>
+          ) : null}
+          {/*
+            Inside the button, in the `pr-8` the row already reserves. It was
+            briefly its own control beside the label with the row widened to
+            `pr-14`, which cost every foldable label 24px — at this rail width
+            the difference between "Unternehmen" and "Unternehm…", on six of the
+            eight groups.
+          */}
+          <span
             aria-hidden
-            className={cn("transition-transform", open && "rotate-90")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-inverse/45"
           >
-            <path d="M4 2.5 L8 6 L4 9.5" />
-          </svg>
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={cn("transition-transform", open && "rotate-90")}
+            >
+              <path d="M4 2.5 L8 6 L4 9.5" />
+            </svg>
+          </span>
         </button>
-      ) : null}
 
-      <button
-        type="button"
-        onClick={() => onToggleStar(section.id)}
-        aria-pressed={starred(section.id)}
-        title={starred(section.id) ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
-        className={cn(
-          "absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 transition-opacity",
-          "focus-visible:opacity-100 group-hover/row:opacity-100",
-          starred(section.id)
-            ? "text-brand-sand opacity-100"
-            : "text-inverse/40 opacity-0 hover:text-inverse",
-        )}
-      >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 18 18"
-          aria-hidden
-          fill={starred(section.id) ? "currentColor" : "none"}
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinejoin="round"
-        >
-          <path d={ICONS.star} />
-        </svg>
-        <span className="sr-only">
-          {starred(section.id) ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
-        </span>
-      </button>
+        {/*
+          Unmounted when closed rather than hidden with CSS. The rail's keyboard
+          navigation reads `[data-nav-link]` off the DOM, so a hidden-but-present
+          entry would be a stop on a journey through rows nobody can see.
+        */}
+        {open ? (
+          <ul id={panelId} className="mt-0.5 flex flex-col gap-0.5">
+            {section.items.map((item) => (
+              <SidebarSubRow
+                key={item.id}
+                item={item}
+                active={isActive(item.to, path, item.exact)}
+                starred={starred(item.id)}
+                onToggleStar={onToggleStar}
+              />
+            ))}
+          </ul>
+        ) : null}
+      </li>
+    );
+  }
 
-      {/*
-        Unmounted when closed rather than hidden with CSS. The rail's keyboard
-        navigation reads `[data-nav-link]` off the DOM, so a hidden-but-present
-        entry would be a stop on a journey through rows nobody can see.
-      */}
-      {foldable && open ? (
-        <ul id={panelId} className="mt-0.5 flex flex-col gap-0.5">
-          {section.items.map((item) => (
-            <SidebarSubRow
-              key={item.id}
-              item={item}
-              active={isActive(item.to, path, item.exact)}
-              starred={starred(item.id)}
-              onToggleStar={onToggleStar}
-            />
-          ))}
-        </ul>
-      ) : null}
-    </li>
+  /**
+   * A single-destination section is a plain row, exactly as before — and it
+   * keeps its favourite star, because it is a page. A *group* is not a page,
+   * so it is no longer starrable: the entries inside it are, individually,
+   * which is both more precise and what the star was always for.
+   */
+  const to = sectionHref(section);
+  if (!to) return null;
+
+  return (
+    <SidebarRow
+      item={{
+        id: section.id,
+        to,
+        label: section.label,
+        permissions: section.permissions,
+        badge: section.badge,
+        exact: section.exact,
+      }}
+      icon={section.icon}
+      active={active}
+      starred={starred(section.id)}
+      onToggleStar={onToggleStar}
+    />
   );
 }
 
@@ -418,7 +427,12 @@ function SidebarSubRow({
  */
 function Heading({ children }: { children: ReactNode }) {
   return (
-    <p className="px-3 pb-1.5 pt-5 text-[11px] font-medium tracking-wide text-inverse/40">
+    // `/60`, not `/40`. At 40% white on the navy rail this measured **3.56:1**
+    // in the light theme and 3.74:1 in the dark — below the 4.5 AA wants for
+    // 11px text, and found by an axe pass on every screen. 60% measures 6.4:1
+    // and is still comfortably quieter than the rows it organises, which was
+    // the whole point of the value.
+    <p className="px-3 pb-1.5 pt-5 text-[11px] font-medium tracking-wide text-inverse/60">
       {children}
     </p>
   );
@@ -598,7 +612,7 @@ export function Sidebar({ sections, path }: { sections: NavSection[]; path: stri
           }}
           placeholder="Suchen …"
           className="w-full rounded-md bg-inverse/[0.07] py-1.5 pl-8 pr-2.5 text-[13px] text-inverse
-                     placeholder:text-inverse/40 focus:bg-inverse/[0.12] focus:outline-none
+                     placeholder:text-inverse/60 focus:bg-inverse/[0.12] focus:outline-none
                      focus:ring-1 focus:ring-inverse/25"
         />
       </label>

@@ -568,14 +568,31 @@ function SettingField({
 
   /** The key line, plus a plain statement when nothing reads the value. */
   const hint = setting.pending
-    ? `${setting.key} · noch nicht angebunden — der Wert wird gespeichert, aber von nichts gelesen`
+    ? `${setting.key} · der Wert wird gespeichert, aber noch von nichts gelesen`
     : setting.secret
       ? `${setting.key} · ${setting.hasValue ? "gesetzt" : "nicht gesetzt"} — leer lassen, um den Wert zu behalten`
       : setting.key;
 
+  /**
+   * A badge, not a dimmed block.
+   *
+   * `opacity-60` on the wrapper was the first attempt, and an axe pass measured
+   * what it did: it multiplies through to the text inside, dropping the hint
+   * from `muted` to **2.54:1** in the light theme and 3.43:1 in the dark. The
+   * information — "nothing reads this yet" — was being carried by the one
+   * property that also makes it hard to read.
+   *
+   * A label says it outright, at full contrast, and says it more precisely than
+   * a shade could.
+   */
+  const pendingMark = setting.pending ? (
+    <Badge tone="neutral">noch nicht angebunden</Badge>
+  ) : null;
+
   if (typeof setting.value === "boolean") {
     return (
-      <div className={cn(setting.pending && "opacity-60")}>
+      <div className="flex flex-col gap-1.5">
+        {pendingMark}
         <Toggle
           label={setting.description ?? setting.key}
           hint={hint}
@@ -592,7 +609,7 @@ function SettingField({
       label={setting.description ?? setting.key}
       htmlFor={id}
       hint={hint}
-      className={cn(setting.pending && "opacity-60")}
+      action={pendingMark}
     >
       {Array.isArray(setting.value) ? (
         <Input

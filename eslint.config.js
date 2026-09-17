@@ -124,4 +124,20 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "off",
     },
   },
+
+  {
+    /**
+     * The Playwright suite is not React, and the React rules misread it.
+     *
+     * A Playwright fixture is `async ({ deps }, use) => { … await use(value) }`,
+     * and `react-hooks/rules-of-hooks` sees a call to `use` — React 19's hook of
+     * the same name — inside a function that is not a component, and reports
+     * three errors on correct code. There is no React in `e2e/` to protect.
+     */
+    files: ["e2e/**/*.ts", "playwright.config.ts"],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+      "react-hooks/exhaustive-deps": "off",
+    },
+  },
 );

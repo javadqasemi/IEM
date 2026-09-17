@@ -47,11 +47,38 @@ rejected.
 
 ```bash
 # The gates. `verify` is what to run before a commit.
-npm run verify       # typecheck + lint + test, both halves
+npm run verify       # typecheck + lint + test, both halves. Needs nothing running.
 npm test             # vitest, site + dashboard
 npm --prefix server run test
 npm run lint         # eslint; 0 errors is the bar, warnings are a backlog
+
+# The browser pass. Needs `npm run dev`, `npm run server:dev` and a seeded database.
+npm run e2e          # Playwright: 3 widths x 2 themes, every screen, + axe
+npm run e2e:report   # the HTML report from the last run
+npm run verify:all   # verify + e2e, for a release
 ```
+
+**`e2e` is deliberately *not* in `verify`.** `verify` is the pre-commit gate: no
+servers, no database, a few seconds. Folding the browser pass in would make it
+fail on a machine with no Postgres, and a gate that fails for reasons unrelated
+to the change is a gate people learn to skip. Run `e2e` before a release and
+after anything touching the shell, the theme, the routes or the downloads.
+
+Three things about the Playwright suite that cost time to learn:
+
+- **It signs in once per worker and shares one browser context.** Per-test
+  sign-in trips the login throttle (10/min) partway through, and the usual
+  `storageState` trick is worse here: replaying one refresh cookie into fresh
+  contexts looks exactly like token theft to `AuthService`, which revokes every
+  session in response.
+- **`channel: "chromium"`, not the headless shell.** The shell omits composited
+  regions from `fullPage` screenshots at small viewports — an image renders
+  correctly and photographs as a blank rectangle.
+- **The dossier test submits through the public form**, which is capped at five
+  an hour per IP. Re-running the suite repeatedly makes it skip itself with a
+  message saying so; that is the rate limit working, not a failure.
+
+Screenshots land in `e2e/shots/<width>/<theme>/` — 78 of them, all gitignored.
 
 **Vitest and ESLint were added on 17 September 2026** and replace the note that used to stand here
 saying none existed. Three things about them are deliberate:
