@@ -28,6 +28,11 @@ import type { NavSection } from "./lib/navigation";
 
 const REAL_WINDOW = globalThis.window;
 
+/** Points the stubbed router at a path before a render. */
+function at(hash: string) {
+  (globalThis.window as unknown as { location: { hash: string } }).location.hash = hash;
+}
+
 beforeAll(() => {
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -130,5 +135,64 @@ describe("the dashboard shell renders", () => {
     // noticed last, because the rail looks fine in the light theme either way.
     expect(html).toContain("text-inverse");
     expect(html).not.toContain("text-surface");
+  });
+});
+
+/**
+ * The rail's groups fold open in place.
+ *
+ * Asserted through a real render rather than by reading the component, because
+ * the behaviour that matters is a *derivation*: which group is open is computed
+ * from the path during render, not stored. A test that called a helper would
+ * miss the wiring, which is the part that broke when the entries lived in the
+ * top bar.
+ */
+describe("the rail folds a group open", () => {
+  it("offers a disclosure on a group with several entries", () => {
+    at("#/");
+    const html = render();
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("Benutzer &amp; Rollen aufklappen");
+  });
+
+  it("keeps a group's entries out of the DOM while it is closed", () => {
+    // Unmounted rather than hidden: the rail's arrow-key navigation reads
+    // `[data-nav-link]` off the DOM, so a hidden entry would be a stop on a
+    // journey through rows nobody can see.
+    at("#/");
+    expect(render()).not.toContain('href="#/rollen"');
+  });
+
+  it("opens the group the current route is in, with no stored state", () => {
+    at("#/benutzer");
+    const html = render();
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('href="#/rollen"');
+    expect(html).toContain("Benutzer &amp; Rollen zuklappen");
+  });
+
+  it("marks the open entry as the current page", () => {
+    at("#/rollen");
+    const html = render();
+    expect(html).toContain('href="#/rollen"');
+    expect(html).toMatch(/href="#\/rollen"[^>]*aria-current="page"/);
+  });
+
+  it("does not fold a group that is a single destination", () => {
+    // "Übersicht" is one page. A disclosure on it would be a control that
+    // reveals nothing.
+    at("#/");
+    const html = render();
+    const overview = html.slice(html.indexOf("Übersicht") - 400, html.indexOf("Übersicht"));
+    expect(overview).not.toContain("aufklappen");
+  });
+
+  it("no longer renders the entries a second time in the top bar", () => {
+    // `SectionTabs` was removed with this change. Two copies of one navigation
+    // is what the choice between them was about.
+    at("#/benutzer");
+    const html = render();
+    expect(html).not.toContain("Unterbereiche");
+    expect((html.match(/href="#\/rollen"/g) ?? []).length).toBe(1);
   });
 });

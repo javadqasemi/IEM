@@ -38,6 +38,8 @@ import {
 const KEY = {
   favorites: "iem.nav.favorites",
   recent: "iem.nav.recent",
+  /** The group left unfolded. `null` means "whichever the route is in". */
+  openGroup: "iem.nav.openGroup",
 } as const;
 
 function read<T>(key: string, fallback: T): T {
@@ -179,6 +181,232 @@ function SidebarRow({
 }
 
 /**
+ * A group that folds open to show its entries.
+ *
+ * The rail used to list main groups only and render a group's entries across
+ * the shell's top bar. That was a deliberate answer to a real problem — thirty-six
+ * content types nested under folding headings is a menu you have to operate
+ * before you can read it — and it is replaced here on an equally deliberate
+ * one: a top bar can only ever show the group you are *already in*, so reaching
+ * another group's third page costs two navigations and a guess. With nineteen
+ * modules ahead of the four that exist, that compounds.
+ *
+ * Three things keep the original objection answered:
+ *
+ * - **One group open at a time.** Opening a group closes the others, so the
+ *   rail is never longer than its groups plus one group's entries. Without this
+ *   the Website block alone unfolds to thirty-six rows.
+ * - **The open group is the one you are in.** No state to manage in the common
+ *   case: navigating opens the right group and closes the last one.
+ * - **The choice is remembered per browser**, like favourites and history, so
+ *   deliberately opening a group you are not in survives a reload.
+ *
+ * The row is **a link and a disclosure at once**, which is the part that is easy
+ * to get wrong. The label navigates to the group's first entry — every rail row
+ * stays a real link, middle-clickable and bookmarkable — and a separate chevron
+ * button toggles the fold. Nesting a button inside an anchor would put both out
+ * of reach of a keyboard, which is the same reason the favourite star is a
+ * sibling rather than a child.
+ */
+function SidebarGroup({
+  section,
+  path,
+  open,
+  onToggle,
+  starred,
+  onToggleStar,
+}: {
+  section: NavSection;
+  path: string;
+  open: boolean;
+  onToggle: () => void;
+  starred: (id: string) => boolean;
+  onToggleStar: (id: string) => void;
+}) {
+  const to = sectionHref(section);
+  if (!to) return null;
+
+  const active =
+    (section.to ? isActive(section.to, path, section.exact) : false) ||
+    section.items.some((i) => isActive(i.to, path, i.exact));
+
+  // A group with one entry is not worth a fold: the row already goes there.
+  const foldable = section.items.length > 1;
+  const panelId = `nav-group-${section.id}`;
+
+  return (
+    <li className="relative">
+      <Link
+        to={to}
+        data-nav-link
+        aria-current={active && !foldable ? "page" : undefined}
+        className={cn(ROW, active ? ROW_ACTIVE : ROW_IDLE, foldable && "pr-14")}
+      >
+        <span aria-hidden className="shrink-0 opacity-80">
+          <Glyph name={section.icon} />
+        </span>
+        <span className="min-w-0 flex-1 truncate">{section.label}</span>
+        {section.badge ? (
+          <span className="shrink-0 rounded-full bg-brand-sand px-1.5 py-0.5 font-mono text-[10px] tnum font-medium text-admin-rail">
+            {section.badge}
+          </span>
+        ) : null}
+      </Link>
+
+      {foldable ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-controls={panelId}
+          aria-label={open ? `${section.label} zuklappen` : `${section.label} aufklappen`}
+          className="absolute right-7 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-inverse/45 transition-colors hover:bg-inverse/10 hover:text-inverse"
+        >
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+            className={cn("transition-transform", open && "rotate-90")}
+          >
+            <path d="M4 2.5 L8 6 L4 9.5" />
+          </svg>
+        </button>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={() => onToggleStar(section.id)}
+        aria-pressed={starred(section.id)}
+        title={starred(section.id) ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
+        className={cn(
+          "absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 transition-opacity",
+          "focus-visible:opacity-100 group-hover/row:opacity-100",
+          starred(section.id)
+            ? "text-brand-sand opacity-100"
+            : "text-inverse/40 opacity-0 hover:text-inverse",
+        )}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 18 18"
+          aria-hidden
+          fill={starred(section.id) ? "currentColor" : "none"}
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinejoin="round"
+        >
+          <path d={ICONS.star} />
+        </svg>
+        <span className="sr-only">
+          {starred(section.id) ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
+        </span>
+      </button>
+
+      {/*
+        Unmounted when closed rather than hidden with CSS. The rail's keyboard
+        navigation reads `[data-nav-link]` off the DOM, so a hidden-but-present
+        entry would be a stop on a journey through rows nobody can see.
+      */}
+      {foldable && open ? (
+        <ul id={panelId} className="mt-0.5 flex flex-col gap-0.5">
+          {section.items.map((item) => (
+            <SidebarSubRow
+              key={item.id}
+              item={item}
+              active={isActive(item.to, path, item.exact)}
+              starred={starred(item.id)}
+              onToggleStar={onToggleStar}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+/**
+ * One entry inside an open group.
+ *
+ * Indented to the group's icon column rather than to its label, and carrying a
+ * hairline down that column: at this rail width the indent alone is four or
+ * five pixels of difference, which is not enough to read as nesting. The rule
+ * is what makes the block legible as "these belong to the row above".
+ *
+ * No icon. Giving every entry one would put twelve near-identical glyphs in a
+ * column and cost the indent its meaning — the group's icon is the block's
+ * mark, and the entries are text under it.
+ */
+function SidebarSubRow({
+  item,
+  active,
+  starred,
+  onToggleStar,
+}: {
+  item: NavItem;
+  active: boolean;
+  starred: boolean;
+  onToggleStar: (id: string) => void;
+}) {
+  return (
+    <li className="relative ml-[1.35rem] border-l border-inverse/15 pl-2">
+      <Link
+        to={item.to}
+        data-nav-link
+        aria-current={active ? "page" : undefined}
+        className={cn(
+          "group/row flex w-full items-center gap-2 rounded-md py-1.5 pl-2 pr-7 text-left text-[13px] transition-colors",
+          active
+            ? "bg-inverse/[0.14] font-medium text-inverse"
+            : "text-inverse/55 hover:bg-inverse/[0.07] hover:text-inverse",
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        {item.badge ? (
+          <span className="shrink-0 rounded-full bg-brand-sand px-1.5 py-0.5 font-mono text-[10px] tnum font-medium text-admin-rail">
+            {item.badge}
+          </span>
+        ) : null}
+      </Link>
+
+      <button
+        type="button"
+        onClick={() => onToggleStar(item.id)}
+        aria-pressed={starred}
+        title={starred ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
+        className={cn(
+          "absolute right-0.5 top-1/2 -translate-y-1/2 rounded p-1 transition-opacity",
+          "focus-visible:opacity-100 group-hover/row:opacity-100",
+          starred ? "text-brand-sand opacity-100" : "text-inverse/40 opacity-0 hover:text-inverse",
+        )}
+      >
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 18 18"
+          aria-hidden
+          fill={starred ? "currentColor" : "none"}
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinejoin="round"
+        >
+          <path d={ICONS.star} />
+        </svg>
+        <span className="sr-only">
+          {starred ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
+        </span>
+      </button>
+    </li>
+  );
+}
+
+/**
  * A block heading.
  *
  * Deliberately *not* the dashboard's `.eyebrow` (mono, uppercase,
@@ -205,10 +433,52 @@ export function Sidebar({ sections, path }: { sections: NavSection[]; path: stri
   const [searching, setSearching] = useState(false);
   const [favorites, setFavorites] = usePersisted<string[]>(KEY.favorites, []);
   const [recent, setRecent] = usePersisted<string[]>(KEY.recent, []);
+  const [openGroup, setOpenGroup] = usePersisted<string | null>(KEY.openGroup, null);
   const nav = useRef<HTMLElement>(null);
 
   const all = useMemo(() => flattenNavigation(sections), [sections]);
   const byId = useMemo(() => new Map(all.map((i) => [i.id, i])), [all]);
+
+  /**
+   * Which group is unfolded.
+   *
+   * The group the current route belongs to wins over the remembered one, and
+   * that ordering is the whole behaviour: navigating into a group opens it,
+   * navigating out closes it, and nobody has to manage the rail by hand. The
+   * stored value only decides the case the route cannot — a group deliberately
+   * opened to look at something while standing somewhere else, which then
+   * survives a reload.
+   *
+   * Derived during render rather than synchronised in an effect. An effect
+   * would paint the old group open for one frame on every navigation, and the
+   * state it maintained would be a second source of truth for something the
+   * path already answers.
+   */
+  const routeGroup = useMemo(
+    () =>
+      sections.find(
+        (s) =>
+          s.items.length > 1 &&
+          (((s.to && isActive(s.to, path, s.exact)) ?? false) ||
+            s.items.some((i) => isActive(i.to, path, i.exact))),
+      )?.id ?? null,
+    [sections, path],
+  );
+  const expanded = routeGroup ?? openGroup;
+
+  /**
+   * Opening a group closes the others.
+   *
+   * Without this the Website block alone unfolds to thirty-six rows, which is
+   * the objection the previous groups-only rail was built to answer. An
+   * accordion keeps the rail at its groups plus one group's entries.
+   */
+  const toggleGroup = useCallback(
+    (id: string) => setOpenGroup(expanded === id ? null : id),
+    [expanded, setOpenGroup],
+  );
+
+  const isStarred = useCallback((id: string) => favorites.includes(id), [favorites]);
 
   // History, recorded when the route settles on a known destination. A deep
   // link into an editor (`/inhalte/projects/abc`) credits the list it belongs
@@ -405,33 +675,17 @@ export function Sidebar({ sections, path }: { sections: NavSection[]; path: stri
               <div key={zone.id}>
                 {zone.label ? <Heading>{zone.label}</Heading> : null}
                 <ul className={cn("flex flex-col gap-0.5", !zone.label && "pt-3")}>
-                  {rows.map((section) => {
-                    const to = sectionHref(section);
-                    if (!to) return null;
-                    // The group is lit by anything inside it, not only by its
-                    // own route — otherwise opening the second entry of a group
-                    // would leave the rail showing nothing selected.
-                    const active =
-                      (section.to ? isActive(section.to, path, section.exact) : false) ||
-                      section.items.some((i) => isActive(i.to, path, i.exact));
-                    return (
-                      <SidebarRow
-                        key={section.id}
-                        item={{
-                          id: section.id,
-                          to,
-                          label: section.label,
-                          permissions: section.permissions,
-                          badge: section.badge,
-                          exact: section.exact,
-                        }}
-                        icon={section.icon}
-                        active={active}
-                        starred={favorites.includes(section.id)}
-                        onToggleStar={toggleStar}
-                      />
-                    );
-                  })}
+                  {rows.map((section) => (
+                    <SidebarGroup
+                      key={section.id}
+                      section={section}
+                      path={path}
+                      open={expanded === section.id}
+                      onToggle={() => toggleGroup(section.id)}
+                      starred={isStarred}
+                      onToggleStar={toggleStar}
+                    />
+                  ))}
                 </ul>
               </div>
             );

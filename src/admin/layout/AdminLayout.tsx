@@ -5,7 +5,6 @@ import { useAuth } from "../lib/auth";
 import { Link, useRoute } from "../lib/router";
 import { useTheme } from "../lib/theme";
 import { activeSection, type NavSection } from "../lib/navigation";
-import { SectionTabs } from "../ui/SectionTabs";
 import { Sidebar } from "../ui/Sidebar";
 import { Button } from "../ui/primitives";
 
@@ -200,10 +199,20 @@ export function AdminLayout({
               <span className="sr-only">Navigation</span>
             </Button>
 
-            {/* "Website bearbeiten" opts out: it embeds the live site, which
-                carries its own header, and the rail already says which page is
-                open. The divider goes with the name — it exists to separate
-                the name from the entries. */}
+            {/*
+              The group's name, and nothing else.
+
+              Its entries used to sit beside it as a segmented control, because
+              the rail listed groups only. The rail now folds them open in
+              place, so a copy here would be the same navigation twice — and the
+              copy was always the weaker one, able to show only the group you
+              were already in. `SectionTabs` was deleted with this change; it is
+              in the history if the trade is ever reconsidered.
+
+              "Website bearbeiten" opts out: it embeds the live site, which
+              carries its own header, and the rail already says which page is
+              open.
+            */}
             {section && !section.hideBarTitle ? (
               <div className="order-2 flex min-w-0 items-center gap-4">
                 {/* `h2`, not `h1`: the page below keeps its own `h1` in
@@ -211,19 +220,13 @@ export function AdminLayout({
                 <h2 className="truncate font-display text-[15px] font-semibold text-ink">
                   {section.label}
                 </h2>
-                {section.items.length > 1 ? (
-                  <span aria-hidden className="hidden h-5 w-px shrink-0 bg-line lg:block" />
-                ) : null}
               </div>
             ) : null}
 
-            <SectionTabs section={section} path={path} />
-
-            {/* `ml-auto` at every width, not just below `lg`. When the open
-                group has entries, their `lg:flex-1` has already eaten the free
-                space and this adds nothing; when it has none — "Medien",
-                "Übersicht" — it is the only thing holding the account button
-                against the right edge instead of against the group's name. */}
+            {/* `ml-auto` holds the account button against the right edge
+                rather than against the group's name. It used to share that job
+                with the entries' `lg:flex-1`; with those gone it is the only
+                thing doing it. */}
             <div className="order-3 ml-auto shrink-0 lg:order-4 lg:pl-4">
               <UserMenu />
             </div>
