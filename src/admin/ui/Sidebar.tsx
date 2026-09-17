@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { cn } from "@/lib/cn";
+import { cn } from "../lib/cn";
 import { Link } from "../lib/router";
 import {
   ICONS,
@@ -107,8 +107,8 @@ function Glyph({ name }: { name: string }) {
  */
 const ROW =
   "group/row flex w-full items-center gap-3 rounded-md border-l-2 py-2 pl-3 pr-8 text-left text-[14px] transition-colors";
-const ROW_IDLE = "border-transparent text-inverse/65 hover:bg-surface/[0.07] hover:text-inverse";
-const ROW_ACTIVE = "border-brand-sand bg-surface/[0.14] font-medium text-inverse";
+const ROW_IDLE = "border-transparent text-inverse/65 hover:bg-inverse/[0.07] hover:text-inverse";
+const ROW_ACTIVE = "border-brand-sand bg-inverse/[0.14] font-medium text-inverse";
 
 function SidebarRow({
   item,
@@ -327,9 +327,9 @@ export function Sidebar({ sections, path }: { sections: NavSection[]; path: stri
             if (!nav.current?.contains(e.relatedTarget as Node | null)) setSearching(false);
           }}
           placeholder="Suchen …"
-          className="w-full rounded-md bg-surface/[0.07] py-1.5 pl-8 pr-2.5 text-[13px] text-inverse
-                     placeholder:text-inverse/40 focus:bg-surface/[0.12] focus:outline-none
-                     focus:ring-1 focus:ring-surface/25"
+          className="w-full rounded-md bg-inverse/[0.07] py-1.5 pl-8 pr-2.5 text-[13px] text-inverse
+                     placeholder:text-inverse/40 focus:bg-inverse/[0.12] focus:outline-none
+                     focus:ring-1 focus:ring-inverse/25"
         />
       </label>
 

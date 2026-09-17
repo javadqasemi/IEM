@@ -1,4 +1,4 @@
-import { cn } from "@/lib/cn";
+import { cn } from "../lib/cn";
 import { Link } from "../lib/router";
 import { isActive, type NavSection } from "../lib/navigation";
 

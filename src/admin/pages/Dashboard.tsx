@@ -24,10 +24,27 @@ import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "../u
  */
 export function DashboardPage() {
   const { user, can } = useAuth();
-  const overview = useAsync(() => api.overview(), []);
+  /**
+   * `GET /dashboard/overview` requires `system.health`, which three of the
+   * eleven seeded roles do not hold — Content Editor, Viewer and Guest. This is
+   * also the landing page, so for those roles signing in used to end at a
+   * full-page error where the dashboard should be.
+   *
+   * Asked for only when it can be had, and the page renders without it
+   * otherwise: the greeting, the shortcuts and whatever else the reader *can*
+   * see. A missing figure is a missing figure, not a broken screen — the same
+   * judgement the KPI tiles already make about metrics with no data source.
+   */
+  const mayReadOverview = can("system.health");
+  const overview = useAsync(
+    () => (mayReadOverview ? api.overview() : Promise.resolve(null)),
+    [mayReadOverview],
+  );
   const health = useAsync(() => (can("system.health") ? api.health() : Promise.resolve(null)), []);
 
-  if (overview.error) {
+  // A genuine failure still gets an error state; a *refused* one does not,
+  // because for these roles it is the expected answer rather than a fault.
+  if (overview.error && mayReadOverview) {
     return <ErrorState message={overview.error} onRetry={overview.reload} />;
   }
 
@@ -295,11 +312,21 @@ export function DashboardPage() {
       </div>
 
       {!overview.loading && !data ? (
-        <EmptyState
-          title="Keine Daten"
-          description="Der Server hat keine Übersicht geliefert."
-          action={<Button onClick={overview.reload}>Nochmals versuchen</Button>}
-        />
+        mayReadOverview ? (
+          <EmptyState
+            title="Keine Daten"
+            description="Der Server hat keine Übersicht geliefert."
+            action={<Button onClick={overview.reload}>Nochmals versuchen</Button>}
+          />
+        ) : (
+          /* Not an error: this role is not meant to see the figures. Saying so
+             plainly beats an empty page that looks like a fault, and it tells
+             the reader what would change it. */
+          <EmptyState
+            title="Kennzahlen sind für Ihre Rolle nicht freigegeben."
+            description="Die Übersicht zeigt Zahlen aus dem ganzen System. Ihre Arbeitsbereiche erreichen Sie über das Menü."
+          />
+        )
       ) : null}
     </>
   );

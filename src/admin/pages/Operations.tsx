@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { cn } from "@/lib/cn";
+import { cn } from "../lib/cn";
 import { api, type ApplicationRow, type SettingRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { THEME_CHOICES, useTheme } from "../lib/theme";

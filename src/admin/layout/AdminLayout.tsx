@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { cn } from "@/lib/cn";
+import { cn } from "../lib/cn";
 import { Wordmark } from "@/components/Wordmark";
 import { useAuth } from "../lib/auth";
 import { Link, useRoute } from "../lib/router";
@@ -99,7 +99,7 @@ export function AdminLayout({
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-surface/10 px-5">
+        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-inverse/10 px-5">
           {/* The site's header lockup (`components/Nav.tsx`), re-toned for the
               rail: same `h-5` mark, same divider-and-strapline beside it, same
               hover shift. Only the palette moves — the site sets navy on paper
@@ -113,7 +113,7 @@ export function AdminLayout({
               fluid; the rail has a fixed width, so it always fits. */}
           <Link to="/" className="group flex items-center gap-3 text-inverse">
             <Wordmark className="h-5 transition-colors group-hover:text-brand-sand" />
-            <span className="border-l border-surface/15 pl-3 text-[11px] leading-tight text-inverse/60">
+            <span className="border-l border-inverse/15 pl-3 text-[11px] leading-tight text-inverse/60">
               Energie- und
               <br />
               Messtechnik
@@ -126,12 +126,12 @@ export function AdminLayout({
         {/* Pinned to the foot of the rail: `shrink-0` after a `flex-1` nav, so
             the navigation scrolls and this does not move. With the rail itself
             now viewport-height, that foot is the bottom of the screen. */}
-        <div className="shrink-0 border-t border-surface/10 p-3">
+        <div className="shrink-0 border-t border-inverse/10 p-3">
           <a
             href="/"
             target="_blank"
             rel="noreferrer"
-            className="flex items-center gap-3 rounded-md px-3 py-2 text-[14px] text-inverse/65 transition-colors hover:bg-surface/[0.07] hover:text-inverse"
+            className="flex items-center gap-3 rounded-md px-3 py-2 text-[14px] text-inverse/65 transition-colors hover:bg-inverse/[0.07] hover:text-inverse"
           >
             <span aria-hidden className="shrink-0 opacity-80">
               <svg
@@ -245,7 +245,7 @@ export function AdminLayout({
  * both are deliberate:
  *
  * **The colours are the light-surface set, not the rail's.** The rail is navy,
- * so that block was written in `text-inverse` and `bg-surface/[0.07]` — white on
+ * so that block was written in `text-inverse` and `bg-inverse/[0.07]` — white on
  * dark. The header is `bg-base`, where those are invisible. This uses the same
  * tokens every other light surface in the dashboard uses (`text-ink`,
  * `text-muted`, `hover:bg-surface-2`), matching `Modal`'s close button exactly.

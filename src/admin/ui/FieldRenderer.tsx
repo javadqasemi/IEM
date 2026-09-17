@@ -1,5 +1,5 @@
 import { useId, useState, type ReactNode } from "react";
-import { cn } from "@/lib/cn";
+import { cn } from "../lib/cn";
 import type { FieldDef } from "../lib/api";
 import { Badge, Button, Checkbox, Field, Input, Select, Textarea } from "./primitives";
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { cn } from "@/lib/cn";
+import { cn } from "../lib/cn";
 import { api, type MediaRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
