@@ -7,6 +7,29 @@ export default defineConfig({
   resolve: {
     alias: { "@": "/src" },
   },
+  server: {
+    proxy: {
+      /**
+       * Uploaded media, forwarded to the API.
+       *
+       * `LocalStorageAdapter.url()` returns a *root-relative* `/media/<key>`,
+       * and that is the right thing to store: the snapshot is a document that
+       * outlives this machine, so baking `http://localhost:3100` into it would
+       * be wrong the moment it is deployed. In production the site and the API
+       * sit behind one origin and the path resolves by itself.
+       *
+       * In development they do not, so without this the browser asks the dev
+       * server for `/media/…`, gets Vite's SPA fallback — `index.html`, status
+       * 200, `text/html` — and every uploaded image renders as a broken one.
+       * A 200 is why this looked like a failed upload rather than a missing
+       * route.
+       */
+      "/media": {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     // Three entries:
     //

@@ -12,7 +12,9 @@ import {
 } from "@nestjs/common";
 import { WorkflowState } from "@prisma/client";
 import {
+  Allow,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -33,16 +35,47 @@ import {
 
 /* ---- DTOs -------------------------------------------------------- */
 
+/**
+ * `@Allow()` on `data` is load-bearing on both DTOs below.
+ *
+ * The global pipe runs with `whitelist: true`, which strips every property that
+ * carries no class-validator decorator. Undecorated, `data` was removed from
+ * the body before the service saw it, and **every save failed** — with a
+ * message about the *downstream* content validator complaining that required
+ * fields were missing, which points at the editor's input rather than at the
+ * request that never carried it.
+ *
+ * It cannot be a real validator: `data` is an entry of an arbitrary content
+ * type, and its shape is checked against `ContentType.schema` by
+ * `validateEntry` in the service, which is the only thing that knows what shape
+ * to expect. `@Allow` is the decorator whose whole purpose is surviving the
+ * whitelist without asserting anything.
+ *
+ * The same trap caught the settings DTO — see the note there and
+ * `settings.dto.test.ts`, which is the shape of the test this pair wants too.
+ */
 export class CreateEntryDto {
   @IsString() typeKey!: string;
   @IsOptional() @IsString() @MaxLength(120) key?: string;
-  data!: unknown;
+  @Allow() data!: unknown;
   @IsOptional() @IsInt() @Min(0) position?: number;
 }
 
 export class UpdateEntryDto {
-  data!: unknown;
+  @Allow() data!: unknown;
   @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
+/**
+ * Takes an entry off the site, or puts it back.
+ *
+ * `@IsBoolean` and not `@IsOptional`: "hide it" and "show it" are the same call
+ * with different values, so an absent flag is a malformed request rather than a
+ * default. Sending `false` is how an entry comes back, and a stripped or
+ * defaulted `false` would be indistinguishable from "no change".
+ */
+export class VisibilityDto {
+  @IsBoolean() hidden!: boolean;
 }
 
 export class ReorderDto {
@@ -159,6 +192,30 @@ export class ContentController {
     return this.content.deleteEntry(id, user, this.ctx(req, ip));
   }
 
+  /**
+   * Takes one entry off the site, or puts it back.
+   *
+   * A **draft change like any other**: the entry stays on the live site until
+   * the next publish, and `GET /content/pending` reports it because that
+   * compares built documents rather than counting approved rows.
+   *
+   * `content.update` rather than a permission of its own. Hiding is an
+   * editorial act on an entry the holder may already edit outright, and a
+   * separate key would be one more thing to grant that grants nothing anyone
+   * lacks — the catalogue already has twelve of those.
+   */
+  @Patch("entries/:id/visibility")
+  @RequirePermissions("content.update")
+  setVisibility(
+    @Param("id") id: string,
+    @Body() dto: VisibilityDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.content.setEntryHidden(id, dto.hidden, user, this.ctx(req, ip));
+  }
+
   @Post("entries/:id/restore")
   @RequirePermissions("content.archive")
   restore(
@@ -268,6 +325,28 @@ export class ContentController {
     @ClientIp() ip: string | null,
   ) {
     return this.content.publish(dto.note, user, this.ctx(req, ip));
+  }
+
+  /**
+   * What publishing now would change on the live site, and where.
+   *
+   * `content.read` rather than `content.publish`: this is the question "is the
+   * site up to date?", which anyone working on the content has a reason to ask
+   * and which the dashboard shows on the publish screen to people who cannot
+   * press the button.
+   *
+   * It exists because counting `APPROVED` entries is not the same question and
+   * gets it wrong in a way that matters. A deletion never reaches `APPROVED` —
+   * the row is marked deleted and its status left alone — and neither does a
+   * reordering or a hide, so the publish screen reported "nothing is approved"
+   * and disabled its own button while a deleted team member was still live on
+   * the site. This compares the stored document against the one the next
+   * publish would build, which catches all four.
+   */
+  @Get("pending")
+  @RequirePermissions("content.read")
+  pending() {
+    return this.content.pendingChanges();
   }
 
   /** The draft document, for the dashboard's live preview of the real page. */

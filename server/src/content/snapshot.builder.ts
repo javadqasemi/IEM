@@ -8,6 +8,12 @@ type EntryRow = {
   data: unknown;
   publishedData: unknown;
   status: string;
+  /**
+   * Optional so a caller that does not select it still typechecks — but every
+   * caller should, or the filter below silently never fires. See the note on
+   * `buildSnapshot`.
+   */
+  hidden?: boolean;
 };
 
 /**
@@ -31,6 +37,19 @@ type EntryRow = {
  *    is a blank section on a live page, and it would be discovered by a
  *    visitor rather than by us. `assertComplete` is what stands between a
  *    half-seeded database and that.
+ * 4. **Hidden entries are dropped, here and nowhere else.** That is why the
+ *    public site has no concept of visibility at all: an entry that is not in
+ *    the document does not exist as far as the page is concerned. It applies to
+ *    the draft preview too, so the preview shows what publishing would produce.
+ *    Note the interaction with `assertComplete`: hiding *every* entry of a
+ *    required collection empties it and fails the publish. That is intended,
+ *    and it is the same backstop that stands between a half-seeded database and
+ *    a blank section.
+ *
+ *    The filter reads `row.hidden`, so **a caller must select it**. A Prisma
+ *    `select` that omits the column returns `undefined`, which is falsy, and
+ *    the filter then silently passes everything — the feature would look
+ *    implemented and do nothing.
  */
 export function buildSnapshot(
   entries: EntryRow[],
@@ -38,6 +57,7 @@ export function buildSnapshot(
 ): Record<string, unknown> {
   const byType = new Map<string, EntryRow[]>();
   for (const e of entries) {
+    if (e.hidden) continue;
     const list = byType.get(e.typeKey) ?? [];
     list.push(e);
     byType.set(e.typeKey, list);
@@ -234,4 +254,147 @@ export function crossCheck(snapshot: Record<string, unknown>): string[] {
   }
 
   return warnings;
+}
+
+/* ------------------------------------------------------------------ */
+/* Comparing two documents                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Sorts object keys recursively, so two documents can be compared as strings.
+ *
+ * **Required, not tidiness.** The live document comes back out of a Postgres
+ * `jsonb` column, and `jsonb` does not preserve key order — it stores an
+ * object's keys in its own order and hands them back that way. A plain
+ * `JSON.stringify` comparison against a freshly built object therefore reports
+ * almost every object as changed, which would make the publish screen claim
+ * there is always something to publish and so tell an editor nothing.
+ *
+ * Arrays keep their order: in this document order is meaning, because a
+ * collection is written in `position` order and reordering *is* a change worth
+ * reporting.
+ *
+ * Exported so nothing writes a second comparison that gets this wrong.
+ */
+export function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = canonical((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** Two documents are the same when their canonical forms are. */
+function same(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
+/**
+ * How many things are in one area, for the diff's readout.
+ *
+ * A collection reports its length and a keyed map its number of entries, which
+ * is the number an editor recognises — "Referenzprojekte 30 → 29" says what
+ * happened. A singleton reports `null`: counting the fields of the footer would
+ * be a number that looks like information and is not.
+ */
+function countOf(value: unknown): number | null {
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === "object") return Object.keys(value as object).length;
+  return null;
+}
+
+/** The editor-facing name of a content key, from the content model. */
+function labelFor(contentKey: string): string {
+  const type = CONTENT_TYPES.find((t) => t.contentKey === contentKey);
+  if (type) return type.name;
+  // The two `__`-prefixed types spread loose keys, so their content key is not
+  // the one that lands in the document — name those explicitly rather than
+  // falling through to the raw key.
+  const loose: Record<string, string> = {
+    jobUeberUns: "Stelleninserat — Über uns",
+    jobBewerbung: "Stelleninserat — Bewerbung",
+    jobSchluss: "Stelleninserat — Schlusssatz",
+    contactEmail: "Bewerbungsadresse",
+  };
+  return loose[contentKey] ?? contentKey;
+}
+
+/**
+ * What differs between the live document and the one the next publish builds.
+ *
+ * Per **area** rather than per field, because that is the question the publish
+ * screen asks: an editor deciding whether to publish wants to know that the
+ * team and the references have changed, not that `team[17].office` did.
+ *
+ * The comparison is what makes the screen honest. It used to count `APPROVED`
+ * entries instead, and that count is not the question — a **deletion** never
+ * reaches `APPROVED` (the row is marked deleted and its status left alone) and
+ * neither does a **reordering** or a **hide**. So removing a team member left
+ * the screen reporting nothing to do, with the publish button disabled, while
+ * the live page still showed the person. Comparing built documents catches all
+ * four the same way.
+ *
+ * `live` is null before anything has ever been published, and every area then
+ * counts as new.
+ */
+export function diffDocuments(
+  live: Record<string, unknown> | null,
+  next: Record<string, unknown>,
+): { key: string; label: string; live: number | null; next: number | null }[] {
+  const keys = [...new Set([...Object.keys(live ?? {}), ...Object.keys(next)])].sort();
+
+  const changes: { key: string; label: string; live: number | null; next: number | null }[] = [];
+  for (const key of keys) {
+    const before = live?.[key];
+    const after = next[key];
+    if (same(before, after)) continue;
+    changes.push({
+      key,
+      label: labelFor(key),
+      live: live ? countOf(before) : null,
+      next: countOf(after),
+    });
+  }
+  return changes;
+}
+
+/* ------------------------------------------------------------------ */
+/* What the next publish would use                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The rows `publish()` would build its snapshot from, without writing anything.
+ *
+ * A **pure model of the first two steps** `publish()` performs inside its
+ * transaction:
+ *
+ * 1. every `APPROVED` entry has its `data` promoted to `publishedData`;
+ * 2. the snapshot is built from every non-deleted row that has a
+ *    `publishedData` — `where: { deletedAt: null, publishedData: { not: DbNull } }`.
+ *
+ * Step 1 is modelled by substituting `data` for `publishedData` on approved
+ * rows; step 2 by dropping rows that would still have none. A row that has
+ * never been published and is not approved is therefore absent from both — it
+ * is a draft, and a draft is not on the site.
+ *
+ * **`publish()` deliberately does not call this.** It writes the rows and reads
+ * them back, so what it stores is what the database actually holds rather than
+ * what this function predicted. The duplication is the point: this one has to
+ * be side-effect free because `GET /content/pending` runs it on every load of
+ * the publish screen. If the promotion rule changes, change it in both.
+ *
+ * Deleted rows are the caller's responsibility — `pendingChanges` already
+ * queries `where: { deletedAt: null }`, which is what makes a deletion show up
+ * here as an absence.
+ */
+export function rowsForNextPublish<T extends EntryRow>(rows: T[]): T[] {
+  return rows
+    .map((row) =>
+      row.status === "APPROVED" ? ({ ...row, publishedData: row.data } as T) : row,
+    )
+    .filter((row) => row.publishedData !== null && row.publishedData !== undefined);
 }

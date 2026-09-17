@@ -663,6 +663,10 @@ export class ContentService {
           data: true,
           publishedData: true,
           status: true,
+          // Selected because uildSnapshot filters on it. Omit it and Prisma
+          // returns undefined, the filter passes everything, and hiding an
+          // entry silently stops working.
+          hidden: true,
         },
       });
 
@@ -749,6 +753,10 @@ export class ContentService {
           data: true,
           publishedData: true,
           status: true,
+          // Selected because uildSnapshot filters on it. Omit it and Prisma
+          // returns undefined, the filter passes everything, and hiding an
+          // entry silently stops working.
+          hidden: true,
         },
       }),
       this.prisma.contentSnapshot.findFirst({ orderBy: { version: "desc" } }),
@@ -783,6 +791,10 @@ export class ContentService {
         data: true,
         publishedData: true,
         status: true,
+        // Selected because uildSnapshot filters on it. Omit it and Prisma
+        // returns undefined, the filter passes everything, and hiding an
+        // entry silently stops working.
+        hidden: true,
       },
     });
     const content = buildSnapshot(rows, { source: "draft" });

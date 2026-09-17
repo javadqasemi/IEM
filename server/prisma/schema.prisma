@@ -236,6 +236,10 @@ model ContentEntry {
   data          Json
   publishedData Json?
   status        WorkflowState @default(DRAFT)
+  /// Kept, but left out of the site. Distinct from `deletedAt`: a hidden entry
+  /// is still edited, reviewed and versioned like any other — it simply does
+  /// not reach the published document. `buildSnapshot` drops it.
+  hidden        Boolean       @default(false)
   position      Int           @default(0)
   version       Int           @default(1)
   createdById   String?

@@ -155,18 +155,28 @@ export type Paginated<T> = {
  * Wraps every successful body as `{ data: … }`.
  *
  * It costs one key and buys the ability to add `meta` later without breaking
- * every caller — which a bare array cannot do. A handler that already returns
- * a `{ data }` shape is passed through untouched so paginated responses do not
- * end up double-wrapped.
+ * every caller — which a bare array cannot do.
+ *
+ * **Unconditionally.** This used to skip bodies that already had a `data` key,
+ * on the reasoning that a handler returning its own envelope should not be
+ * wrapped twice. No handler does — `paginate()` returns
+ * `{ items, total, page, perPage, pages }`, not `{ data }` — so the guard
+ * protected nothing and instead misfired on the domain: `ContentEntry.data` is
+ * a real column holding the entry's fields. Every endpoint returning a single
+ * entry was therefore passed through unwrapped, the client unwrapped it anyway,
+ * and callers received the entry's *payload* where they expected the entry.
+ * The content editor read `entry.versions` off that payload and crashed the
+ * dashboard to a blank page.
+ *
+ * So: no inspection of the body. If a handler ever genuinely needs to control
+ * its own envelope, give it an explicit opt-out decorator that this reads —
+ * never a shape test, which cannot tell an envelope from data that happens to
+ * look like one.
  */
 @Injectable()
 export class EnvelopeInterceptor implements NestInterceptor {
   intercept(_ctx: ExecutionContext, next: CallHandler): Observable<unknown> {
-    return next.handle().pipe(
-      map((body) =>
-        body && typeof body === "object" && "data" in (body as object) ? body : { data: body },
-      ),
-    );
+    return next.handle().pipe(map((body) => ({ data: body })));
   }
 }
 

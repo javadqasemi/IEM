@@ -142,13 +142,38 @@ export async function hydrate(signal?: AbortSignal): Promise<void> {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const snapshot = (await res.json()) as PublishedSnapshot;
+    /**
+     * The API wraps every successful body as `{ data: … }`.
+     *
+     * `EnvelopeInterceptor` does it unconditionally and with no inspection of
+     * the body — see the note on it in `server/src/common/http.ts` — so this
+     * has to unwrap unconditionally too. Reading `res.json()` as the snapshot
+     * directly yields an object with a `data` key and no `content`, which is
+     * the malformed case below, and the page would silently keep serving the
+     * build-time copy for ever.
+     */
+    const payload = (await res.json()) as { data?: PublishedSnapshot } | null;
+    const snapshot = payload?.data;
+
     if (!snapshot?.content || typeof snapshot.version !== "number") {
-      throw new Error("malformed snapshot");
-    }
-    // Strictly newer. An equal version means the build already embeds it, and
-    // re-setting would re-render the page for nothing.
-    if (snapshot.version > state.version) {
+      /**
+       * Warned, not thrown.
+       *
+       * A malformed body is the one failure here that is *ours* rather than
+       * the network's, and it is the one that would otherwise be invisible:
+       * the page keeps rendering the embedded snapshot and looks entirely
+       * correct while never taking a published change. `console.debug` in the
+       * catch below is right for an offline API; this deserves a warning with
+       * the body attached, because someone has to be able to see it.
+       */
+      console.warn(
+        "[iem] Der veröffentlichte Inhalt hat eine unerwartete Form. " +
+          "Die Seite zeigt weiterhin den Stand aus dem Build.",
+        payload,
+      );
+    } else if (snapshot.version > state.version) {
+      // Strictly newer. An equal version means the build already embeds it, and
+      // re-setting would re-render the page for nothing.
       setContent(snapshot.content, snapshot.version);
       return;
     }

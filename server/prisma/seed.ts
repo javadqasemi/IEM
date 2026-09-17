@@ -12,6 +12,10 @@
  *
  *   npm run seed
  */
+// Run straight through `tsx`, this script gets no env file of its own — the
+// Prisma CLI loads `prisma.config.ts`, `npm run seed` does not.
+import "dotenv/config";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type ContentKind } from "@prisma/client";
 import * as argon2 from "argon2";
 import { PERMISSIONS, SYSTEM_ROLES } from "../src/rbac/permissions.catalog";
@@ -21,7 +25,16 @@ import { DEFAULT_SETTINGS } from "../src/settings/settings.service";
 // source of the seed copy.
 import { defaultContent } from "../../src/content/defaults";
 
-const prisma = new PrismaClient();
+// The same driver adapter the server uses. From Prisma 7 a bare
+// `new PrismaClient()` throws: the connection is made by `pg`, not by a
+// bundled query engine, and `schema.prisma` carries no `url` to fall back on.
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error(
+    "DATABASE_URL ist nicht gesetzt. server/.env.example nach server/.env kopieren und ausfüllen.",
+  );
+}
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 /* ------------------------------------------------------------------ */
 
