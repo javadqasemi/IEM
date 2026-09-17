@@ -12,6 +12,23 @@ audit of the **frontend only**, dated 14 September 2026, written before the CMS 
 still useful for the site's own coverage and technical debt, but it predates `server/` and knows
 nothing about it — it is *not* the source of the Known gaps at the foot of this file.
 
+Five further documents describe the **enterprise platform** the CMS is becoming the foundation of.
+Read them in this order before touching `src/app`, `src/core`, `src/entities`, `src/features`,
+`src/shared` or `src/widgets` — those folders exist but are empty, and their README files are the
+contracts that say what may go in them:
+
+| Document | |
+| --- | --- |
+| `docs/system-audit.md` | What is actually here. **§0 is the premise: there is no operational domain model.** |
+| `docs/enterprise-architecture.md` | Current architecture, its twelve named weaknesses, the target, the folder structure, navigation, dashboards, the UI system, and a staged migration |
+| `docs/data-model.md` | Every business entity — fields, relationships, validation, lifecycle, statuses — with a Mermaid ER diagram |
+| `docs/permissions.md` | The RBAC catalogue and the role × module × action matrix, including the row-level `◐` rules |
+| `docs/roadmap.md` | Build order, complexity, dependencies, database and API impact, and the definition of done per module |
+
+**None of the nineteen business modules is implemented, and the architecture says not to start one
+until the Foundation stages (F2–F9 in the roadmap) are done.** The folder skeleton is Stage A and is
+the only part built so far.
+
 ## Commands
 
 ```bash
