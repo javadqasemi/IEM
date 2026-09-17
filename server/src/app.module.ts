@@ -20,7 +20,7 @@ import { UsersService } from "./users/users.service";
 import { RbacController } from "./rbac/rbac.controller";
 import { RbacService } from "./rbac/rbac.service";
 import { SettingsController } from "./settings/settings.controller";
-import { SettingsService } from "./settings/settings.service";
+import { SettingsModule } from "./settings/settings.module";
 import { AuditController } from "./audit/audit.controller";
 import { ApplicationsController } from "./applications/applications.controller";
 import { ApplicationsService } from "./applications/applications.service";
@@ -65,6 +65,11 @@ import { ScheduledTasks } from "./tasks/scheduled.tasks";
       }),
     }),
     CommonModule,
+    // Before `MailModule` and `AuthModule` in the list because both now read
+    // settings. Nest resolves providers by the graph rather than by this order,
+    // so it is documentation rather than a requirement — but the graph is what
+    // the reader is trying to reconstruct, and this is the shape of it.
+    SettingsModule,
     MailModule,
     AuthModule,
     MediaModule,
@@ -82,7 +87,9 @@ import { ScheduledTasks } from "./tasks/scheduled.tasks";
     ContentService,
     UsersService,
     RbacService,
-    SettingsService,
+    // `SettingsService` is no longer listed here — it moved to the global
+    // `SettingsModule` so that `MailService` and `AuthService` can inject it.
+    // Leaving it here as well would construct a second instance.
     ApplicationsService,
     ScheduledTasks,
 

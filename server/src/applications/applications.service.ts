@@ -32,6 +32,16 @@ const ALLOWED_DOSSIER = new Map<string, string>([
   ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
 ]);
 
+/**
+ * The hard ceiling per file, matching the Multer limit on the controller.
+ *
+ * Multer enforces it before the body is buffered, which is the only place it can
+ * usefully be enforced against a hostile caller — a limit checked after the
+ * bytes are in memory has already cost the memory. `applications.maxFileBytes`
+ * can lower the effective limit from the dashboard but never raise it past this,
+ * which is why the setting is clamped rather than trusted: an operator typing a
+ * gigabyte into a box must not be able to widen the public endpoint's exposure.
+ */
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_FILES = 5;
@@ -73,8 +83,18 @@ export class ApplicationsService {
     const stored: StoredFile[] = [];
     let total = 0;
 
+    // The configured limit, never above the hard one. The setting was labelled
+    // "Grösse pro Datei" from the start and read by nothing — the only limit in
+    // force was the constant.
+    const maxFileBytes = await this.settings.number(
+      "applications.maxFileBytes",
+      MAX_FILE_BYTES,
+      64 * 1024,
+      MAX_FILE_BYTES,
+    );
+
     for (const file of files.slice(0, MAX_FILES)) {
-      if (file.size > MAX_FILE_BYTES) {
+      if (file.size > maxFileBytes) {
         this.logger.warn(`Bewerbungsanhang zu gross, übersprungen: ${file.originalname}`);
         continue;
       }

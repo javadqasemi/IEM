@@ -2,9 +2,45 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as nodemailer from "nodemailer";
 import type { JobApplication } from "@prisma/client";
+import { SettingsService } from "../settings/settings.service";
+
+/** The keys this service reads, in one place so the group read below is honest. */
+const MAIL_KEYS = [
+  "mail.smtpHost",
+  "mail.smtpPort",
+  "mail.smtpUser",
+  "mail.smtpPassword",
+  "mail.smtpSecure",
+  "mail.from",
+  "mail.fromName",
+  "company.name",
+];
+
+type MailConfig = {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+  fromName: string;
+};
 
 /**
  * Outgoing mail.
+ *
+ * **Configured from the dashboard, with the environment as the fallback.** It
+ * used to be environment-only, built once in the constructor — which meant the
+ * dashboard's whole SMTP form configured nothing, and an operator who filled it
+ * in and found mail still not sending had no way to tell why. A setting that is
+ * left blank still defers to `SMTP_*`, so an existing deployment is unchanged
+ * and a container can keep its secrets out of the database.
+ *
+ * The settings are read **per send** rather than cached. That is one indexed
+ * read of eight rows against a volume of a few messages a day, and it buys the
+ * property the old design lacked: changing the SMTP host in the dashboard takes
+ * effect on the next message rather than on the next restart. The transport is
+ * still only rebuilt when the resolved configuration actually changes.
  *
  * **Degrades to logging rather than throwing.** With no SMTP host configured
  * — which is the state of a fresh install and of every developer machine —
@@ -22,30 +58,80 @@ import type { JobApplication } from "@prisma/client";
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transport: nodemailer.Transporter | null = null;
 
-  constructor(private readonly config: ConfigService) {
-    const host = config.get<string>("SMTP_HOST");
-    if (!host) {
-      this.logger.warn(
-        "SMTP_HOST ist nicht gesetzt — E-Mails werden protokolliert statt versendet.",
-      );
-      return;
+  /** Rebuilt only when `resolve()` returns something different from last time. */
+  private transport: nodemailer.Transporter | null = null;
+  private transportKey = "";
+  /** Logged once per distinct state, so a stubbed install does not flood the log. */
+  private announced = "";
+
+  constructor(
+    private readonly config: ConfigService,
+    private readonly settings: SettingsService,
+  ) {}
+
+  /**
+   * The effective mail configuration: dashboard setting, else environment, else
+   * a sane default.
+   *
+   * Falls back to the environment on a *blank* setting rather than only on a
+   * missing one — an operator clearing the SMTP host means "use the deployment's
+   * value", not "send to an empty host".
+   */
+  private async resolve(): Promise<MailConfig> {
+    let stored: Record<string, unknown> = {};
+    try {
+      stored = await this.settings.values(MAIL_KEYS);
+    } catch (err) {
+      // The database being unreachable must not stop a password-reset mail that
+      // the environment alone could have sent.
+      this.logger.warn(`Mail-Einstellungen nicht lesbar, Umgebung wird verwendet: ${(err as Error).message}`);
     }
-    this.transport = nodemailer.createTransport({
-      host,
-      port: Number(config.get("SMTP_PORT") ?? 587),
-      secure: config.get("SMTP_SECURE") === "true",
-      auth: config.get<string>("SMTP_USER")
-        ? { user: config.getOrThrow<string>("SMTP_USER"), pass: config.getOrThrow<string>("SMTP_PASSWORD") }
-        : undefined,
-    });
+
+    const str = (key: string, envKey: string, fallback = ""): string => {
+      const value = stored[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+      return this.config.get<string>(envKey) ?? fallback;
+    };
+
+    const company = typeof stored["company.name"] === "string" ? (stored["company.name"] as string) : "";
+    const port = Number(stored["mail.smtpPort"]);
+    const secure = stored["mail.smtpSecure"];
+
+    return {
+      host: str("mail.smtpHost", "SMTP_HOST"),
+      port: Number.isFinite(port) && port > 0 ? port : Number(this.config.get("SMTP_PORT") ?? 587),
+      secure:
+        typeof secure === "boolean" ? secure : this.config.get("SMTP_SECURE") === "true",
+      user: str("mail.smtpUser", "SMTP_USER"),
+      pass: str("mail.smtpPassword", "SMTP_PASSWORD"),
+      from: str("mail.from", "MAIL_FROM", "noreply@iem.ch"),
+      fromName: str("mail.fromName", "MAIL_FROM_NAME", company || "IEM AG"),
+    };
   }
 
-  private get from(): string {
-    const address = this.config.get<string>("MAIL_FROM") ?? "noreply@iem.ch";
-    const name = this.config.get<string>("MAIL_FROM_NAME") ?? "IEM AG";
-    return `"${name}" <${address}>`;
+  /** The transport for a configuration, rebuilt only when that changes. */
+  private transportFor(mail: MailConfig): nodemailer.Transporter | null {
+    if (!mail.host) {
+      this.transport = null;
+      this.transportKey = "";
+      return null;
+    }
+
+    const key = `${mail.host}:${mail.port}:${mail.secure}:${mail.user}:${mail.pass}`;
+    if (this.transport && key === this.transportKey) return this.transport;
+
+    // `close()` on the superseded transport, or its pooled sockets stay open for
+    // a host nothing will send to again.
+    this.transport?.close();
+    this.transport = nodemailer.createTransport({
+      host: mail.host,
+      port: mail.port,
+      secure: mail.secure,
+      auth: mail.user ? { user: mail.user, pass: mail.pass } : undefined,
+    });
+    this.transportKey = key;
+    return this.transport;
   }
 
   private get adminUrl(): string {
@@ -53,12 +139,33 @@ export class MailService {
   }
 
   private async send(to: string, subject: string, text: string): Promise<void> {
-    if (!this.transport) {
+    const mail = await this.resolve();
+    const transport = this.transportFor(mail);
+
+    if (!transport) {
+      if (this.announced !== "stub") {
+        this.announced = "stub";
+        this.logger.warn(
+          "Kein SMTP-Server konfiguriert (weder in den Einstellungen noch als SMTP_HOST) — " +
+            "E-Mails werden protokolliert statt versendet.",
+        );
+      }
       this.logger.log(`[mail:stub] an ${to} — ${subject}\n${text}`);
       return;
     }
+
+    if (this.announced !== mail.host) {
+      this.announced = mail.host;
+      this.logger.log(`E-Mail-Versand über ${mail.host}:${mail.port}.`);
+    }
+
     try {
-      await this.transport.sendMail({ from: this.from, to, subject, text });
+      await transport.sendMail({
+        from: `"${mail.fromName}" <${mail.from}>`,
+        to,
+        subject,
+        text,
+      });
     } catch (err) {
       // Logged, never rethrown — see the note at the top of the class.
       this.logger.error(`Versand an ${to} fehlgeschlagen: ${(err as Error).message}`);

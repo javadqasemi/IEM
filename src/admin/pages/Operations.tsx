@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { cn } from "@/lib/cn";
 import { api, type ApplicationRow, type SettingRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
@@ -535,6 +536,21 @@ export function SettingsPage() {
  * comma list, everything else a text box. A secret shows its mask and writing
  * the mask back is a no-op on the server, so saving the SMTP form without
  * retyping the password does not blank it.
+ *
+ * **`pending` marks a setting nothing reads yet**, and it is drawn differently
+ * rather than hidden. An audit of this screen found that 23 of the 25 settings
+ * were stored, editable, and consumed by no code — the SMTP block configured
+ * nothing because mail came from the environment, and `workflow.requireApproval`
+ * described lifting the four-eyes principle while doing nothing at all, so an
+ * operator could as easily have believed they were switching it *on*. Most are
+ * now wired; the rest say so.
+ *
+ * Saying so beats hiding them: they are the shape of half-built features —
+ * `security.requireMfaForAdmins` has its columns and its dependency but no
+ * enrolment flow — and an operator looking for the MFA switch should find it
+ * with an explanation rather than not find it. It is the same choice the
+ * executive dashboard makes with `KpiUnavailable`: a figure with no source shown
+ * as a gap rather than as a zero.
  */
 function SettingField({
   setting,
@@ -549,15 +565,24 @@ function SettingField({
 }) {
   const id = `setting-${setting.key}`;
 
+  /** The key line, plus a plain statement when nothing reads the value. */
+  const hint = setting.pending
+    ? `${setting.key} · noch nicht angebunden — der Wert wird gespeichert, aber von nichts gelesen`
+    : setting.secret
+      ? `${setting.key} · ${setting.hasValue ? "gesetzt" : "nicht gesetzt"} — leer lassen, um den Wert zu behalten`
+      : setting.key;
+
   if (typeof setting.value === "boolean") {
     return (
-      <Toggle
-        label={setting.description ?? setting.key}
-        hint={setting.key}
-        checked={Boolean(value)}
-        onChange={onChange}
-        disabled={disabled}
-      />
+      <div className={cn(setting.pending && "opacity-60")}>
+        <Toggle
+          label={setting.description ?? setting.key}
+          hint={hint}
+          checked={Boolean(value)}
+          onChange={onChange}
+          disabled={disabled}
+        />
+      </div>
     );
   }
 
@@ -565,11 +590,8 @@ function SettingField({
     <Field
       label={setting.description ?? setting.key}
       htmlFor={id}
-      hint={
-        setting.secret
-          ? `${setting.key} · ${setting.hasValue ? "gesetzt" : "nicht gesetzt"} — leer lassen, um den Wert zu behalten`
-          : setting.key
-      }
+      hint={hint}
+      className={cn(setting.pending && "opacity-60")}
     >
       {Array.isArray(setting.value) ? (
         <Input

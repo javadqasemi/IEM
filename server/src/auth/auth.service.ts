@@ -10,6 +10,7 @@ import * as argon2 from "argon2";
 import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { SettingsService } from "../settings/settings.service";
 import type { AuthUser } from "../common/decorators";
 
 export type TokenPair = {
@@ -38,6 +39,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly audit: AuditService,
+    private readonly settings: SettingsService,
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -163,7 +165,7 @@ export class AuthService {
   /* ---------------------------------------------------------------- */
 
   private async issue(user: User, ctx: Ctx): Promise<TokenPair> {
-    const ttl = this.config.get<string>("JWT_ACCESS_TTL") ?? "15m";
+    const ttl = await this.accessTtl();
     // No version claim: see `AccessTokenPayload` in `guards.ts` for why one was
     // removed rather than implemented.
     const accessToken = await this.jwt.signAsync(
@@ -193,6 +195,41 @@ export class AuthService {
     });
 
     return { accessToken, refreshToken, expiresIn: parseTtl(ttl) };
+  }
+
+  /**
+   * How long an access token lasts, as a `jsonwebtoken` duration string.
+   *
+   * `security.sessionTimeoutMinutes` is the source and `JWT_ACCESS_TTL` is the
+   * fallback. The setting existed from the start, was labelled "Gültigkeit des
+   * Zugriffstokens", and was read by nothing — so shortening a session in the
+   * dashboard changed no session.
+   *
+   * Clamped to 1–240 minutes by `SettingsService.number`. The ceiling is the
+   * point: this token is a bearer credential that cannot be revoked before it
+   * expires (the *refresh* token is the revocable half), so an operator typing
+   * 10000 into a box should not be able to mint day-long ones. The floor keeps a
+   * typo from issuing tokens that expire before the response arrives.
+   *
+   * Read per issue rather than cached — that is one indexed row on sign-in and
+   * on refresh, and it means a change applies to the next token rather than
+   * after a restart. A session already running keeps its current token until it
+   * expires, which is why the setting's description says so.
+   */
+  private async accessTtl(): Promise<string> {
+    const envTtl = this.config.get<string>("JWT_ACCESS_TTL") ?? "15m";
+    try {
+      const minutes = await this.settings.number(
+        "security.sessionTimeoutMinutes",
+        Math.max(1, Math.round(parseTtl(envTtl) / 60)),
+        1,
+        240,
+      );
+      return `${minutes}m`;
+    } catch {
+      // A settings read that fails must not stop anyone signing in.
+      return envTtl;
+    }
   }
 
   /**

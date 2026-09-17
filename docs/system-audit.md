@@ -2,6 +2,9 @@
 
 **Date:** 17 September 2026
 **Scope:** the whole repository — public site, dashboard, API, database, auth, RBAC, media, build.
+**Status:** revised the same day. Three corrections and two new findings are marked *(added in
+revision)* below; they came out of running the seed and exercising the API while fixing Stage 0,
+which is also the honest record of what a source-only read missed.
 **Method:** source read of all ~28'000 lines of first-party code, plus a live run of both processes
 (Vite on 5173, NestJS on 3100, PostgreSQL on 5433) and the two typecheck gates and the production
 build. Every claim below names the file it came from.
@@ -283,7 +286,8 @@ device", no SSO/OIDC, no API keys (`system.api` is a permission with no implemen
 
 ### 2.7 Authorisation / RBAC (`server/src/rbac/`, `server/src/auth/guards.ts`)
 
-**Purpose.** 51 permissions, 10 seeded roles, custom roles assembled from the same catalogue.
+**Purpose.** 51 permissions, 11 seeded roles, custom roles assembled from the same catalogue
+*(corrected in revision: the seed reports 11 roles; `README.md` says ten)*.
 
 **Status.** Backend complete and correct. **Frontend half is not implemented.**
 
@@ -304,7 +308,7 @@ being acceptable the moment Finance and HR screens exist. See **F-07**.
 
 12 of the 51 permissions are enforced on no route. See **F-06** for the verified list.
 
-The 10 seeded roles are **CMS roles** — `content_editor`, `marketing`, `viewer`, `guest`. None of
+The 11 seeded roles are **CMS roles** — `content_editor`, `marketing`, `viewer`, `guest`. None of
 Management, Project Manager, Engineer, Draftsman or Finance exists. `hr` exists but is scoped to
 content and applications.
 
@@ -343,8 +347,9 @@ nothing reads. Part of **F-03**.
 come back as a fixed mask with a `hasValue` flag, and writing the mask back is a no-op — so saving
 the SMTP form without retyping the password does not blank it.
 
-**Bug — and it is the most user-visible defect in the system.** 24 of the 26 seeded settings are
-**write-only**. Verified by grepping every read of `SettingsService.value` across `server/src`: the
+**Bug — and it is the most user-visible defect in the system.** 23 of the 25 seeded settings are
+**write-only** *(corrected in revision: the seed reports 25 settings, not 26)*. Verified by grepping
+every read of `SettingsService.value` across `server/src`: the
 only two consumers are `applications.retentionDays` and `applications.notifyEmail`
 (`applications.service.ts:109` and `:150`). Everything else — `workflow.requireApproval`,
 `workflow.autoPublishApproved`, `site.maintenanceMode`, `security.sessionTimeoutMinutes`,
@@ -357,6 +362,10 @@ only two consumers are `applications.retentionDays` and `applications.notifyEmai
 Vier-Augen-Grundsatz auf". An operator could reasonably believe they had turned the four-eyes
 principle **on**. Mail settings are the second: SMTP is configured from `server/.env`, so an operator
 who fills in the dashboard's SMTP form and finds mail still not sending has no way to tell why.
+
+**And it is worse than the source read showed** *(added in revision)*. Exercising the endpoint
+revealed that the settings page **cannot save at all** — not just that the values are unread. See
+**F-22**. Both halves are now fixed.
 
 ---
 
@@ -546,6 +555,46 @@ Severity is about this system as it stands *and* about the risk it carries into 
 | F-18 | Low | RBAC | Seeded roles are CMS roles; the requested engineering-company roles do not exist. |
 | F-19 | Low | Tooling | Two source files are binary to git because of a NUL sentinel. |
 | F-20 | — | UX decision | Rail shows groups only; spec asks for expandable groups. Needs a decision, not a default. |
+| F-21 | **High** | Correctness | *(added in revision)* Both dashboard download links — audit CSV and application dossiers — return 401 and have never worked. |
+| F-22 | **High** | Correctness | *(added in revision)* The settings page cannot save. `value` is stripped by the validation pipe; the endpoint answers 200 and the audit log records a change that did not happen. |
+
+### F-21 and F-22 in detail *(added in revision)*
+
+Neither was in the audit as first written, and the reason is worth recording: both are **runtime**
+failures on paths that read correctly. A source-only review sees a guarded route and a link to it, or
+a DTO and a service that writes it, and both look right. This is the concrete cost of the missing
+browser/API pass noted in §7.
+
+**F-21 — the download links send no credential.** `api.ts` carried the comment "the link carries the
+session cookie and the server checks the permission on the way through". There is no such cookie: the
+only one issued is `refresh_token`, scoped to `path=/api/v1/auth`. `JwtAuthGuard` had an
+`access_token` cookie fallback that would have covered it, and nothing has ever set that cookie
+either (**F-10** — which turned out not to be merely dead, but dead in a load-bearing place).
+
+```
+GET /api/v1/audit/export   (browser, session cookies) -> 401
+GET /api/v1/audit/export   (Authorization: Bearer …)  -> 200, 15'350 bytes
+```
+
+It failed silently because a failed navigation is not something the page can catch — the operator
+clicked and nothing happened.
+
+**F-22 — the settings page cannot save.** `SettingUpdate.value` in `settings.controller.ts` carried
+**no class-validator decorator**, and the global pipe runs with `whitelist: true`, which strips
+exactly that. The service then wrote `value: undefined`, which Prisma reads as "leave this column
+alone".
+
+```
+PATCH /api/v1/settings  {updates:[{key:"applications.retentionDays", value:999}]}
+  -> 200
+  -> audit row: settings.updated by admin@iem.ch, after {"keys":["applications.retentionDays"]}
+  -> stored value: still 180
+```
+
+A success response, an audit entry asserting the change, and no change. This is the **second**
+occurrence of the identical trap in this codebase — the first is written up in `CLAUDE.md` against
+the content DTOs, where it blanked the editor. A scan of every class property in `server/src` found
+no third instance.
 
 ### F-02 in detail
 
@@ -665,6 +714,14 @@ requested application); the IFC models; visual/browser QA of the dashboard, beca
 automation was available in this session — every UI statement above comes from reading the source,
 not from watching it run. A browser pass over the 11 dashboard screens is worth doing before Stage 1
 and is the one gap in this audit's evidence.
+
+*(added in revision)* That gap has already proved expensive. **F-21** and **F-22** were both found in
+the first hour of Stage 0, by exercising endpoints rather than reading them, and both are High: two
+download links that have never worked, and a settings page that reports success while saving nothing.
+Both sit on code that reads correctly. Treat the remaining unexercised paths — the media upload and
+replace flows, the review and publish screens, the reorder endpoint, the invitation flow end to end —
+as unverified rather than as working, and exercise them before building on them. The first three
+Stage 0 commits added the API-level habit; a browser pass is still owed.
 
 `docs/PROJECT_IMPLEMENTATION_CHECKLIST.md` (14 September 2026) remains valid for the public site's
 own coverage. It predates `server/` and knows nothing about the CMS; nothing in it is superseded by

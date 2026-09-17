@@ -8,9 +8,16 @@ import {
 import { Prisma, WorkflowState, type ContentEntry } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { SettingsService } from "../settings/settings.service";
 import { CONTENT_TYPES, contentTypeByKey } from "./content-types";
 import { validateEntry } from "./content.validator";
-import { assertComplete, buildSnapshot, crossCheck } from "./snapshot.builder";
+import {
+  assertComplete,
+  buildSnapshot,
+  crossCheck,
+  diffDocuments,
+  rowsForNextPublish,
+} from "./snapshot.builder";
 import type { AuthUser } from "../common/decorators";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
@@ -40,6 +47,7 @@ export class ContentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly settings: SettingsService,
   ) {}
 
   /* ================================================================ */
@@ -314,6 +322,44 @@ export class ContentService {
     return entry;
   }
 
+  /**
+   * Takes an entry off the site, or puts it back.
+   *
+   * Not a delete and not a workflow step. The row keeps its data, its
+   * versions, its review state and its position; `buildSnapshot` simply leaves
+   * it out of the document. That is what makes it reversible at no cost — the
+   * switch back is the same call.
+   *
+   * It changes the *draft*, like every other edit here, so the entry stays on
+   * the live site until someone publishes. `GET /content/pending` reports it
+   * correctly because that compares built documents rather than counting
+   * approved rows, and a hidden entry changes the document it would produce.
+   *
+   * `status` is deliberately left alone. Hiding is not an editorial change to
+   * the content and should not drag an approved entry back into review — the
+   * same reasoning that leaves a deletion's status untouched.
+   */
+  async setEntryHidden(id: string, hidden: boolean, actor: AuthUser, ctx: Ctx) {
+    const entry = await this.prisma.contentEntry.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!entry) throw new NotFoundException("Eintrag nicht gefunden.");
+
+    const updated = await this.prisma.contentEntry.update({
+      where: { id },
+      data: { hidden, updatedById: actor.id },
+    });
+
+    this.audit.record({
+      actor,
+      action: hidden ? "content.hidden" : "content.shown",
+      resource: "content_entry",
+      resourceId: id,
+      ...ctx,
+    });
+    return updated;
+  }
+
   async duplicateEntry(id: string, actor: AuthUser, ctx: Ctx) {
     const src = await this.prisma.contentEntry.findUnique({ where: { id } });
     if (!src) throw new NotFoundException("Eintrag nicht gefunden.");
@@ -503,11 +549,32 @@ export class ContentService {
     if (review.state !== "PENDING") {
       throw new BadRequestException("Diese Anfrage wurde bereits entschieden.");
     }
-    // Reviewing one's own submission defeats the point of having the step.
-    // Super Admin is exempt: on a small team they are often the only person
-    // who can act at all, and the audit log records that they did both.
-    if (review.requestedById === actor.id && !actor.isSuperAdmin) {
-      throw new ForbiddenException("Eigene Einreichungen können nicht selbst freigegeben werden.");
+    /**
+     * Reviewing one's own submission defeats the point of having the step.
+     *
+     * Two exemptions, and they are different in kind. **Super Admin** is exempt
+     * because on a small team they are often the only person who can act at all,
+     * and the audit log records that they did both halves.
+     * **`workflow.requireApproval`** is the operator's own decision to run
+     * without the four-eyes principle — the setting has always been described as
+     * exactly that ("Ausschalten hebt den Vier-Augen-Grundsatz auf") and was
+     * read by nothing, so switching it off changed nothing and an operator could
+     * as easily have believed they had switched it *on*.
+     *
+     * Turning it off does not remove the review step; it only allows the same
+     * person to take both actions. The submission, the decision and the
+     * decider are still recorded, which is what makes the exemption auditable
+     * rather than invisible.
+     */
+    const selfReview = review.requestedById === actor.id;
+    if (selfReview && !actor.isSuperAdmin) {
+      const fourEyes = await this.settings.flag("workflow.requireApproval", true);
+      if (fourEyes) {
+        throw new ForbiddenException(
+          "Eigene Einreichungen können nicht selbst freigegeben werden. " +
+            "Das Vier-Augen-Prinzip lässt sich in den Einstellungen aufheben.",
+        );
+      }
     }
 
     const next = decision === "APPROVED" ? WorkflowState.APPROVED : WorkflowState.REJECTED;
@@ -655,6 +722,48 @@ export class ContentService {
       version: snapshot.version,
       publishedAt: snapshot.publishedAt.toISOString(),
       content: snapshot.content,
+    };
+  }
+
+  /**
+   * Whether publishing now would change the live site, and where.
+   *
+   * The publish screen used to answer this by counting `APPROVED` entries, and
+   * that count is not the question. A **deletion** never reaches `APPROVED` —
+   * the row is marked deleted and its status is left alone — so removing a team
+   * member left the screen reporting nothing to do while the live page still
+   * showed the person, with the publish button disabled for good measure.
+   *
+   * This compares the stored snapshot against the document the next publish
+   * would build, so a deletion, a reordering and an approved edit all show up
+   * the same way: as an area that differs.
+   */
+  async pendingChanges() {
+    const [rows, last] = await Promise.all([
+      this.prisma.contentEntry.findMany({
+        where: { deletedAt: null },
+        select: {
+          typeKey: true,
+          key: true,
+          position: true,
+          data: true,
+          publishedData: true,
+          status: true,
+        },
+      }),
+      this.prisma.contentSnapshot.findFirst({ orderBy: { version: "desc" } }),
+    ]);
+
+    const next = buildSnapshot(rowsForNextPublish(rows), { source: "published" });
+    const live = (last?.content ?? null) as Record<string, unknown> | null;
+    const changes = diffDocuments(live, next);
+
+    return {
+      liveVersion: last?.version ?? null,
+      publishedAt: last?.publishedAt.toISOString() ?? null,
+      changed: changes.length > 0,
+      changes,
+      approved: rows.filter((r) => r.status === WorkflowState.APPROVED).length,
     };
   }
 

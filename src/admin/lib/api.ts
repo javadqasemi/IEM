@@ -448,6 +448,14 @@ export type SettingRow = {
   description: string | null;
   secret: boolean;
   hasValue: boolean;
+  /**
+   * Stored and editable, but read by no code yet.
+   *
+   * A property of the server's own definition list rather than of the row —
+   * whether a setting has a consumer is decided by what imports it. The screen
+   * draws these as explicitly not-yet-connected instead of as live controls.
+   */
+  pending: boolean;
   updatedAt: string;
 };
 
