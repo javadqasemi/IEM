@@ -134,10 +134,13 @@ and no boundary anywhere.
 *state*: no dirty tracking, no unsaved-changes guard, no submit/validation
 lifecycle, no server-error-to-field mapping beyond what each screen writes.
 
-**W10 — No domain layer on the server.** Business rules live in services
+**W10 — No domain layer, on either side.** Business rules live in services
 alongside Prisma calls. `ContentService` is 815 lines of workflow, validation,
-persistence and audit. A project's budget rules and a time entry's approval
-chain need somewhere that is not a repository.
+persistence and audit — and the rules in it are good, they are simply not
+reachable without a database. The frontend has the mirror problem: a rule would
+land in a component or beside a `fetch`. Both halves need a pure layer that can
+be tested with no mocks, and §3.1 is the answer on the client, `domain/` in
+§3.2 on the server.
 
 **W11 — The router has no nesting.** 175 lines, flat patterns, no nested
 routes, no loaders, no scroll restoration. Every enterprise module is a
@@ -248,7 +251,8 @@ src/
   features/                   one folder per module. Owns its whole stack.
     projects/
       routes.tsx              this feature's routes + permissions
-      api.ts                  its API slice only
+      repository.ts           HTTP only — the one file that knows URLs  §3.1
+      service.ts              domain only — pure rules, no React, no fetch
       hooks/                  useProjects, useProject, useProjectBudget
       screens/                ProjectList, ProjectDetail, ProjectCreate
       components/             ProjectStatusBadge, ProjectHealthBar
@@ -283,7 +287,43 @@ They are a different application that happens to share a repository, their
 stylesheet is the one every visitor downloads, and its content hash has been
 unchanged through ten commits. Moving them would buy nothing and risk that.
 
-### 3.1 Server structure
+### 3.1 Four layers inside a feature
+
+The first draft gave each feature a single `api.ts`. That is one layer too few:
+it leaves transport, domain rules and React state in one file, so an API change
+reaches the components and the rules cannot be tested without mocking `fetch`.
+
+```
+repository.ts   HTTP only. URLs, methods, DTOs. No React, no rules.
+      ↓
+service.ts      Domain only. Pure functions over entity types —
+                canTransition(), deriveHealth(), validatePhaseApproval().
+                No React, no fetch, therefore testable with no mocks at all.
+      ↓
+hooks/          React only. Cache keys, loading state, invalidation,
+                optimistic updates. Calls the repository, applies the service.
+      ↓
+screens/        Rendering only. No fetch call and no rule.
+```
+
+| Layer | Changeable without touching | Tested with |
+| --- | --- | --- |
+| `repository` | screens, hooks, rules | a stubbed client |
+| `service` | transport and UI | plain unit tests, no mocks |
+| `hooks` | screens | the cache + a stubbed repository |
+| `screens` | — | render tests and Playwright |
+
+`service.ts` is the layer that matters most and the one easiest to skip. The
+transitions table, the derived `health`, the four-eyes check on a phase approval
+— all pure, and all belonging somewhere testable without a browser or a server.
+The **server holds the authoritative copy of every rule**; the client's exists so
+a button that would be refused is disabled rather than clicked.
+
+**A feature with no domain logic omits `service.ts`.** Disciplines is master
+data; inventing an empty service for symmetry is ceremony. The layer appears
+when it has something to hold.
+
+### 3.2 Server structure
 
 ```
 server/src/
@@ -295,8 +335,15 @@ server/src/
     events/     the in-process domain event bus
     jobs/       the queue seam (W12)
   modules/      one Nest module per feature, mirroring features/
-    projects/   projects.module.ts · .controller.ts · .service.ts
-                dto/ · domain/ (rules, invariants, status machine)
+    projects/   projects.module.ts
+                projects.controller.ts    HTTP, DTOs, guards
+                projects.service.ts       orchestration, transactions,
+                                          audit, domain events
+                projects.repository.ts    Prisma access, list contract,
+                                          the where-builder
+                domain/                   pure rules — the same transitions
+                                          table the client's service holds
+                dto/
     customers/ contacts/ buildings/ offers/ contracts/ planning/
     tasks/ calendar/ meetings/ documents/ bim/ employees/ time-tracking/
     resources/ finance/ reports/ company/
@@ -556,7 +603,7 @@ Each stage is independently shippable and leaves the application working.
 | --- | --- | --- | --- |
 | **A** | Create `app/ core/ entities/ features/ shared/ widgets/` with their README contracts. Move **nothing**. | none | trivially |
 | **B** | Move the domain-free UI into `shared/ui/*`, split `primitives.tsx` and `data.tsx` by family. Imports updated mechanically; 274 tests are the net. | low | yes |
-| **C** | Move `lib/*` into `core/*` and split `api.ts`: request core to `core/api/client.ts`, endpoint groups to the features that own them. | medium — touches every screen | yes |
+| **C** | Move `lib/*` into `core/*` and split `api.ts`: request core to `core/api/client.ts`, endpoint groups into each owning feature's `repository.ts` (§3.1). | medium — touches every screen | yes |
 | **D** | Move each existing screen into a feature folder. `Operations.tsx` splits into `applications/`, `settings/`, `audit/`, `account/`. | medium | yes |
 | **E** | Server: wrap the flat controllers in feature modules; add `core/list`, `core/events`, generated permissions. | medium | yes |
 | **F** | Add the query cache, the nested router and the form layer — the three that every module depends on. | medium | yes |

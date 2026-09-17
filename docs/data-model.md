@@ -35,11 +35,21 @@ per table.
 enum Priority   { LOW  MEDIUM  HIGH  URGENT }
 enum RiskLevel  { LOW  MEDIUM  HIGH  CRITICAL }
 enum SiaPhase   { P31 P32 P33 P41 P51 P52 P53 }   // Vorprojekt … Inbetriebnahme
-enum Discipline { HEIZUNG LUEFTUNG KLIMA SANITAER ELEKTRO ENERGIE BIM }
 ```
 
 `SiaPhase` uses the real SIA 112 numbers the firm already plans in — the public
 site does this and the platform should not invent a second vocabulary.
+
+**`Discipline` is deliberately *not* an enum.** The first draft of this document
+made it one. It is wrong: a Gewerk has a lead engineer, a fee share, its own
+deliverables and its own budget, and an enum can hold none of that. It is an
+entity — §3.4.
+
+**`SiaPhase` stays an enum *and* gains an entity.** The enum is the vocabulary
+(the code `P41` means Bauprojekt everywhere); `ProjectPhase` in §3.5 is the
+instance of that phase on one project, with its dates, its fee, its deliverables
+and its sign-off. A phase is not a status field — it is the structure the firm
+plans, delivers and bills against.
 
 ---
 
@@ -55,6 +65,30 @@ erDiagram
     CUSTOMER   ||--o{ INVOICE       : "is billed"
 
     BUILDING   ||--o{ PROJECT       : "is site of"
+    BUILDING   ||--o{ FLOOR         : "stacks"
+    BUILDING   |o--o| MODEL_FILE    : "is modelled by"
+    FLOOR      ||--o{ ROOM          : "contains"
+    ROOM       ||--o{ ROOM_LOAD     : "is calculated for"
+
+    DISCIPLINE ||--o{ PROJECT_DISCIPLINE : "scoped as"
+    DISCIPLINE ||--o{ DRAWING            : "drawn for"
+    DISCIPLINE ||--o{ DELIVERABLE        : "owes"
+    PROJECT    ||--o{ PROJECT_DISCIPLINE : "covers"
+
+    PROJECT       ||--o{ PROJECT_PHASE : "runs through"
+    PROJECT_PHASE ||--o{ DELIVERABLE   : "owes"
+    PROJECT_PHASE ||--o{ PHASE_APPROVAL: "closed by"
+    DELIVERABLE   |o--o| DOCUMENT      : "is"
+    DELIVERABLE   |o--o| DRAWING       : "is"
+
+    PROJECT    ||--o{ DRAWING       : "produces"
+    DRAWING    ||--o{ DRAWING_REV   : "revised as"
+    DRAWING    }o--o| FLOOR         : "depicts"
+    DRAWING_REV ||--o{ TRANSMITTAL_ITEM : "sent in"
+    TRANSMITTAL ||--o{ TRANSMITTAL_ITEM : "bundles"
+    TRANSMITTAL }o--o| CONTACT           : "sent to"
+
+    MODEL_FILE ||--o{ MODEL_LINK    : "linked to"
 
     OFFER      ||--o{ OFFER_VERSION : "revised as"
     OFFER      |o--o| CONTRACT      : "becomes"
@@ -172,18 +206,150 @@ login, no salary and no time entries.
 unique index. Email unique per customer, not globally: the same person may
 appear under two customers.
 
-### 3.3 Building
+### 3.3 Building, Floor, Room
 
-The physical object. IEM's work is *about* buildings, and a customer often owns
-several — so this is its own entity rather than an address field on a project.
+The physical object, and the thing the firm's work is actually *about*. A
+customer often owns several, and a building outlives any one project — so it is
+its own entity, and it is not an address field.
 
-`name` `address` `zip` `city` `type` (`WOHNBAU` `BUERO` `INDUSTRIE` `SCHULE`
-`SPITAL` `ANDERE`) `yearBuilt` `floors` `heatedArea` (m²) `volume` (m³)
-`energyStandard` (`MINERGIE` `MINERGIE_P` `GEAK_A`…) `parcelNumber`
-`coordinates` · `customerId` → Customer
+#### Building
 
-**Validation** — `heatedArea` and `volume` positive when present; `yearBuilt`
-between 1800 and current year + 5.
+| Field | Type | Notes |
+| --- | --- | --- |
+| `number` | String @unique | `G-00412`, the firm's own building key |
+| `name` | String | "Schulhaus Guglera" |
+| `customerId` | → Customer | the **Bauherrschaft** |
+| `address`, `zip`, `city`, `country` | String | |
+| `parcelNumber`, `egid` | String? | `egid` is the federal building identifier |
+| `coordinates` | Json? | LV95 E/N |
+| `usage` | enum | `WOHNBAU` `BUERO` `INDUSTRIE` `GEWERBE` `SCHULE` `SPITAL` `SPORT` `KULTUR` `LANDWIRTSCHAFT` `ANDERE` |
+| `constructionType` | enum | `NEUBAU` `UMBAU` `SANIERUNG` `ERWEITERUNG` |
+| `yearBuilt`, `yearRenovated` | Int? | |
+| `floorCount`, `undergroundFloorCount` | Int? | |
+| `heatedArea` (EBF m²), `grossArea` (GF m²), `volume` (GV m³) | Decimal? | SIA 416 terms |
+| `energyStandard` | enum? | `MINERGIE` `MINERGIE_P` `MINERGIE_A` `GEAK_A`…`GEAK_G` `KEINER` |
+| `heatingSystem`, `ventilationSystem` | String? | what is installed now |
+| `primaryModelFileId` | → ModelFile? | the coordination model |
+| `officeId` | → Office? | which office looks after it |
+
+**Validation** — `yearBuilt` 1800…current+5; `yearRenovated ≥ yearBuilt`;
+areas and volume positive; `egid` eight digits when present.
+**Lifecycle** — a building is never deleted while a project references it. It
+outlives projects deliberately: the second commission on the same building
+should inherit its data, which is most of the value of having this table.
+
+#### Floor
+
+`buildingId` `code` (`UG2` `UG1` `EG` `OG1` … `DG`) `name` `level` (m above
+reference) `grossArea` `heatedArea` `order` Int
+
+Composite unique on `(buildingId, code)`. `order` is what sorts a stack
+correctly — `UG2 < UG1 < EG < OG1` is not alphabetical and not numeric.
+
+#### Room
+
+The level at which HVAC design actually happens. Heating and cooling loads are
+per room, not per building, and a `Raumbuch` is a deliverable in its own right.
+
+`floorId` `number` (the room number on the plan) `name` `usage` (SIA 380/1
+category) `area` `volume` `clearHeight` `occupancy` (persons)
+`designTempWinter` `designTempSummer` `airChangeRate` `notes`
+
+**RoomLoad** — `roomId` `disciplineId` `kind` (`HEIZLAST` `KUEHLLAST`
+`LUFTMENGE` `WARMWASSER`) `value` `unit` `method` (`SIA_380_1` `SIA_382_1`
+`SCHAETZUNG`) `calculatedAt` `calculatedById` `sourceModelFileId?`
+
+**Validation** — room numbers unique per floor; `area` and `volume` positive;
+a load without a `method` is refused, because an unattributed number is the
+thing the public site's own content rules already forbid ("if you add a number,
+add its source").
+
+**Volume note** — a school with 120 rooms × four load kinds is 480 rows for one
+building. `RoomLoad` is the first table where import matters more than the form:
+it should accept a spreadsheet and an IFC extraction, not only typing.
+
+### 3.4 Discipline and ProjectDiscipline (Gewerke)
+
+The first draft made this an enum. That was wrong, and it is the correction with
+the widest consequences: almost every other entity in this model is scoped by
+discipline.
+
+#### Discipline — master data
+
+`code` (`HZG` `LFT` `KLT` `SAN` `ELT` `ENE` `MSR` `BIM`) `name` (`Heizung`,
+`Lüftung`, `Klima/Kälte`, `Sanitär`, `Elektro`, `Energie`, `MSRL`,
+`BIM/Koordination`) `colour` `defaultHourlyRate Decimal?` `order` `active`
+
+`colour` is the one the drawings, the Gantt and the model views all use, so a
+Lüftung run is the same colour on a plan, in a schedule and in the 3D scene —
+which the public site's `disc-*` tokens already do for six of these.
+
+#### ProjectDiscipline — the scope of one Gewerk on one project
+
+`projectId` `disciplineId` `leadEngineerId?` → Employee
+`status` (`PLANNED` `ACTIVE` `ON_HOLD` `COMPLETED` `NOT_IN_SCOPE`)
+`feeShare Decimal?` (% of the project fee) `budgetHours` `budgetCost`
+`hourlyRate?` (overrides the default) `scopeNote`
+
+Composite unique on `(projectId, disciplineId)`.
+
+**Why it earns a table** — this is what lets the system answer the questions an
+engineering office actually asks: *what is the Lüftung budget on Guglera and who
+owns it*, *how many Sanitär hours are open across all projects*, *which projects
+have no Elektro lead*. An enum answers none of them.
+
+**Validation** — `feeShare` across a project's disciplines may exceed 100% only
+with an explicit override flag (subcontracted scope legitimately does);
+`NOT_IN_SCOPE` blocks time entries and deliverables against that discipline.
+
+### 3.5 ProjectPhase, Deliverable, PhaseApproval (SIA)
+
+A phase is **not** a status field on a project. It is a contracted block of work
+with a fee, a set of deliverables and a client sign-off, and SIA 102/103 define
+the fee percentages per phase. Modelling it as an enum on `Project` — which the
+first draft did — makes it impossible to say *when phase 41 was approved*, *what
+it owed*, or *how much of the fee it carried*.
+
+#### ProjectPhase
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `projectId`, `phase` | → Project, SiaPhase | unique together |
+| `name` | String | the SIA label, overridable |
+| `status` | enum | `NOT_STARTED` `ACTIVE` `IN_APPROVAL` `APPROVED` `SKIPPED` |
+| `plannedStart`, `plannedEnd` | Date | |
+| `actualStart`, `actualEnd` | Date? | |
+| `feePercent` | Decimal? | SIA 102 share of the total fee |
+| `feeAmount` | Decimal? | derived from the contract, stored for billing |
+| `budgetHours` | Int? | |
+| `isBillingTrigger` | Boolean | approving the phase may raise an invoice |
+
+**Lifecycle** — a phase reaches `APPROVED` only when every non-waived
+`Deliverable` is `RELEASED` and a `PhaseApproval` exists. `SKIPPED` is explicit
+and requires a note: phases are genuinely omitted on small commissions, and
+silently leaving one `NOT_STARTED` forever is how a project looks stalled when
+it is finished.
+
+#### Deliverable
+
+`projectPhaseId` `disciplineId?` `name` `type` (`PLAN` `BERICHT` `BERECHNUNG`
+`SCHEMA` `DEVIS` `KOSTENSCHAETZUNG` `RAUMBUCH` `MODELL` `PROTOKOLL`)
+`status` (`OPEN` `IN_PROGRESS` `IN_REVIEW` `RELEASED` `WAIVED`)
+`dueDate?` `responsibleId?` `documentId?` `drawingId?` `modelFileId?` `note`
+
+Exactly one of `documentId` / `drawingId` / `modelFileId` may be set — the
+deliverable *is* that artefact once it exists. Before then it is a promise with
+a due date, which is what makes the phase plannable.
+
+#### PhaseApproval
+
+`projectPhaseId` `decision` (`APPROVED` `APPROVED_WITH_REMARKS` `REJECTED`)
+`decidedById` → Employee `decidedAt` `note`
+`customerContactId?` `customerSignedAt?` `documentId?` (the signed sheet)
+
+**Validation** — the four-eyes rule applies: the approver may not be the person
+who released the last deliverable. `customerSignedAt` without a
+`customerContactId` is refused — "the client approved it" needs a name.
 
 ### 3.4 Offer
 
@@ -234,10 +400,10 @@ The centre of the system.
 | `number` | String @unique | `P-2026-014` |
 | `name` | String | 2–200 |
 | `status` | enum | see below |
-| `phase` | SiaPhase | the current SIA 112 phase |
+| `currentPhase` | SiaPhase? | **derived** — the one `ProjectPhase` that is `ACTIVE`. Denormalised for list filtering only; §3.5 holds the truth |
 | `priority` | Priority | |
 | `health` | enum | `GREEN` `AMBER` `RED` — **derived**, stored for sorting |
-| `disciplines` | Discipline[] | |
+| ~~`disciplines`~~ | | replaced by `ProjectDiscipline` rows — §3.4 |
 | `customerId` | → Customer | required |
 | `buildingId?`, `contractId?` | → | |
 | `architectId?` | → Customer | the architect is another company |
@@ -293,10 +459,24 @@ milestone raises `MilestoneReached`, and Finance may create an invoice draft.
 `organiserId` `minutesDocumentId?`
 
 **MeetingAttendee** — `meetingId`, exactly one of `employeeId` / `contactId`,
-`required Boolean`, `attended Boolean?`.
-**MeetingItem** — `meetingId` `order` `text` `decision?` `taskId?`
-`responsibleId?` `dueDate?`. An item can become a `Task`, which is how minutes
-stop being a document nobody reads.
+`required Boolean`, `invitedAt`, `attended Boolean?`, `apologised Boolean`.
+**MeetingAgendaItem** — `meetingId` `order` `title` `presenterId?`
+`durationMinutes?` `note`. Set before the meeting; the protocol is written
+against it.
+**MeetingItem** (protocol) — `meetingId` `agendaItemId?` `order` `text`
+`kind` (`INFORMATION` `ENTSCHEID` `PENDENZ`) `decision?` `taskId?`
+`responsibleId?` `dueDate?` `disciplineId?`.
+**MeetingApproval** — `meetingId` `decidedById` `decidedAt` `decision`
+(`APPROVED` `AMENDED`) `note`. Minutes of a Bausitzung are approved at the
+*next* one, and an amendment is a fact about the record.
+
+A `PENDENZ` item becomes a `Task` — which is how minutes stop being a document
+nobody reads. `disciplineId` on an item is what lets "all open Pendenzen for
+Lüftung across every Bausitzung" be a query rather than a re-read.
+
+**Numbering** — meetings of a series carry `seriesNumber` (Bausitzung 14), and
+items carry the meeting's number in their display key (`14.3`), because that is
+how they are referred to out loud on site.
 
 ### 3.10 Document
 
@@ -315,6 +495,71 @@ survive, exactly as `MediaAssetVersion` does.
 (the four-eyes rule `ContentService` already enforces, and which
 `workflow.requireApproval` can lift).
 
+### 3.10b Drawing, DrawingRevision, Transmittal (Pläne)
+
+**A drawing is not a document**, and collapsing the two — which the first draft
+did — loses the three things that make a plan a plan: it carries a revision
+letter rather than a version number, it is *issued* to named recipients on a
+date, and which revision someone received is a liability question.
+
+#### Drawing
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `number` | String | the plan number, e.g. `4723-HZG-EG-101` |
+| `title` | String | |
+| `projectId`, `disciplineId` | → | both required |
+| `buildingId?`, `floorId?` | → | what it depicts |
+| `type` | enum | `GRUNDRISS` `SCHNITT` `ANSICHT` `SCHEMA` `PRINZIPSCHEMA` `DETAIL` `STRANGSCHEMA` `ISOMETRIE` |
+| `scale` | String | `1:50`, `1:100`, `o.M.` |
+| `format` | enum | `A0` `A1` `A2` `A3` `A4` `SONDER` |
+| `phase` | SiaPhase? | which phase it belongs to |
+| `status` | enum | see below |
+| `currentRevision` | String | `—`, `A`, `B`, … or `00`, `01` |
+| `drawnById`, `checkedById?`, `approvedById?` | → Employee | gezeichnet / geprüft / freigegeben |
+
+Composite unique on `(projectId, number)`.
+
+**Status** `WIP → IN_CHECK → CHECKED → RELEASED → ISSUED → SUPERSEDED`, with
+`WITHDRAWN` from any state.
+The distinction that matters: **`RELEASED` is internal, `ISSUED` is external.**
+A released plan is approved in-house; an issued one has left the building and
+someone is building from it. They are different facts with different
+consequences and a single `APPROVED` state cannot hold both.
+
+#### DrawingRevision
+
+`drawingId` `revision` `changeNote` (**required** — "what changed" is the whole
+point of a revision) `reason` (`ERSTAUSGABE` `KUNDENWUNSCH` `KOORDINATION`
+`FEHLERKORREKTUR` `BEHOERDE` `AUSFUEHRUNG`) `storageKey` `fileName` `size`
+`checksum` `mimeType` `drawnById` `checkedById?` `approvedById?` `releasedAt?`
+`supersededAt?` `sourceModelFileId?`
+
+Append-only, composite unique on `(drawingId, revision)`. The bytes of every
+revision survive, exactly as `MediaAssetVersion` and `DocumentVersion` do.
+
+#### Transmittal (Planversand)
+
+The entity that makes the liability question answerable.
+
+**Transmittal** — `number @unique` `projectId` `sentAt` `sentById`
+`purpose` (`ZUR_INFORMATION` `ZUR_PRUEFUNG` `ZUR_AUSFUEHRUNG` `ZUR_FREIGABE`)
+`medium` (`EMAIL` `POST` `PLATTFORM` `UEBERGABE`) `note` `documentId?` (the
+signed delivery note)
+**TransmittalItem** — `transmittalId` `drawingRevisionId` `copies` `format`
+**TransmittalRecipient** — `transmittalId`, one of `contactId` / `employeeId`,
+`role` (`TO` `CC`), `acknowledgedAt?`
+
+**Why this is not an email folder** — six months later the question is "which
+revision did the Sanitär contractor have on 14 March", and the answer has to be
+a row, not a search through somebody's mailbox. Issuing a transmittal is what
+moves its drawings from `RELEASED` to `ISSUED`.
+
+**Validation** — only a `RELEASED` revision may be transmitted; a superseded
+revision may not be transmitted at all; sending a revision that supersedes one
+already issued to the same recipient raises a warning naming them, because that
+is precisely the person who must be told.
+
 ### 3.11 ModelFile (BIM/CAD)
 
 `name` `kind` (`IFC` `RVT` `DWG` `DXF` `NWD` `PDF_PLAN`) `discipline`
@@ -332,6 +577,23 @@ offline; `ModelIssue` is where its output lands when it is wired in.
 **Validation** — an IFC upload is checked for schema and unit declarations
 before `SHARED`; ingestion runs as a job, never in the request (architecture
 §7.5).
+
+**ModelLink** — `modelFileId`, one of `drawingId` / `documentId` / `roomId` /
+`buildingId`, `elementGuid?`, `relation` (`DERIVED_FROM` `DOCUMENTS`
+`REPRESENTS` `COORDINATES_WITH`).
+
+This is the table that makes BIM a domain rather than a file store. A plan
+derived from a model, a room whose loads came from a model element, a report
+documenting a coordination state — each is a link with a reason, and
+`elementGuid` reaches the individual IFC object. `build_scene_ifc.py` already
+accounts for every `IfcProduct` in the federation with a reason for each of the
+11'194 it excludes; that inventory is what populates this.
+
+**Federation** — a coordination model is a `ModelFile` of kind `NWD`/`IFC` whose
+`ModelLink` rows point at the discipline models it federates. Guglera is already
+three files — Architektur, Heizung, Lüftung — and the audit report the Python
+chain produces is a cross-model clash list, so the federated case is the normal
+one here, not an advanced feature.
 
 ### 3.12 Employee
 
@@ -484,6 +746,32 @@ to the publish pipeline, with alt text and responsive derivatives. `Document` is
 a project file with approval and retention. One table would force every website
 image to carry an approval state and every contract to carry alt text.
 
+**Drawing vs Document stay separate**, for three reasons that a shared table
+cannot hold: a drawing is revised by *letter* against a plan number that is
+itself structured (`4723-HZG-EG-101`); it distinguishes `RELEASED` (internal)
+from `ISSUED` (external), which a document has no need of; and it is transmitted
+to named recipients on a date, which is the record that answers a liability
+question years later. A report has none of those and would carry five null
+columns for the privilege.
+
+**Discipline is an entity, not an enum** — §3.4. It owns a lead, a fee share, a
+budget and a colour, and it is the axis almost every list in the system is
+filtered by.
+
+**SiaPhase is both.** The enum is the vocabulary; `ProjectPhase` is the instance
+with dates, fee, deliverables and sign-off. `Project.currentPhase` is a
+denormalised copy for list filtering and is derived, never typed — the same
+discipline as `health` and `progressPercent`.
+
+**Room is where HVAC design lives.** Heating and cooling loads are per room;
+`Building.heatedArea` is a planning figure, not a design input. A `Raumbuch` is
+a contracted deliverable, so the rooms have to be data rather than a spreadsheet
+attached to a project.
+
+**Building outlives the project.** It is keyed to the customer, not the project,
+so a second commission on the same object inherits its floors, rooms, loads and
+model. That inheritance is most of the reason this table earns its place.
+
 ---
 
 ## 5. Indexing and volume
@@ -493,10 +781,22 @@ image to carry an approval state and every contract to carry alt text.
 | TimeEntry | 500k+ | `(employeeId, date)`, `(projectId, date)`, `(status)` |
 | Task | 100k | `(projectId, status)`, `(assigneeId, status)`, `(dueDate)` |
 | Document | 200k | `(projectId, category)`, `(status)`, tsvector on name |
+| **DrawingRevision** | 150k | `(drawingId, revision)`, `(releasedAt)` |
+| **Drawing** | 30k | `(projectId, disciplineId)`, `(status)`, tsvector on number+title |
+| **Room** | 100k+ | `(floorId)`, `(buildingId)` via floor — a hospital is 2'000 rooms |
+| **RoomLoad** | 400k+ | `(roomId, disciplineId, kind)` |
 | CostItem | 200k | `(projectId, date)`, `(budgetLineId)` |
+| **TransmittalItem** | 200k | `(drawingRevisionId)`, `(transmittalId)` |
 | AuditLog | millions | already indexed; **needs partitioning by month** |
-| Project | ~2k | `(status)`, `(managerId)`, `(customerId)` |
+| ProjectDiscipline | ~10k | `(projectId)`, `(disciplineId, status)` |
+| ProjectPhase | ~14k | `(projectId, phase)` |
+| Project | ~2k | `(status)`, `(managerId)`, `(customerId)`, `(currentPhase)` |
+| Building | ~3k | `(customerId)`, `(egid)`, tsvector on name+address |
 | Customer | ~2k | tsvector on name |
+
+`Room`, `RoomLoad` and `DrawingRevision` join `TimeEntry` and `AuditLog` as the
+tables where access paths matter. The rest are small enough that correctness
+matters more.
 
 `TimeEntry` and `AuditLog` are the two that force real decisions. Everything
 else is small enough that correctness matters more than access paths.

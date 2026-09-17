@@ -35,12 +35,31 @@ features/projects/
   index.ts           the public surface: routes + nav entries. Nothing else
                      leaves the folder.
   routes.tsx         route definitions with their permissions and breadcrumbs
-  api.ts             this feature's endpoints only
-  hooks/             useProjects, useProject, useProjectBudget
+  repository.ts      HTTP only — the one file that knows URLs and DTOs
+  service.ts         domain only — pure rules, no React, no fetch
+  hooks/             React only — cache, loading state, invalidation
   screens/           ProjectList.tsx, ProjectDetail.tsx, ProjectCreate.tsx
   components/        ProjectStatusBadge, ProjectHealthBar — feature-specific
   __tests__/
 ```
+
+### The four layers
+
+```
+repository.ts  →  service.ts  →  hooks/  →  screens/
+   HTTP            pure rules      React       rendering
+```
+
+Each is replaceable without touching the ones above it, and `service.ts` — the
+transitions table, the derived values, the four-eyes checks — is testable with
+no mocks at all, because it touches neither the network nor React. That is the
+layer worth being strict about; it is also the one easiest to skip.
+
+A feature with no domain logic omits `service.ts`. Disciplines is master data;
+an empty service for symmetry is ceremony.
+
+The server holds the authoritative copy of every rule. The client's copy exists
+so a button that would be refused is disabled rather than clicked.
 
 `index.ts` is the boundary. `app/routes.tsx` imports `features/*/index.ts` and
 nothing deeper; if something outside the folder needs a file two levels in, the

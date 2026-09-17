@@ -279,6 +279,56 @@ sensitive contents, and the audit log records any attempt.
 
 ---
 
+## 3.10 Resources added in review
+
+The engineering entities added after the first draft — disciplines, SIA phases,
+rooms, drawings — need permissions of their own, or they inherit whatever
+happens to be nearest and the matrix stops describing reality.
+
+| Resource | Standard actions | Extra keys | Notes |
+| --- | --- | --- | --- |
+| `discipline` | read, manage | — | Master data. Only `manage` writes; a Gewerk list is not edited per project |
+| `projectDiscipline` | read, create, update, delete | `projectDiscipline.assignLead` | Scoped by the project's row-level rule |
+| `projectPhase` | read, create, update, delete, approve | `projectPhase.skip`, `projectPhase.reopen` | `approve` is the phase sign-off |
+| `deliverable` | read, create, update, delete | `deliverable.release`, `deliverable.waive` | `release` is distinct from `update`: it makes the artefact the phase's evidence |
+| `building` | read, create, update, delete, export | — | |
+| `room` | read, create, update, delete, export | `room.import` | Import matters more than the form — 480 rows per school |
+| `roomLoad` | read, create, update, delete | `roomLoad.recalculate` | |
+| `drawing` | read, create, update, delete, export | `drawing.check`, `drawing.release`, `drawing.issue`, `drawing.withdraw` | Four separate keys, see below |
+| `transmittal` | read, create, export | — | Never updated or deleted; it is a record of something that happened |
+| `modelFile` | read, create, update, delete, export | `bim.upload`, `bim.publish`, `bim.resolveIssue`, `bim.link` | |
+
+**Why `drawing` has four extra keys.** Gezeichnet, geprüft, freigegeben and
+ausgegeben are four different people's authority in an engineering office, and
+collapsing them into `update` and `approve` loses the distinction that matters
+most: `release` is internal and `issue` sends a plan to someone who will build
+from it. A draftsman draws and may not check their own work; an engineer checks
+and releases; issuing is usually the project manager's.
+
+**`transmittal` has no `update` or `delete` by design.** A Planversand is a
+statement about the past. Correcting one means issuing another — the same reason
+`AuditLog` has no API to edit a row.
+
+### By role
+
+| Resource | Mgmt | PM | Engineer | Draftsman | HR | Finance |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| `discipline` read / manage | ● / ○ | ● / ○ | ● / ○ | ● / ○ | ● / ○ | ● / ○ |
+| `projectDiscipline` | ● | ● | ● read | ● read | ○ | ● read |
+| `projectPhase` incl. approve | ● | ● ◐ | ● read | ● read | ○ | ● read |
+| `deliverable` / release | ● / ● | ● / ● | ● / ● | ● / ○ | ○ | ● read |
+| `building`, `room`, `roomLoad` | ● | ● | ● | ● | ○ | ● read |
+| `drawing` read/create/update | ● read | ● | ● | ● | ○ | ● read |
+| `drawing.check` | ○ | ● | ● | ○ | ○ | ○ |
+| `drawing.release` | ○ | ● | ● | ○ | ○ | ○ |
+| `drawing.issue` | ● | ● | ○ | ○ | ○ | ○ |
+| `transmittal` | ● | ● | ● read | ● read | ○ | ● read |
+
+`projectPhase.approve` is `◐` for the Project Manager — their own projects, and
+the four-eyes rule still forbids approving a phase whose last deliverable they
+released themselves. Only `management` and `super_admin` hold
+`projectPhase.reopen`.
+
 ## 4. Row-level rules (`◐`)
 
 The guard is coarse and the service is fine-grained. The `◐` cells resolve to
