@@ -175,6 +175,100 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 /* ------------------------------------------------------------------ */
+/* Downloads                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Fetches a non-JSON route and saves the body as a file.
+ *
+ * The two download routes — the audit CSV and an application dossier — were
+ * plain `<a href>` links, on the belief recorded in the old comment here that
+ * "the link carries the session cookie and the server checks the permission on
+ * the way through". It does not. The only cookie this system issues is
+ * `refresh_token`, scoped to `path=/api/v1/auth`, so a browser navigating to
+ * `/api/v1/audit/export` sends no credential at all; `JwtAuthGuard` had an
+ * `access_token` cookie fallback that nothing ever set. **Both links returned
+ * 401** — reproduced against a running server, then fixed here and in
+ * `guards.ts`.
+ *
+ * So the credential is carried the same way every other call carries it, in the
+ * `Authorization` header, which means this goes through the shared refresh-and-
+ * retry path and a download started twenty minutes into a session works. The
+ * cost is that the file is buffered in memory before it is saved. Both bodies
+ * here are small — a CSV of the audit log and a CV — and the alternative, giving
+ * the browser a credential it attaches by itself, is the one that would reopen
+ * CSRF on every other route.
+ *
+ * The filename comes from `Content-Disposition` when the server sends one, so
+ * the dossier keeps the applicant's own filename rather than becoming `4`.
+ */
+async function download(path: string, options: RequestOptions & { fallbackName: string }): Promise<void> {
+  const url = new URL(`${BASE}${PREFIX}${path}`, window.location.origin);
+  for (const [k, v] of Object.entries(options.query ?? {})) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+
+  const send = async (): Promise<Response> =>
+    fetch(url.toString(), {
+      headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
+      credentials: "include",
+    });
+
+  let res = await send();
+  if (res.status === 401) {
+    if (await refreshSession()) {
+      res = await send();
+    } else {
+      onUnauthenticated?.();
+    }
+  }
+
+  if (!res.ok) {
+    let payload: ApiErrorBody | null = null;
+    try {
+      payload = (await res.json()) as ApiErrorBody;
+    } catch {
+      /* A non-JSON error body tells us nothing more than the status does. */
+    }
+    throw new ApiError(
+      payload ?? {
+        statusCode: res.status,
+        code: "download_failed",
+        message: `Der Download ist fehlgeschlagen (${res.status}).`,
+      },
+    );
+  }
+
+  const blob = await res.blob();
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filenameFrom(res.headers.get("content-disposition")) ?? options.fallbackName;
+  // Firefox needs the element in the document for a programmatic click to
+  // count as a user-initiated download.
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Revoked on the next tick rather than immediately: revoking synchronously
+  // races the browser's own read of the URL and silently saves an empty file.
+  setTimeout(() => URL.revokeObjectURL(href), 0);
+}
+
+/** `attachment; filename="Lebenslauf%20M.pdf"` → `Lebenslauf M.pdf`. */
+function filenameFrom(header: string | null): string | null {
+  if (!header) return null;
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  const raw = star?.[1] ?? plain?.[1];
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(raw.trim());
+  } catch {
+    return raw.trim();
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* The typed surface                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -233,6 +327,10 @@ export type EntryRow = {
   typeKey: string;
   key: string;
   data: Record<string, unknown>;
+  /** What the live site is showing. Absent until the entry has been published. */
+  publishedData?: Record<string, unknown> | null;
+  /** Kept, but left out of the site from the next publish on. */
+  hidden?: boolean;
   status: WorkflowState;
   position: number;
   version: number;
@@ -362,6 +460,22 @@ export type SnapshotRow = {
   publishedBy: { id: string; name: string; email: string } | null;
 };
 
+/**
+ * What publishing now would change on the live site.
+ *
+ * Not the same question as "how many entries are approved", which is what the
+ * publish screen used to ask: a deletion never becomes `APPROVED`, so removing
+ * a person left the screen claiming there was nothing to do.
+ */
+export type PendingChanges = {
+  liveVersion: number | null;
+  publishedAt: string | null;
+  changed: boolean;
+  changes: { key: string; label: string; live: number | null; next: number | null }[];
+  /** Kept for the secondary list of approved entries. */
+  approved: number;
+};
+
 export type Overview = {
   kpis: Record<string, number>;
   content: Record<string, number>;
@@ -394,6 +508,31 @@ export const api = {
 
   /* ---- Content ---- */
   contentTypes: () => request<ContentTypeRow[]>("/content/types"),
+  /**
+   * The live document, exactly as a visitor gets it.
+   *
+   * The one place the dashboard reads *published* content rather than the
+   * draft rows it owns, and it has to be the published one: the edit overlay
+   * matches the words rendered in the preview frame, and the frame shows the
+   * published site. Indexing drafts would mean looking up text that is not on
+   * the page.
+   */
+  publishedSnapshot: () =>
+    request<{ version: number; publishedAt: string; content: Record<string, unknown> }>(
+      "/content/published",
+    ),
+  /**
+   * Takes one entry off the site, or puts it back.
+   *
+   * A draft change like any other: the entry stays on the live site until the
+   * next publish. Not a delete — the row, its versions and its review state
+   * are untouched, and the call back is the same one with `false`.
+   */
+  setEntryVisibility: (id: string, hidden: boolean) =>
+    request<EntryRow>(`/content/entries/${id}/visibility`, {
+      method: "PATCH",
+      body: { hidden },
+    }),
   entries: (query: Record<string, string | number | undefined>) =>
     request<Paginated<EntryRow>>("/content/entries", { query }),
   entry: (id: string) =>
@@ -430,6 +569,7 @@ export const api = {
     request<{ version: number; content: Record<string, unknown>; warnings: string[] }>(
       "/content/preview",
     ),
+  pendingChanges: () => request<PendingChanges>("/content/pending"),
   snapshots: () => request<SnapshotRow[]>("/content/snapshots"),
   restoreSnapshot: (version: number) =>
     request<{ version: number; restoredFrom: number }>(`/content/snapshots/${version}/restore`, {
@@ -488,11 +628,16 @@ export const api = {
   deleteApplication: (id: string) => request<void>(`/applications/${id}`, { method: "DELETE" }),
   applicationStats: () =>
     request<{ total: number; byStatus: Record<string, number> }>("/applications/stats"),
-  /** Not a fetch: the browser downloads it, with the bearer token unavailable —
-      so the link carries the session cookie and the server checks the
-      permission on the way through. */
-  applicationFileUrl: (id: string, index: number) =>
-    `${BASE}${PREFIX}/applications/${id}/files/${index}`,
+  /**
+   * Downloads one dossier file.
+   *
+   * A call rather than an href — see `download`. The route checks
+   * `application.download` and records the download in the audit log, and that
+   * only happens if the request actually carries a credential, which the old
+   * link did not.
+   */
+  downloadApplicationFile: (id: string, index: number, fallbackName: string) =>
+    download(`/applications/${id}/files/${index}`, { fallbackName }),
 
   /* ---- Settings, audit, dashboard ---- */
   settings: () => request<{ group: string; settings: SettingRow[] }[]>("/settings"),
@@ -504,11 +649,12 @@ export const api = {
   audit: (query: Record<string, string | number | undefined>) =>
     request<Paginated<AuditRow>>("/audit", { query }),
   auditActions: () => request<{ action: string; count: number }[]>("/audit/actions"),
-  auditExportUrl: (query: Record<string, string | undefined>) => {
-    const url = new URL(`${BASE}${PREFIX}/audit/export`, window.location.origin);
-    for (const [k, v] of Object.entries(query)) if (v) url.searchParams.set(k, v);
-    return url.toString();
-  },
+  /** Downloads the filtered audit log as CSV. A call, not an href — see `download`. */
+  downloadAuditExport: (query: Record<string, string | undefined>) =>
+    download("/audit/export", {
+      query,
+      fallbackName: `audit-${new Date().toISOString().slice(0, 10)}.csv`,
+    }),
   overview: () => request<Overview>("/dashboard/overview"),
   health: () =>
     request<{
