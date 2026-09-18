@@ -11,6 +11,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
 import { SettingsService } from "../core/settings/settings.service";
+import { MAX_FAILED_LOGINS, afterFailedLogin, isLockedOut, judgeRefresh } from "./auth.rules";
 import type { AuthUser } from "../common/decorators";
 
 export type TokenPair = {
@@ -20,17 +21,6 @@ export type TokenPair = {
 };
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
-
-/**
- * How long a failed-login streak locks an account, and at what count.
- *
- * Fifteen minutes after five attempts is slow enough to make online guessing
- * pointless and short enough that a person who mistyped their password twice
- * and then went to look it up is not calling support. The counter clears on
- * every success.
- */
-const MAX_FAILED_LOGINS = 5;
-const LOCKOUT_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -69,6 +59,7 @@ export class AuthService {
   /* ---------------------------------------------------------------- */
 
   async login(email: string, password: string, ctx: Ctx): Promise<TokenPair & { user: unknown }> {
+    const now = new Date();
     const user = await this.prisma.user.findFirst({
       where: { email: email.toLowerCase().trim(), deletedAt: null },
     });
@@ -92,7 +83,7 @@ export class AuthService {
       throw deny();
     }
 
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
+    if (isLockedOut(user, now)) {
       this.audit.record({
         action: "auth.login_locked",
         resource: "user",
@@ -118,20 +109,20 @@ export class AuthService {
 
     const ok = await this.verifyPassword(user.passwordHash, password);
     if (!ok) {
-      const failed = user.failedLogins + 1;
+      // The streak restarts once a lockout has been served — see
+      // `afterFailedLogin`, which is where the reason is written down and
+      // where every boundary of it is tested.
+      const next = afterFailedLogin(user, now);
       await this.prisma.user.update({
         where: { id: user.id },
-        data: {
-          failedLogins: failed,
-          lockedUntil: failed >= MAX_FAILED_LOGINS ? new Date(Date.now() + LOCKOUT_MS) : null,
-        },
+        data: next,
       });
       this.audit.record({
         action: "auth.login_failed",
         resource: "user",
         resourceId: user.id,
         outcome: AuditOutcome.FAILURE,
-        message: `Fehlversuch ${failed}/${MAX_FAILED_LOGINS}`,
+        message: `Fehlversuch ${next.failedLogins}/${MAX_FAILED_LOGINS}`,
         ...ctx,
       });
       throw deny();
@@ -236,11 +227,28 @@ export class AuthService {
    * Exchanges a refresh token for a new pair, rotating it.
    *
    * Rotation plus reuse detection: each refresh revokes the token it was given
-   * and records the replacement. If a *already revoked* token is presented,
-   * that means someone is replaying a stolen copy — the whole family is then
-   * revoked, which signs the attacker and the legitimate user out together.
-   * Logging both out is the right trade; the alternative leaves the attacker
-   * holding a live session.
+   * and records the replacement. A token presented *after* it was rotated is
+   * evidence that two parties hold the same credential, and the answer is to
+   * revoke the whole family — which signs the attacker and the legitimate user
+   * out together. Logging both out is the right trade; the alternative leaves
+   * the attacker holding a live session.
+   *
+   * **What was wrong with that as the only rule.** Rotation has a gap nothing on
+   * the client can close: the replacement travels back in a `Set-Cookie`, so
+   * anything already in flight is still carrying the old token. Two tabs
+   * restoring a session in the same instant therefore presented it twice, the
+   * second was read as theft, and every session the user had was revoked. It
+   * surfaced as *"the dashboard signs me out at random"*, it got worse the more
+   * tabs somebody kept open, and there was no fix available to a client because
+   * the second request was sent before the first reply existed.
+   *
+   * `judgeRefresh` separates the two. Inside `REFRESH_GRACE_MS` of the rotation
+   * the old token is a race and is served; outside it, it is a replay and the
+   * family goes. A token revoked with no successor was ended on purpose — a
+   * sign-out, a password change — and is refused without the alarm.
+   *
+   * Both grace cases are audited. A quiet weakening of a theft control is worth
+   * nothing to the operator who has to decide whether an account was taken.
    */
   async refresh(presented: string, ctx: Ctx): Promise<TokenPair> {
     const hash = sha256(presented);
@@ -251,7 +259,9 @@ export class AuthService {
 
     if (!row) throw new UnauthorizedException("Sitzung ungültig. Bitte neu anmelden.");
 
-    if (row.revokedAt) {
+    const verdict = judgeRefresh(row, new Date());
+
+    if (verdict === "replayed") {
       await this.prisma.refreshToken.updateMany({
         where: { userId: row.userId, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -267,14 +277,50 @@ export class AuthService {
       throw new UnauthorizedException("Sitzung ungültig. Bitte neu anmelden.");
     }
 
-    if (row.expiresAt < new Date()) {
+    if (verdict === "ended") {
+      // Deliberately revoked: a sign-out elsewhere, a password change, a reset.
+      // Recorded as a denial so the log can tell it apart from a replay, and
+      // *not* answered by revoking a family that is already gone.
+      this.audit.record({
+        action: "auth.refresh_revoked",
+        resource: "user",
+        resourceId: row.userId,
+        outcome: AuditOutcome.DENIED,
+        message: "Beendete Sitzung vorgelegt.",
+        ...ctx,
+      });
+      throw new UnauthorizedException("Sitzung beendet. Bitte neu anmelden.");
+    }
+
+    if (verdict === "expired") {
       throw new UnauthorizedException("Sitzung abgelaufen. Bitte neu anmelden.");
     }
+
     if (row.user.deletedAt || row.user.status !== "ACTIVE") {
       throw new UnauthorizedException("Dieses Konto ist nicht mehr aktiv.");
     }
 
     const next = await this.issue(row.user, ctx);
+
+    if (verdict === "concurrent") {
+      /*
+        The row is already revoked and already names its successor. Leaving both
+        alone is deliberate: overwriting `replacedById` would break the chain
+        this decision reads, and revoking the successor would end whichever tab
+        actually received it — the one thing that is certainly a live session.
+        The unclaimed token expires on its own.
+      */
+      this.audit.record({
+        action: "auth.refresh_concurrent",
+        resource: "user",
+        resourceId: row.userId,
+        actor: { id: row.user.id, email: row.user.email } as AuthUser,
+        message: "Rotiertes Token innerhalb der Toleranz erneut vorgelegt — gleichzeitige Anfrage.",
+        ...ctx,
+      });
+      return next;
+    }
+
     await this.prisma.refreshToken.update({
       where: { id: row.id },
       data: {
@@ -476,7 +522,19 @@ export function assertPasswordStrength(password: string): void {
   }
 }
 
-/** `"15m"` → seconds, for the `expiresIn` the client uses to pre-refresh. */
+/**
+ * `"15m"` → seconds, for the `expiresIn` in the response body.
+ *
+ * It used to say "which the client uses to pre-refresh", and the client does no
+ * such thing — nothing in `src/` reads the field. That is deliberate rather than
+ * missing: a timer in every tab that renews a token nobody is using would be
+ * more rotations, more races and a session that never ends for a browser left
+ * open on a desk. The dashboard refreshes when a request comes back 401, retries
+ * it once, and the user sees one extra round trip they cannot feel.
+ *
+ * The number stays in the response because it is true and an operator reading a
+ * network tab wants it; the comment is corrected rather than the behaviour.
+ */
 function parseTtl(ttl: string): number {
   const m = /^(\d+)([smhd])$/.exec(ttl);
   if (!m) return 900;
