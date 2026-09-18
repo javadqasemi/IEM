@@ -31,6 +31,17 @@ export type JobPayloads = {
    * `projects.reconcile.ts`.
    */
   "projects.reconcileDerived": Record<string, never>;
+  /**
+   * Raises `TaskOverdue` for tasks that have passed their date since the last
+   * sweep.
+   *
+   * A job rather than a computed flag, and the distinction is worth stating
+   * because the module deliberately does *not* store `isOverdue`: whether a
+   * task is overdue is a `where` clause and needs nothing; **telling somebody**
+   * is an event, and an event has to be raised by something. Time is the
+   * trigger, so a clock is the only thing that can raise it.
+   */
+  "tasks.flagOverdue": Record<string, never>;
 
   /* ---- Named by the firm ------------------------------------------- */
   "export.csv": { resource: string; filter: Record<string, unknown>; requestedBy: string };
@@ -60,6 +71,7 @@ export const JOB_NAMES = [
   "content.publishScheduled",
   "applications.purgeExpired",
   "projects.reconcileDerived",
+  "tasks.flagOverdue",
   "export.csv",
   "pdf.render",
   "bim.import",

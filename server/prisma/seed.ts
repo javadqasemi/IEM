@@ -653,11 +653,278 @@ async function seedDomain() {
     }
   }
 
+  const tasks = await seedTasks(byNumber);
+
   console.log(
     `  ✓ ${offices.length} Standorte, ${departments.length} Abteilungen, ` +
       `${employees.length} Mitarbeitende, ${disciplines.length} Gewerke, ` +
-      `${customers.length} Kunden, ${buildings.length} Gebäude, ${projectSeed.length} Projekte`,
+      `${customers.length} Kunden, ${buildings.length} Gebäude, ${projectSeed.length} Projekte, ` +
+      `${tasks} Aufgaben`,
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Aufgaben — Wave 2, module 1                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Nine tasks, and none of them is a placeholder.
+ *
+ * Each exists to make one part of the module reachable from a screen that would
+ * otherwise only be reachable by hand:
+ *
+ * | | |
+ * | --- | --- |
+ * | A task per column | so the board is not one full column and five empty ones |
+ * | One **blocked**, with a reason | the only status that carries text, and the only column that is unreadable without it |
+ * | One **overdue** | `isOverdue` is computed from the clock, so the date is relative to today rather than fixed — a literal date would stop being overdue the day it was seeded and start again never |
+ * | One with **subtasks** | `refuseTransition` refuses `DONE` while a child is open, and that is not visible on a flat board |
+ * | One with a **dependency** | the same rule through the other input, and the one an `FS` edge gates |
+ * | One with a **checklist** | `deriveProgress` counts points and subtasks equally |
+ * | One with **no project** | the firm-level to-do: the module's defining case, and the one a demo built from project data would never show |
+ *
+ * `position` is seeded explicitly at multiples of `POSITION_GAP`, because the
+ * board's ordering is the one thing a fresh install cannot derive. `spentHours`
+ * is left at 0 and `overdueNotifiedAt` at null on purpose — the first has no
+ * writer until Wave 2 module 14, and seeding the second would mean the overdue
+ * sweep announced nothing on a fresh database and looked as though it had run.
+ *
+ * Matched on `(projectId, title)` by hand, like milestones: a task has no
+ * business key, and a `createMany` would duplicate every one of these on the
+ * second run — which is the specific way a seed stops being idempotent without
+ * anybody noticing, because the screen still looks plausible.
+ */
+async function seedTasks(byNumber: (n: string) => { id: string }): Promise<number> {
+  const guglera = await prisma.project.findUnique({
+    where: { number: "P-2026-001" },
+    select: { id: true, milestones: { where: { deletedAt: null }, select: { id: true, name: true } } },
+  });
+  const aarefeld = await prisma.project.findUnique({
+    where: { number: "P-2026-002" },
+    select: { id: true },
+  });
+  if (!guglera || !aarefeld) return 0;
+
+  const disciplines = await prisma.discipline.findMany({ select: { id: true, code: true } });
+  const byCode = (code: string) => disciplines.find((d) => d.code === code)?.id ?? null;
+  const ausschreibung = guglera.milestones.find((m) => m.name.startsWith("Ausschreibung"))?.id ?? null;
+
+  /*
+    Dates relative to today, not literals.
+
+    `isOverdue` is computed against the clock, so a task seeded as due
+    `2026-09-10` is overdue on the day it is written and for ever after —
+    including on a database seeded in 2028, where the whole board is red. Days
+    from now keeps every case meaning what it was written to mean.
+  */
+  const day = 86_400_000;
+  const inDays = (n: number) => new Date(Date.now() + n * day);
+
+  const seeds: {
+    key: string;
+    projectId: string | null;
+    title: string;
+    description?: string;
+    status: "TODO" | "IN_PROGRESS" | "IN_REVIEW" | "DONE" | "BLOCKED";
+    priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+    assignee: string | null;
+    discipline: string | null;
+    milestoneId?: string | null;
+    dueIn: number | null;
+    estimate: string | null;
+    blockedFrom?: "TODO" | "IN_PROGRESS" | "IN_REVIEW";
+    blockedReason?: string;
+    parent?: string;
+    checklist?: string[];
+    dependsOn?: string;
+  }[] = [
+    {
+      key: "lueftung-konzept",
+      projectId: guglera.id,
+      title: "Lüftungskonzept Obergeschoss überarbeiten",
+      description: "Luftmengen nach SIA 382/1 gegen den revidierten Raumplan prüfen.",
+      status: "IN_PROGRESS",
+      priority: "HIGH",
+      assignee: "MA-002",
+      discipline: "LFT",
+      milestoneId: ausschreibung,
+      dueIn: 12,
+      estimate: "16.00",
+      checklist: [
+        "Raumliste gegen Architekturplan abgleichen",
+        "Luftmengen berechnen",
+        "Kanalführung im Modell prüfen",
+        "Ergebnis mit Fachbereichsleitung besprechen",
+      ],
+    },
+    {
+      key: "heizlast",
+      projectId: guglera.id,
+      title: "Heizlastberechnung aktualisieren",
+      status: "TODO",
+      priority: "MEDIUM",
+      assignee: "MA-001",
+      discipline: "HZG",
+      dueIn: 20,
+      estimate: "8.00",
+    },
+    {
+      key: "ausschreibung-lueftung",
+      projectId: guglera.id,
+      title: "Ausschreibungsunterlagen Lüftung zusammenstellen",
+      status: "TODO",
+      priority: "HIGH",
+      assignee: "MA-002",
+      discipline: "LFT",
+      milestoneId: ausschreibung,
+      dueIn: 30,
+      estimate: "24.00",
+      // Gated by the concept above: an `FS` edge, which `refuseTransition`
+      // refuses `DONE` against while the predecessor is open.
+      dependsOn: "lueftung-konzept",
+    },
+    {
+      key: "sanitaer-abnahme",
+      projectId: guglera.id,
+      title: "Sanitär-Grobinstallation abnehmen",
+      status: "IN_REVIEW",
+      priority: "MEDIUM",
+      assignee: "MA-003",
+      discipline: "SAN",
+      dueIn: 5,
+      estimate: "4.00",
+    },
+    {
+      key: "elektro-schema",
+      projectId: guglera.id,
+      title: "Prinzipschema Elektro freigeben lassen",
+      status: "BLOCKED",
+      blockedFrom: "IN_PROGRESS",
+      blockedReason: "Wartet auf den definitiven Küchenausbau der Bauherrschaft.",
+      priority: "HIGH",
+      assignee: "MA-004",
+      discipline: "ELT",
+      dueIn: 8,
+      estimate: "6.00",
+    },
+    {
+      key: "bestandsaufnahme",
+      projectId: guglera.id,
+      title: "Bestandsaufnahme Heizzentrale",
+      status: "DONE",
+      priority: "MEDIUM",
+      assignee: "MA-001",
+      discipline: "HZG",
+      dueIn: -40,
+      estimate: "12.00",
+    },
+    {
+      key: "kanalnetz",
+      projectId: guglera.id,
+      title: "Kanalnetz im Modell nachführen",
+      status: "TODO",
+      priority: "LOW",
+      assignee: "MA-005",
+      discipline: "BIM",
+      dueIn: 18,
+      estimate: "10.00",
+      // A subtask, so `refuseTransition` has an open child to refuse `DONE`
+      // against — which is not visible on a flat board.
+      parent: "lueftung-konzept",
+    },
+    {
+      key: "erdsonden",
+      projectId: aarefeld.id,
+      title: "Erdsondenfeld mit Geologen abstimmen",
+      status: "TODO",
+      priority: "URGENT",
+      assignee: "MA-002",
+      discipline: "ENE",
+      // Overdue: the case a screenshot of a freshly seeded board must show,
+      // because an overdue card is what the module is *for*.
+      dueIn: -6,
+      estimate: "3.00",
+    },
+    {
+      key: "zertifikate",
+      projectId: null,
+      title: "Fachausweise für 2027 erneuern",
+      description: "Suva-Kurs Kältemittel und die SIA-Mitgliedschaften.",
+      status: "TODO",
+      priority: "LOW",
+      // Firm-level: no project, no Gewerk. The module's defining case.
+      assignee: "MA-001",
+      discipline: null,
+      dueIn: 60,
+      estimate: null,
+    },
+  ];
+
+  const ids = new Map<string, string>();
+  let position = 0;
+
+  for (const seed of seeds) {
+    position += 1024;
+    const values = {
+      title: seed.title,
+      description: seed.description ?? null,
+      status: seed.status,
+      priority: seed.priority,
+      blockedFrom: seed.blockedFrom ?? null,
+      blockedReason: seed.blockedReason ?? null,
+      dueDate: seed.dueIn === null ? null : inDays(seed.dueIn),
+      completedAt: seed.status === "DONE" ? inDays(seed.dueIn ?? 0) : null,
+      estimateHours: seed.estimate === null ? null : new Prisma.Decimal(seed.estimate),
+      position,
+      projectId: seed.projectId,
+      milestoneId: seed.milestoneId ?? null,
+      assigneeId: seed.assignee ? byNumber(seed.assignee).id : null,
+      disciplineId: seed.discipline ? byCode(seed.discipline) : null,
+      parentTaskId: seed.parent ? (ids.get(seed.parent) ?? null) : null,
+    };
+
+    const existing = await prisma.task.findFirst({
+      where: { projectId: seed.projectId, title: seed.title },
+      select: { id: true },
+    });
+    const row = existing
+      ? await prisma.task.update({ where: { id: existing.id }, data: values })
+      : await prisma.task.create({ data: values });
+    ids.set(seed.key, row.id);
+
+    if (seed.checklist) {
+      for (const [index, text] of seed.checklist.entries()) {
+        const point = await prisma.checklistItem.findFirst({
+          where: { taskId: row.id, text },
+          select: { id: true },
+        });
+        const data = { text, position: index + 1, done: index === 0 };
+        if (point) await prisma.checklistItem.update({ where: { id: point.id }, data });
+        else await prisma.checklistItem.create({ data: { taskId: row.id, ...data } });
+      }
+    }
+  }
+
+  /*
+    The edges last, in a second pass.
+
+    A dependency names two tasks and the second may not exist yet on the first
+    run. Splitting the pass is what lets the seed list read in the order a person
+    would write it rather than in topological order.
+  */
+  for (const seed of seeds) {
+    if (!seed.dependsOn) continue;
+    const successorId = ids.get(seed.key);
+    const predecessorId = ids.get(seed.dependsOn);
+    if (!successorId || !predecessorId) continue;
+    await prisma.taskDependency.upsert({
+      where: { predecessorId_successorId: { predecessorId, successorId } },
+      create: { predecessorId, successorId, type: "FS" },
+      update: { type: "FS" },
+    });
+  }
+
+  return seeds.length;
 }
 
 /* ------------------------------------------------------------------ */

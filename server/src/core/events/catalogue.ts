@@ -130,9 +130,42 @@ export type DomainEvents = {
   IssueResolved: { projectId: string; number: string; resolvedBy: string };
   IssueVerified: { projectId: string; number: string; verifiedBy: string };
 
-  /* ---- Tasks and time ---------------------------------------------- */
-  TaskAssigned: { projectId?: string; title: string; assigneeId: string };
-  TaskCompleted: { projectId?: string; title: string };
+  /* ---- Tasks (Wave 2) ---------------------------------------------- */
+  TaskCreated: { projectId: string | null; title: string; assigneeId: string | null };
+  /** The field write, separate from the transition — the `ProjectUpdated` rule. */
+  TaskUpdated: { title: string; fields: string[] };
+  TaskStatusChanged: { projectId: string | null; title: string; from: string; to: string };
+  /**
+   * Reassignment, and it carries **both** ends.
+   *
+   * A notification has to reach the person who just gained the work *and* the
+   * one who lost it — "das liegt nicht mehr bei dir" is the half that gets
+   * forgotten, and a payload with only `assigneeId` cannot express it. `null`
+   * on either side is a real value: a task can be unassigned back to the
+   * backlog.
+   */
+  TaskAssigned: {
+    projectId: string | null;
+    title: string;
+    assigneeId: string | null;
+    previousAssigneeId: string | null;
+  };
+  TaskCompleted: { projectId: string | null; title: string; assigneeId: string | null };
+  TaskBlocked: { projectId: string | null; title: string; reason: string };
+  TaskDeleted: { projectId: string | null; title: string };
+  /**
+   * Raised **once per due date** by the nightly sweep, not every night.
+   *
+   * `Task.overdueNotifiedAt` is what makes that true; the reason is written on
+   * the column. `daysOverdue` is on the payload so a listener can escalate
+   * without recomputing it from a date it would have to parse.
+   */
+  TaskOverdue: { projectId: string | null; title: string; assigneeId: string | null; daysOverdue: number };
+  TaskDependencyAdded: { taskId: string; predecessorId: string; type: string };
+  /** Comments are their own event because a mention is a notification trigger. */
+  TaskCommented: { taskId: string; projectId: string | null; mentionedIds: string[] };
+
+  /* ---- Time -------------------------------------------------------- */
   TimeEntryApproved: { employeeId: string; projectId?: string; minutes: number };
   TimeEntryRejected: { employeeId: string; minutes: number; note?: string };
   AbsenceApproved: { employeeId: string; from: string; to: string };
@@ -214,8 +247,16 @@ export const DOMAIN_EVENT_NAMES = [
   "IssueAssigned",
   "IssueResolved",
   "IssueVerified",
+  "TaskCreated",
+  "TaskUpdated",
+  "TaskStatusChanged",
   "TaskAssigned",
   "TaskCompleted",
+  "TaskBlocked",
+  "TaskDeleted",
+  "TaskOverdue",
+  "TaskDependencyAdded",
+  "TaskCommented",
   "TimeEntryApproved",
   "TimeEntryRejected",
   "AbsenceApproved",

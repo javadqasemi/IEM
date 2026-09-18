@@ -847,6 +847,7 @@ model Employee {
   memberships         ProjectMember[]
   projectDisciplines  ProjectDiscipline[]  @relation("ProjectDisciplineLead")
   customersOwned      Customer[]           @relation("CustomerOwner")
+  tasksAssigned       Task[]               @relation("TaskAssignee")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -897,6 +898,7 @@ model Discipline {
   active Boolean @default(true)
 
   projectDisciplines ProjectDiscipline[]
+  tasks              Task[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1140,6 +1142,7 @@ model Project {
   members     ProjectMember[]
   disciplines ProjectDiscipline[]
   milestones  Milestone[]
+  tasks       Task[]
 
   /// The record's own revision — `P-2026-014 v12`.
   ///
@@ -1356,6 +1359,259 @@ model Milestone {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
+  tasks Task[]
+
   @@index([projectId, dueDate])
   @@index([status, dueDate])
+}
+
+// =====================================================================
+// Aufgaben — Wave 2, module 1
+//
+// `docs/data-model.md` §3.9. The first module derived from the Projects
+// reference rather than inventing its own shape, and the first one that is
+// *embedded* in another module's screen: `/projekte/:id/aufgaben` is one of the
+// eight tabs `features/projects/screens/tabs.ts` declares as a placeholder.
+// =====================================================================
+
+/// `TODO → IN_PROGRESS → IN_REVIEW → DONE`, plus `BLOCKED` and `CANCELLED`.
+///
+/// `BLOCKED` is a status rather than a flag, which is the choice worth
+/// recording: a boolean beside the status produces four states that mean
+/// "blocked and also in progress", and every list then has to decide which of
+/// the two to show. It is reachable from the three active states and returns to
+/// the one it came from — `tasks.rules.ts` keeps that in `blockedFrom`.
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  BLOCKED
+  CANCELLED
+}
+
+/// The four standard precedence relations, as Planning's Gantt needs them.
+///
+/// `FS` is finish-to-start and is what everybody means by "depends on"; the
+/// other three exist because a Bauprogramm uses them and a module that only
+/// modelled `FS` would be re-migrated the day Planning arrives.
+enum TaskDependencyType {
+  FS
+  SS
+  FF
+  SF
+}
+
+/// A piece of work. Usually on a project, occasionally not.
+///
+/// **`projectId` is nullable and that is the module's defining decision.** The
+/// firm's own to-dos — chase an offer, renew a certificate, book the Bauführer
+/// course — are tasks with no project, and forcing a project on them would mean
+/// either a "Sonstiges" dummy project polluting every project list, or those
+/// to-dos living outside the system in somebody's notebook. The consequence is
+/// that row-level visibility cannot simply be "the project's scope": see
+/// `tasks.scope.ts`, which is where the interesting half of this module is.
+model Task {
+  id String @id @default(cuid())
+
+  title       String
+  description String?
+
+  status   TaskStatus @default(TODO)
+  priority Priority   @default(MEDIUM)
+
+  /// Where `BLOCKED` came from, so unblocking returns the task rather than
+  /// dropping it back to `TODO`. Null unless `status` is `BLOCKED`.
+  blockedFrom TaskStatus?
+  /// Why it is blocked. Free text, and the reason a blocked board column is
+  /// readable at all.
+  blockedReason String?
+
+  startDate   DateTime?
+  dueDate     DateTime?
+  /// Stamped by the transition to `DONE`, never typed. Same rule as
+  /// `Project.actualEndDate`: "when was this finished" is not a field somebody
+  /// should have to remember to fill in.
+  completedAt DateTime?
+
+  /// Hours, not money — two decimals because a quarter of an hour is 0.25 and
+  /// the firm books in quarters.
+  estimateHours Decimal? @db.Decimal(7, 2)
+
+  /// **Derived, and nothing writes it yet.** Its input is `TimeEntry`, which is
+  /// Wave 2 module 14. It is declared now because `docs/data-model.md` §3.9
+  /// lists it and because the column is what module 14 will fill; it is
+  /// deliberately *not* seeded and no rule reads it, so a reconciler that has
+  /// stopped working cannot hide behind a plausible number. The same discipline
+  /// `Project.progressPercent` states, applied to a figure that has no writer
+  /// at all yet.
+  spentHours Decimal @default(0) @db.Decimal(9, 2)
+
+  /// Kanban order within one column. **Sparse and gap-based** — see
+  /// `positionBetween` in `tasks.rules.ts`. Dropping a card between two others
+  /// rewrites one row, not the column, which is what makes a board with two
+  /// hundred cards usable.
+  position Int @default(0)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// What the task delivers against. `SetNull`, because a milestone being
+  /// rescheduled away must not take the work with it.
+  milestoneId String?
+  milestone   Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+
+  /// Unassigned is a real and common state — a task lands in the backlog before
+  /// anybody owns it, and requiring an assignee at creation is how backlogs end
+  /// up assigned to whoever wrote them.
+  assigneeId String?
+  assignee   Employee? @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  /// One level of nesting in practice, not enforced in the schema. The rule
+  /// that a parent cannot be `DONE` while a child is open is in
+  /// `tasks.rules.ts`, and cycle detection with it — a self-referencing tree is
+  /// something the database cannot refuse.
+  parentTaskId String?
+  parentTask   Task?  @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks     Task[] @relation("TaskSubtasks")
+
+  /// Which Gewerk the work belongs to. Optional, because a firm-level task has
+  /// none — but present, because "alle offenen Lüftungs-Aufgaben" is a question
+  /// the firm asks weekly and a join through the project cannot answer it.
+  disciplineId String?
+  discipline   Discipline? @relation(fields: [disciplineId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  updatedById String?
+
+  /// Set when `TaskOverdue` was raised for the current `dueDate`, and cleared
+  /// when the date moves. Without it the nightly job re-announces the same
+  /// overdue task every night, and a notification that arrives every night is a
+  /// notification nobody reads.
+  overdueNotifiedAt DateTime?
+
+  dependsOn TaskDependency[] @relation("TaskSuccessor")
+  blocks    TaskDependency[] @relation("TaskPredecessor")
+  checklist ChecklistItem[]
+
+  /// The record's own revision — the same optimistic lock `Project` documents.
+  version Int @default(1)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  /// The board: one column of one project, in order.
+  @@index([projectId, status, position])
+  /// "Was liegt bei mir" — the single most-run query in the module.
+  @@index([assigneeId, status, dueDate])
+  /// The nightly overdue sweep, and the overdue filter on every list.
+  @@index([dueDate, status])
+  @@index([parentTaskId])
+  @@index([milestoneId])
+}
+
+/// One precedence relation between two tasks.
+///
+/// A table rather than a self-relation on `Task`, because a dependency carries
+/// its own data — the type and the lag — and because a task legitimately has
+/// several. The unique on the pair is what stops a double-click creating the
+/// same edge twice; the *cycle* rule cannot be a constraint and is in
+/// `tasks.rules.ts`.
+model TaskDependency {
+  id String @id @default(cuid())
+
+  /// The one that has to happen first.
+  predecessorId String
+  predecessor   Task   @relation("TaskPredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+  /// The one that waits.
+  successorId String
+  successor   Task   @relation("TaskSuccessor", fields: [successorId], references: [id], onDelete: Cascade)
+
+  type    TaskDependencyType @default(FS)
+  /// Days between the two ends of the relation. Negative is legitimate: a lag
+  /// of −2 on `FS` means the successor may start two days before the
+  /// predecessor finishes, which is how a Bauprogramm overlaps trades.
+  lagDays Int                @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([predecessorId, successorId])
+  @@index([successorId])
+}
+
+/// A line on a task's checklist.
+///
+/// Deliberately **not** a subtask. A checklist item has no assignee, no date and
+/// no status machine — it is a tick — and modelling it as a `Task` would put
+/// three hundred one-line rows on every board and in every "what is assigned to
+/// me" query. The distinction is the same one `docs/data-model.md` draws between
+/// a Task and an Issue: they differ in what can be asked of them.
+model ChecklistItem {
+  id     String @id @default(cuid())
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  text     String
+  done     Boolean   @default(false)
+  doneAt   DateTime?
+  /// The `Employee`, not the `User` — the same key every other "who did this"
+  /// in the domain uses, so a checklist can be read beside a time sheet.
+  doneById String?
+
+  position Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId, position])
+}
+
+/// A comment on any record.
+///
+/// **One table for every entity**, the same trade `AuditLog` and `EntityVersion`
+/// make and for the same reasons:
+///
+/// * **What it buys** — one place that knows how to write a comment, one
+///   thread component, and a module gets discussion by calling a service. At
+///   nineteen modules the alternative is nineteen tables and nineteen slightly
+///   different thread screens.
+/// * **What it costs** — no foreign key, so a comment can outlive its record.
+///   That is correct here: everything is soft-deleted, and a discussion that
+///   vanished with the row would be a discussion of nothing.
+///
+/// `entity` uses the same vocabulary as `AuditLog.resource` and
+/// `DomainEvent.entity`, so the three can be joined by eye.
+model Comment {
+  id String @id @default(cuid())
+
+  entity   String
+  entityId String
+
+  body String
+
+  /// Denormalised like the audit log's, and for the same reason: the account
+  /// may be deleted, and a thread that says "unknown" about who raised the
+  /// question is not a thread.
+  authorId    String?
+  authorEmail String?
+  authorName  String?
+
+  /// One level of replies. `SetNull` rather than cascade — deleting a question
+  /// must not silently remove the answer somebody else wrote.
+  parentId String?
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies  Comment[] @relation("CommentReplies")
+
+  /// Who was named with `@`. Ids, resolved by the reader — a stored display
+  /// name would go stale the day somebody marries.
+  mentionedIds String[]
+
+  editedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([entity, entityId, createdAt])
+  @@index([authorId])
 }

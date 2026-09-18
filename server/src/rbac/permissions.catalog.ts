@@ -106,6 +106,7 @@ export const SYSTEM_ROLES: RoleDef[] = [
         records any attempt. `project.update` is absent on purpose.
       */
       "project.read", "project.readAll", "project.export",
+      "task.read", "task.readAll", "task.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
     ],
   },
@@ -287,6 +288,14 @@ export const SYSTEM_ROLES: RoleDef[] = [
     permissions: [
       "project.read", "project.readAll", "project.create", "project.update",
       "project.archive", "project.export",
+      /*
+        Aufgaben, at the same reach as projects: the whole firm's book, no
+        delete. `task.updateOwn` is absent and it is not an oversight — a grant
+        that widens nothing beside `task.update` would be noise in the role
+        editor, and `mayWrite` short-circuits on the wide key.
+      */
+      "task.read", "task.readAll", "task.create", "task.update", "task.assign",
+      "task.comment", "task.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview", "content.history",
       "contentType.read", "media.read",
@@ -319,6 +328,15 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "project.read", "project.create", "project.update", "project.archive",
       "project.manageTeam", "project.manageDisciplines", "project.manageMilestones",
       "project.export",
+      /*
+        The full set, minus `readAll` — a Projektleiter's tasks are their
+        projects' tasks, and `tasks.scope.ts` narrows to exactly that. They hold
+        `task.delete` because a board fills with cards somebody opened by
+        mistake, and unlike a project a task has nothing hanging off it that a
+        soft delete would orphan.
+      */
+      "task.read", "task.create", "task.update", "task.assign", "task.delete",
+      "task.comment", "task.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",
@@ -342,6 +360,18 @@ export const SYSTEM_ROLES: RoleDef[] = [
     isSystem: true,
     permissions: [
       "project.read",
+      /**
+       * **The role `task.updateOwn` exists for**, and the reason the key is in
+       * the catalogue at all.
+       *
+       * An engineer moves their own card across the board, ticks their own
+       * checklist and asks questions on anybody's. They cannot reassign work,
+       * cannot edit a colleague's card, and cannot delete. `task.create` is
+       * granted because the person doing the work is the one who discovers the
+       * next piece of it; without it every task has to be opened by a
+       * Projektleiter, which is how a board stops reflecting the site.
+       */
+      "task.read", "task.create", "task.updateOwn", "task.comment",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",
@@ -368,6 +398,13 @@ export const SYSTEM_ROLES: RoleDef[] = [
     isSystem: true,
     permissions: [
       "project.read", "project.readAll", "project.export",
+      /*
+        `readAll` without `update` again, and for the reason the project half
+        gives: it is the combination that catches a guard which checks "may this
+        person reach the module" and forgets "may they write". Finance reads and
+        exports; it opens no cards and ticks nothing.
+      */
+      "task.read", "task.readAll", "task.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",

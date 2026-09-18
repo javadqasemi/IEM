@@ -26,6 +26,7 @@ import { AuditModule } from "./audit/audit.module";
 import { ApplicationsModule } from "./applications/applications.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { SchedulerModule } from "./scheduler/scheduler.module";
+import { TasksModule } from "./tasks/tasks.module";
 
 import { ProjectsModule } from "./projects/projects.module";
 import { CustomersModule } from "./customers/customers.module";
@@ -113,6 +114,7 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     RbacModule,
     SchedulerModule,
     SettingsRoutesModule,
+    TasksModule,
     UsersModule,
   ],
   providers: [

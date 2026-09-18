@@ -176,6 +176,50 @@ export const RESOURCES: ResourceDef[] = [
     export: "Projektlisten exportieren",
   }),
 
+  /* ===================================================================
+     The operational domain — Wave 2
+     =================================================================== */
+
+  /**
+   * Aufgaben, and the one place this catalogue gains a shape Projects did not
+   * need.
+   *
+   * **`updateOwn` beside `update`.** Everywhere else in this system a write
+   * permission is firm-wide and the *read* scope decides what can be reached.
+   * That does not work for a board: an engineer must be able to move their own
+   * card from `TODO` to `IN_PROGRESS` and tick their own checklist, and they
+   * must not be able to reassign their colleague's work or change its deadline.
+   * Row-level *write* is the `◐` this module needs, and the same argument that
+   * put `readAll` in the catalogue puts this here — as a grant somebody can be
+   * given, not as a role name compared inside a service.
+   *
+   * `tasks.scope.ts` → `ownsTask` is the predicate, and it is deliberately
+   * *narrower* than the read scope: seeing a project's board does not make
+   * every card on it yours.
+   *
+   * **`assign` is separate from `update`.** Who does the work is a planning
+   * decision; when it is due is a project decision; what it says is neither.
+   * Splitting them is what lets a Projektleiter staff their board without
+   * holding the permission that rewrites its contents — and it is the key the
+   * notification module will read to answer "who may have caused this".
+   *
+   * **No `archive`.** Projects has one because a finished project with invoices
+   * against it must never be deleted. A task has nothing hanging off it that a
+   * soft delete would orphan, so `CANCELLED` is the whole of "this will not
+   * happen" and a second mechanism would be two answers to one question.
+   */
+  resource("task", "Aufgaben", "Projekte", {
+    read: "Eigene Aufgaben und die der eigenen Projekte ansehen",
+    readAll: "Alle Aufgaben der Firma ansehen",
+    create: "Aufgaben anlegen",
+    update: "Beliebige Aufgaben bearbeiten",
+    updateOwn: "Eigene Aufgaben bearbeiten und auf dem Board verschieben",
+    assign: "Aufgaben zuweisen",
+    delete: "Aufgaben löschen",
+    comment: "Aufgaben kommentieren",
+    export: "Aufgabenlisten exportieren",
+  }),
+
   /**
    * The Wave 1 master data, read-only for now — and that is the whole
    * declaration, deliberately.
