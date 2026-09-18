@@ -569,6 +569,17 @@ export type SiteContent = {
     mobile: string;
     menuOpen: string;
     menuClose: string;
+    /**
+     * The header's link into the CMS. **Optional, and that is deliberate.**
+     *
+     * `setContent` replaces the document wholesale rather than merging it with
+     * `defaults.ts`, so a snapshot published before this field existed carries a
+     * `navLabels` without it. Typing it as required would be a lie the first
+     * time such a snapshot hydrates, and the cost would land on the one place
+     * that cannot afford it — an icon button whose only accessible name is this
+     * string. `Nav.tsx` falls back rather than rendering an unlabelled control.
+     */
+    login?: string;
   };
   /**
    * Labels in the service register. `enthalten`/`nichtEnthalten` are the

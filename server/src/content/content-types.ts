@@ -771,6 +771,15 @@ export const CONTENT_TYPES: ContentTypeDef[] = [
       { name: "mobile", label: "Mobile Navigation", type: "text", required: true },
       { name: "menuOpen", label: "Menü öffnen", type: "text", required: true },
       { name: "menuClose", label: "Menü schliessen", type: "text", required: true },
+      // Not `required`: snapshots published before this field existed have no
+      // value for it, and forcing one would make the next save of an untouched
+      // record fail on a field nobody changed. `Nav.tsx` falls back.
+      {
+        name: "login",
+        label: "Anmelden",
+        type: "text",
+        help: "Vorlesename des Anmelde-Symbols im Kopf. Führt ins Dashboard.",
+      },
     ],
   },
   labelBlock(

@@ -68,6 +68,43 @@ export function Nav() {
           </a>
           <SiteSearch className="hidden w-44 sm:block lg:w-56" />
 
+          {/*
+            The way into the CMS, and an `<a>` rather than a `<button>` because
+            it leaves the page — `admin.html` is its own Vite entry, not a route.
+            Icon-only, so the accessible name is the whole label: `sr-only` text
+            rather than `aria-label`, matching the menu toggle below, and with a
+            `title` so a mouse user gets the same word on hover.
+
+            `navLabels.login` is optional — a snapshot published before the field
+            existed has none — so it falls back rather than rendering a control
+            no screen reader can announce.
+          */}
+          <a
+            href="/admin.html"
+            title={navLabels.login ?? "Anmelden"}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md ring-1 ring-line transition-colors hover:bg-surface-2 hover:text-brand-blue"
+          >
+            <span className="sr-only">{navLabels.login ?? "Anmelden"}</span>
+            {/* Arrow entering a door: the conventional sign-in mark. Rounded
+                caps and joins are what separate it from the hamburger's plain
+                strokes — the same weight, a softer finish. */}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              aria-hidden
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9.5 2.5h3.5v11H9.5" />
+              <path d="M6.5 5.5L9 8l-2.5 2.5" />
+              <path d="M9 8H2.5" />
+            </svg>
+          </a>
+
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}

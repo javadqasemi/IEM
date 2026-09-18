@@ -1291,6 +1291,7 @@ export const navLabels = {
   mobile: "Hauptnavigation mobil",
   menuOpen: "Menü öffnen",
   menuClose: "Menü schliessen",
+  login: "Anmelden",
 };
 
 /**
