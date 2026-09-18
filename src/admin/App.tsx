@@ -1,4 +1,6 @@
 import { Suspense, useMemo } from "react";
+import { Button, EmptyState, Skeleton, Spinner } from "@/shared/ui/primitives";
+import { ErrorBoundary } from "@/shared/ui/feedback";
 import { api } from "./lib/api";
 import { useAuth } from "./lib/auth";
 import { useRoute } from "./lib/router";
@@ -6,8 +8,6 @@ import { useAsync } from "./lib/useAsync";
 import { AdminLayout } from "./layout/AdminLayout";
 import { buildNavigation, flattenNavigation, type NavSection } from "./lib/navigation";
 import { matchRoute, SPENT_AUTH_ROUTES } from "./routes";
-import { ErrorBoundary } from "./ui/ErrorBoundary";
-import { Button, EmptyState, Skeleton, Spinner } from "./ui/primitives";
 import { LoginPage } from "./pages/Login";
 
 /**

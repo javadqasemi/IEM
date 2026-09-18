@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { cn } from "../lib/cn";
+import { cn } from "@/shared/utils/cn";
+import { Button } from "@/shared/ui/primitives";
 import { Wordmark } from "@/components/Wordmark";
 import { useAuth } from "../lib/auth";
 import { Link, useRoute } from "../lib/router";
 import { useTheme } from "../lib/theme";
 import { activeSection, type NavSection } from "../lib/navigation";
 import { Sidebar } from "../ui/Sidebar";
-import { Button } from "../ui/primitives";
 
 /**
  * The dashboard shell: rail, top bar, content.

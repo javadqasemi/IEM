@@ -1,17 +1,12 @@
+import { formatBytes, formatDateTime, relativeTime } from "@/shared/utils/format";
+import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
+import { KpiCard, KpiUnavailable } from "@/shared/ui/data";
+import { WorkflowBadge } from "@/entities/content";
+import { ActivityFeed } from "@/widgets/activity";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useAsync } from "../lib/useAsync";
 import { Link } from "../lib/router";
-import {
-  ActivityFeed,
-  KpiCard,
-  KpiUnavailable,
-  WorkflowBadge,
-  formatBytes,
-  formatDateTime,
-  relativeTime,
-} from "../ui/data";
-import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "../ui/primitives";
 
 /**
  * The executive dashboard.

@@ -1,39 +1,18 @@
 import { useEffect, useId, useState } from "react";
-import { cn } from "../lib/cn";
+import { cn } from "@/shared/utils/cn";
+import { formatBytes, formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
+import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
+import { Field, Input, SearchInput, Select, Textarea, Toggle } from "@/shared/ui/forms";
+import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
+import { type Column, DataView } from "@/shared/ui/data";
+import { useToast } from "@/shared/ui/feedback";
+import { actionLabel } from "@/entities/audit";
+import { APPLICATION_STATUS_OPTIONS, ApplicationBadge } from "@/entities/application";
+import { ActivityFeed } from "@/widgets/activity";
 import { api, type ApplicationRow, type SettingRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { THEME_CHOICES, useTheme } from "../lib/theme";
 import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
-import { useToast } from "../ui/toast";
-import {
-  Badge,
-  Button,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  ErrorState,
-  Field,
-  Input,
-  Modal,
-  PageHeader,
-  SearchInput,
-  Select,
-  Skeleton,
-  Textarea,
-  Toggle,
-} from "../ui/primitives";
-import {
-  ActivityFeed,
-  APPLICATION_STATUS_OPTIONS,
-  ApplicationBadge,
-  DataView,
-  actionLabel,
-  formatBytes,
-  formatDate,
-  formatDateTime,
-  relativeTime,
-  type Column,
-} from "../ui/data";
 
 /* ================================================================== */
 /* Applications                                                        */

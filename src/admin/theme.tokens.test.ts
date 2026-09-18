@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
  *
  *   1. `src/admin/admin.css`          declares `--c-<token>` for both themes
  *   2. `tailwind.admin.config.ts`     maps a class name onto that variable
- *   3. `src/admin/**`                 writes `bg-<token>`, `text-<token>`, …
+ *   3. the dashboard's source roots   write `bg-<token>`, `text-<token>`, …
  *
  * Break any link and the class silently stops working. Renaming a token in one
  * place — which is exactly what `text-surface` → `text-inverse` and
@@ -29,8 +29,30 @@ import { describe, expect, it } from "vitest";
  */
 
 const ADMIN = resolve(__dirname);
+const SRC = resolve(ADMIN, "..");
 const css = readFileSync(join(ADMIN, "admin.css"), "utf8");
-const config = readFileSync(resolve(ADMIN, "../../tailwind.admin.config.ts"), "utf8");
+const config = readFileSync(resolve(SRC, "../tailwind.admin.config.ts"), "utf8");
+
+/**
+ * Every folder the dashboard renders from.
+ *
+ * This used to be `src/admin` alone, and when the UI moved into `src/shared`,
+ * `src/entities` and `src/widgets` the scan below would have kept passing
+ * while covering a third of what it used to — the worst kind of regression in
+ * a test, because the green tells you nothing changed.
+ *
+ * It is checked against `tailwind.admin.config.ts` rather than just written
+ * down: that file's `content` is what Tailwind scans to decide which classes
+ * to emit, so a folder present in one list and missing from the other is a
+ * hole in either the stylesheet or this test. Folders that do not exist yet
+ * are dropped — the enterprise feature folders are created as their modules
+ * are built.
+ */
+const DASHBOARD_ROOTS = ["admin", "app", "core", "entities", "features", "shared", "widgets"];
+const ROOTS = DASHBOARD_ROOTS.map((d) => join(SRC, d)).filter((d) => existsSync(d));
+
+/** A path as it is written in this repository, for a failure message. */
+const rel = (file: string) => `src/${relative(SRC, file).replace(/\\/g, "/")}`;
 
 /** Tokens declared in the light `:root` block. */
 const declared = new Set(
@@ -71,10 +93,11 @@ function sources(dir: string, out: string[] = []): string[] {
  * `bg-surface-2`.
  */
 const knownTokens = [...new Set([...declared, ...mapped])];
+const scanned = ROOTS.flatMap((root) => sources(root));
 const used = new Map<string, Set<string>>();
-for (const file of sources(ADMIN)) {
+for (const file of scanned) {
   const src = readFileSync(file, "utf8");
-  const where = file.replace(ADMIN, "src/admin").replace(/\\/g, "/");
+  const where = rel(file);
   for (const token of knownTokens) {
     for (const prefix of PREFIXES) {
       if (!new RegExp(`\\b${prefix}-${token}(?![\\w-])`).test(src)) continue;
@@ -139,19 +162,38 @@ describe("the tokens that were renamed are gone for good", () => {
      * so reintroducing it would produce dark text on the dark rail with no
      * error anywhere. This is the only check that would catch that.
      */
-    const offenders = sources(ADMIN).filter((f) =>
-      /\btext-surface\b/.test(readFileSync(f, "utf8")),
-    );
-    expect(offenders.map((f) => f.replace(ADMIN, "src/admin"))).toEqual([]);
+    const offenders = scanned.filter((f) => /\btext-surface\b/.test(readFileSync(f, "utf8")));
+    expect(offenders.map(rel)).toEqual([]);
   });
 
   it("nothing uses brand-navy as a foreground", () => {
     // `brand-navy` is a background only; `accent` is its foreground
     // counterpart. As text on a dark card the background value measures
     // 2.93:1 and fails AA — see theme.contrast.test.ts.
-    const offenders = sources(ADMIN).filter((f) =>
+    const offenders = scanned.filter((f) =>
       /\b(?:text|ring|border|fill|stroke)-brand-navy\b/.test(readFileSync(f, "utf8")),
     );
-    expect(offenders.map((f) => f.replace(ADMIN, "src/admin"))).toEqual([]);
+    expect(offenders.map(rel)).toEqual([]);
+  });
+});
+
+describe("the scan covers what Tailwind covers", () => {
+  /**
+   * The check that keeps the three above honest.
+   *
+   * Every assertion in this file is of the form "nothing in the scanned files
+   * does X". Shrink the scan and they all still pass, which is how a folder
+   * move turns a real check into a decorative one. Both halves are asserted:
+   * a root this test reads must be one Tailwind emits classes for, and a root
+   * Tailwind emits classes for must be one this test reads.
+   */
+  const globs = [...config.matchAll(/"\.\/src\/([a-z-]+)\/\*\*/g)].map((m) => m[1]);
+
+  it("reads a meaningful number of files", () => {
+    expect(scanned.length).toBeGreaterThan(20);
+  });
+
+  it("scans exactly the roots the Tailwind config scans", () => {
+    expect([...globs].sort()).toEqual([...DASHBOARD_ROOTS].sort());
   });
 });

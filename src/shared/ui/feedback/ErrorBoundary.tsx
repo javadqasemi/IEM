@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Button, ErrorState } from "./primitives";
+import { Button, ErrorState } from "@/shared/ui/primitives";
 
 /**
  * Catches a render-time exception and shows it.

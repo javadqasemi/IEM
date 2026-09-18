@@ -28,7 +28,32 @@ import base from "./tailwind.config";
 const token = (name: string) => `rgb(var(--c-${name}) / <alpha-value>)`;
 
 export default {
-  content: ["./admin.html", "./src/admin/**/*.{ts,tsx}"],
+  /**
+   * Every root the dashboard renders from — **not** `./src/**`.
+   *
+   * The list grew when the UI moved out of `src/admin/ui` into `src/shared`,
+   * `src/entities` and `src/widgets`, and the failure it prevents is quiet:
+   * Tailwind emits `@layer components` classes only when their name appears in
+   * a scanned file, so a `panel`, a `field-input` or a `cell` used exclusively
+   * from an unscanned folder is simply **not in the stylesheet**. Nothing
+   * errors; the card loses its border.
+   *
+   * Widening this to `./src/**` would also work and is wrong for a different
+   * reason: it would pull the public site's markup in here, so every utility
+   * the landing page uses would be emitted into the dashboard's stylesheet as
+   * well. Harmless to a visitor — this file is never in their bundle — but it
+   * makes the dashboard's CSS grow with a page it does not render.
+   */
+  content: [
+    "./admin.html",
+    "./src/admin/**/*.{ts,tsx}",
+    "./src/app/**/*.{ts,tsx}",
+    "./src/core/**/*.{ts,tsx}",
+    "./src/entities/**/*.{ts,tsx}",
+    "./src/features/**/*.{ts,tsx}",
+    "./src/shared/**/*.{ts,tsx}",
+    "./src/widgets/**/*.{ts,tsx}",
+  ],
   /**
    * `selector`, not `media`.
    *

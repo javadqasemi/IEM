@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatDateTime, relativeTime } from "@/shared/utils/format";
+import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
+import { SearchInput } from "@/shared/ui/forms";
+import { ConfirmDialog } from "@/shared/ui/overlays";
+import { type Column, DataView } from "@/shared/ui/data";
+import { useToast } from "@/shared/ui/feedback";
+import { WorkflowBadge } from "@/entities/content";
 import { api, type ContentTypeRow, type EntryRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { attachVisibilitySwitches, buildEntryIndex } from "../lib/inlineEdit";
 import { Link, navigate } from "../lib/router";
 import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
-import { useToast } from "../ui/toast";
-import {
-  Button,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  ErrorState,
-  PageHeader,
-  SearchInput,
-  Skeleton,
-} from "../ui/primitives";
-import { DataView, WorkflowBadge, formatDateTime, relativeTime, type Column } from "../ui/data";
 
 /* ================================================================== */
 /* The site itself, embedded                                           */

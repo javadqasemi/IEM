@@ -1,7 +1,7 @@
+import { ToastProvider } from "@/shared/ui/feedback";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AdminLayout } from "./layout/AdminLayout";
-import { ToastProvider } from "./ui/toast";
 import { AuthProvider } from "./lib/auth";
 import type { NavSection } from "./lib/navigation";
 

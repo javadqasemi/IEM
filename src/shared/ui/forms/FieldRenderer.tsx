@@ -1,7 +1,9 @@
 import { useId, useState, type ReactNode } from "react";
-import { cn } from "../lib/cn";
-import type { FieldDef } from "../lib/api";
-import { Badge, Button, Checkbox, Field, Input, Select, Textarea } from "./primitives";
+import { cn } from "@/shared/utils/cn";
+import { Badge, Button } from "@/shared/ui/primitives";
+import { Field } from "./Field";
+import { Checkbox, Input, Select, Textarea } from "./inputs";
+import type { FieldDef, FieldErrors } from "./types";
 
 /**
  * Renders any content type's form from its field definitions.
@@ -18,8 +20,6 @@ import { Badge, Button, Checkbox, Field, Input, Select, Textarea } from "./primi
  * available placeholders, because a writer who does not know `{jahrzehnte}`
  * exists will type "30" and the number will go stale in four years.
  */
-
-export type FieldErrors = Record<string, string[]>;
 
 export function FieldRenderer({
   fields,

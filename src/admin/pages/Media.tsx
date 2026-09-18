@@ -1,26 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { cn } from "../lib/cn";
+import { cn } from "@/shared/utils/cn";
+import { formatBytes, formatDateTime } from "@/shared/utils/format";
+import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
+import { Checkbox, Field, Input, SearchInput, Select, Textarea } from "@/shared/ui/forms";
+import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
+import { BarChart } from "@/shared/ui/data";
+import { useToast } from "@/shared/ui/feedback";
 import { api, type MediaRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
-import { useToast } from "../ui/toast";
-import {
-  Button,
-  Card,
-  Checkbox,
-  ConfirmDialog,
-  EmptyState,
-  ErrorState,
-  Field,
-  Input,
-  Modal,
-  PageHeader,
-  SearchInput,
-  Select,
-  Skeleton,
-  Textarea,
-} from "../ui/primitives";
-import { BarChart, formatBytes, formatDateTime } from "../ui/data";
 
 /**
  * The media library.

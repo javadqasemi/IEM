@@ -305,21 +305,16 @@ export type ContentTypeRow = {
   rank: number;
 };
 
-export type FieldDef = {
-  name: string;
-  label: string;
-  type: string;
-  required?: boolean;
-  help?: string;
-  options?: { value: string; label: string }[];
-  optionsFrom?: string;
-  of?: string;
-  fields?: FieldDef[];
-  maxLength?: number;
-  min?: number;
-  max?: number;
-  tokens?: boolean;
-};
+/**
+ * Re-exported, not declared.
+ *
+ * The descriptor's shape belongs to the form layer — `FieldRenderer` is the
+ * only thing that reads it — and it was declared here and there until the two
+ * copies were one field apart. A content type's `schema` is *transported*
+ * here; it is not defined here.
+ */
+import type { FieldDef } from "@/shared/ui/forms";
+export type { FieldDef };
 
 export type WorkflowState =
   | "DRAFT"

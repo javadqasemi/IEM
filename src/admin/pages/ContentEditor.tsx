@@ -1,24 +1,15 @@
 import { useEffect, useState } from "react";
+import { formatDateTime, relativeTime } from "@/shared/utils/format";
+import { Button, Card, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
+import { Field, FieldRenderer, Input, Textarea } from "@/shared/ui/forms";
+import { Breadcrumb } from "@/shared/ui/navigation";
+import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
+import { useToast } from "@/shared/ui/feedback";
+import { WorkflowBadge } from "@/entities/content";
 import { api, type EntryRow, type VersionRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { navigate } from "../lib/router";
 import { useAsync, useMutation } from "../lib/useAsync";
-import { useToast } from "../ui/toast";
-import {
-  Breadcrumb,
-  Button,
-  Card,
-  ConfirmDialog,
-  ErrorState,
-  Field,
-  Input,
-  Modal,
-  PageHeader,
-  Skeleton,
-  Textarea,
-} from "../ui/primitives";
-import { FieldRenderer } from "../ui/FieldRenderer";
-import { WorkflowBadge, formatDateTime, relativeTime } from "../ui/data";
 import { MediaPickerDialog } from "./Media";
 import { title } from "./Content";
 import { tokenHelp } from "@/content/iem";

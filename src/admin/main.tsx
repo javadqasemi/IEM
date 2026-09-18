@@ -1,9 +1,8 @@
 import { StrictMode } from "react";
+import { RootErrorBoundary, ToastProvider } from "@/shared/ui/feedback";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
-import { RootErrorBoundary } from "./ui/ErrorBoundary";
-import { ToastProvider } from "./ui/toast";
 import "./admin.css";
 
 /**

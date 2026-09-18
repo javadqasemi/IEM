@@ -1,22 +1,15 @@
 import { useState } from "react";
+import { formatDateTime, relativeTime } from "@/shared/utils/format";
+import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
+import { Field, Textarea } from "@/shared/ui/forms";
+import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
+import { type Column, DataTable } from "@/shared/ui/data";
+import { useToast } from "@/shared/ui/feedback";
+import { WorkflowBadge } from "@/entities/content";
 import { api, type ReviewRow } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Link } from "../lib/router";
 import { useAsync, useMutation } from "../lib/useAsync";
-import { useToast } from "../ui/toast";
-import {
-  Button,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  ErrorState,
-  Field,
-  Modal,
-  PageHeader,
-  Skeleton,
-  Textarea,
-} from "../ui/primitives";
-import { DataTable, WorkflowBadge, formatDateTime, relativeTime, type Column } from "../ui/data";
 
 /* ================================================================== */
 /* Review queue                                                        */
