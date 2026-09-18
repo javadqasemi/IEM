@@ -36,16 +36,22 @@ business feature; every module depends on all of them.
 | F1 | Folder skeleton + contracts | S | **Done.** Stage A. |
 | F2 | Split `shared/ui` by family | M | **Done.** Six families, and three domain pieces left for `entities/` and `widgets/` |
 | F3 | `core/api`: client, **query cache**, and the repository/**mapper**/service/hooks split per feature (architecture §3.1), with **one feature taken through all five layers** as the validated reference (§3.1.1) | M | **Done.** `features/applications` is the reference; `architecture.test.ts` enforces the DTO boundary and the layering in both directions. The other eight endpoint groups deliberately stay on the shared `api` object until the reference has been driven |
-| F4 | Nested router + breadcrumbs + route-declared actions | M | W11. Every module is `/x/:id/tab`; retrofitting nesting is a rewrite |
-| F5 | Form layer: `useForm`, `EntityForm`, unsaved-changes guard | M | W9. Twenty-odd modules of forms |
+| F4 | Nested router + breadcrumbs + route-declared actions | M | **Done.** A route names its `parent`; the trail and the screen's actions are derived and rendered in the sticky bar |
+| F5 | Form layer: `useForm`, `EntityForm`, unsaved-changes guard | M | **Done.** `dirty` is computed rather than flagged, server field errors map back, and the guard covers a hash change — which `beforeunload` never could |
 | F6 | Server `core/list`: filter/sort/paginate contract | M | W5. Every list endpoint, one implementation |
 | F7 | Generated permission catalogue + agreement test | S | W7. Cheap now, unmanageable at 180 entries |
 | F8 | Feature modules on the server + domain event bus | M | W8 + W10. The seam Finance needs to hear Time Tracking, and the one Notifications and Workflow are both built on |
-| F9 | `EntityPicker`, `DatePicker`, `DateRangePicker`, `Combobox`, `Drawer`, `FilterBar` | M | The six inputs every module needs on day one |
+| F9 | `EntityPicker`, `DatePicker`, `DateRangePicker`, `Combobox`, `Drawer`, `FilterBar` | M | **Done.** `FilterBar` + `DateRangePicker` are in use on the audit log; `Combobox` and `EntityPicker` wait for the first entity list to point at |
 | F10 | Job seam (`core/jobs`) | S | W12. Reports, BIM ingestion and notification digests cannot run in a request |
 
-**F2–F5 and F9 block everything. F6–F8 block the first server module. F10
-blocks Reports, BIM and the notification digest.**
+**F2–F5 and F9 are done.** F6–F8 block the first server module; F10 blocks
+Reports, BIM and the notification digest.
+
+Two of F9's six ship without a call site, and that is stated rather than
+glossed: `Combobox` and `EntityPicker` need a list of *entities* to point at,
+and the first one arrives with Employees in Wave 1. They are built now because
+the alternative is building them inside whichever module needs one first, where
+the keyboard behaviour gets written in a hurry.
 
 ### 2.1 Authentication and RBAC are done
 

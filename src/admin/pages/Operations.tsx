@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { cn } from "@/shared/utils/cn";
-import { formatDateTime, relativeTime } from "@/shared/utils/format";
+import { formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
 import {
   Badge,
   Button,
@@ -10,9 +10,18 @@ import {
   PageHeader,
   Skeleton,
 } from "@/shared/ui/primitives";
-import { Field, Input, SearchInput, Select, Toggle } from "@/shared/ui/forms";
+import {
+  DateRangePicker,
+  EMPTY_RANGE,
+  Field,
+  Input,
+  SearchInput,
+  Select,
+  Toggle,
+  type DateRange,
+} from "@/shared/ui/forms";
 import { Modal } from "@/shared/ui/overlays";
-import { type Column, DataView, Pair } from "@/shared/ui/data";
+import { buildFilterChips, type Column, DataView, FilterBar, Pair } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
 import { useDebounced, useMutation } from "@/shared/hooks";
 import { usePageActions } from "@/core/router";
@@ -229,6 +238,25 @@ function SettingField({
 /* Audit                                                               */
 /* ================================================================== */
 
+const OUTCOME_LABELS: Record<string, string> = {
+  SUCCESS: "Erfolgreich",
+  FAILURE: "Fehlgeschlagen",
+  DENIED: "Verweigert",
+};
+
+/**
+ * A picked day, widened to the instants the server compares against.
+ *
+ * `AuditQuery` validates `@IsISO8601()` and the service compares
+ * `createdAt >= from` and `<= to`. A bare `2026-03-14` parses as **midnight**,
+ * so a range of 14 to 14 March would match a two-millisecond window and return
+ * nothing — a filter that looks broken and is arithmetic. `to` therefore ends
+ * at the last instant of its day, in local time, which is the day the reader
+ * picked rather than the day UTC was having.
+ */
+const isoStart = (day: string) => (day ? new Date(`${day}T00:00:00`).toISOString() : undefined);
+const isoEnd = (day: string) => (day ? new Date(`${day}T23:59:59.999`).toISOString() : undefined);
+
 export function AuditPage() {
   const toast = useToast();
   const [search, setSearch] = useState("");
@@ -238,6 +266,32 @@ export function AuditPage() {
   const [exporting, setExporting] = useState(false);
   const [detail, setDetail] = useState<import("../lib/api").AuditRow | null>(null);
   const debounced = useDebounced(search);
+
+  /**
+   * The date filter the server always supported and the screen never offered.
+   *
+   * `AuditQuery` has had `from` and `to` since the controller was written, and
+   * nothing sent them — so "what happened last Tuesday", which is the question
+   * an audit log exists for, could only be answered by paging. Foundation stage
+   * F9's `DateRangePicker` is what makes it one click.
+   */
+  const [range, setRange] = useState<DateRange>(EMPTY_RANGE);
+
+  const clearFilter = (id: string) => {
+    if (id === "search") setSearch("");
+    if (id === "action") setAction("");
+    if (id === "outcome") setOutcome("");
+    if (id === "range") setRange(EMPTY_RANGE);
+    setPage(1);
+  };
+
+  const clearAll = () => {
+    setSearch("");
+    setAction("");
+    setOutcome("");
+    setRange(EMPTY_RANGE);
+    setPage(1);
+  };
 
   /**
    * The export, declared to the shell rather than drawn on the page.
@@ -262,7 +316,16 @@ export function AuditPage() {
         run: () => {
           setExporting(true);
           api
-            .downloadAuditExport({ search: debounced, action, outcome })
+            // The export follows what is on screen, date range included —
+            // otherwise a filtered view and its CSV disagree, which is the one
+            // thing an audit export must never do.
+            .downloadAuditExport({
+              search: debounced,
+              action,
+              outcome,
+              from: isoStart(range.from),
+              to: isoEnd(range.to),
+            })
             .catch((err: unknown) =>
               toast.error(err instanceof Error ? err.message : "Der Download ist fehlgeschlagen."),
             )
@@ -270,7 +333,7 @@ export function AuditPage() {
         },
       },
     ],
-    [debounced, action, outcome, exporting, toast],
+    [debounced, action, outcome, range.from, range.to, exporting, toast],
   );
   usePageActions(pageActions);
 
@@ -281,10 +344,12 @@ export function AuditPage() {
         search: debounced || undefined,
         action: action || undefined,
         outcome: outcome || undefined,
+        from: isoStart(range.from),
+        to: isoEnd(range.to),
         page,
         perPage: 50,
       }),
-    [debounced, action, outcome, page],
+    [debounced, action, outcome, range.from, range.to, page],
   );
 
   const columns: Column<import("../lib/api").AuditRow>[] = [
@@ -371,7 +436,32 @@ export function AuditPage() {
           perPage={list.data?.perPage ?? 50}
           onPageChange={setPage}
           toolbar={
-            <>
+            <FilterBar
+              className="w-full"
+              total={list.data?.total}
+              onClear={clearFilter}
+              onClearAll={clearAll}
+              chips={buildFilterChips(
+                { search: debounced, action, outcome, range },
+                {
+                  search: "Suche",
+                  action: "Aktion",
+                  outcome: "Ergebnis",
+                  range: "Zeitraum",
+                },
+                {
+                  action: (value) => actionLabel(String(value)),
+                  outcome: (value) => OUTCOME_LABELS[String(value)] ?? String(value),
+                  // The chip reads back what was chosen, not the ISO the server
+                  // gets — `2026-03-14` is not how anyone here writes a date.
+                  range: (value) => {
+                    const r = value as DateRange;
+                    if (!r.from && !r.to) return "";
+                    return `${formatDate(r.from) } – ${formatDate(r.to)}`;
+                  },
+                },
+              )}
+            >
               <SearchInput
                 value={search}
                 onChange={(v) => {
@@ -404,14 +494,17 @@ export function AuditPage() {
                   setPage(1);
                 }}
                 placeholder="Alle Ergebnisse"
-                options={[
-                  { value: "SUCCESS", label: "Erfolgreich" },
-                  { value: "FAILURE", label: "Fehlgeschlagen" },
-                  { value: "DENIED", label: "Verweigert" },
-                ]}
+                options={Object.entries(OUTCOME_LABELS).map(([value, label]) => ({ value, label }))}
                 className="w-auto"
               />
-            </>
+              <DateRangePicker
+                value={range}
+                onChange={(next) => {
+                  setRange(next);
+                  setPage(1);
+                }}
+              />
+            </FilterBar>
           }
           empty={<EmptyState title="Keine Einträge gefunden" />}
         />

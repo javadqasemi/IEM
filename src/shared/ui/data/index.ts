@@ -10,4 +10,5 @@
 export { DataTable, DataView, type Column } from "./DataTable";
 export { KpiCard, KpiUnavailable } from "./Kpi";
 export { Pair } from "./Pair";
+export { FilterBar, buildFilterChips, type FilterChip } from "./FilterBar";
 export { BarChart } from "./BarChart";

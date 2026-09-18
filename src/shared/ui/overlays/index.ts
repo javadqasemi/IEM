@@ -6,3 +6,4 @@
  * hand-written key handler that will be subtly wrong.
  */
 export { Modal, ConfirmDialog } from "./Modal";
+export { Drawer } from "./Drawer";

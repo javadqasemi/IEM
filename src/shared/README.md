@@ -38,22 +38,38 @@ shared/
     primitives/   Button, Spinner, Badge, Card, PageHeader,
                   Skeleton, SkeletonTable, EmptyState, ErrorState
     forms/        Field, Input, Textarea, Select, Checkbox, Toggle,
-                  SearchInput, FieldRenderer
-                  — later: useForm, EntityForm, DatePicker, Combobox,
-                    MoneyInput, FileDropzone
+                  SearchInput, FieldRenderer,
+                  Form, FormSection, FormActions, EntityForm, useForm,
+                  Combobox, EntityPicker, DatePicker, DateRangePicker
+                  — later: MoneyInput, MultiSelect, RichText, FileDropzone,
+                    TagInput, TimePicker
     navigation/   Tabs, Pagination, Breadcrumb
-    overlays/     Modal, ConfirmDialog
-                  — later: Drawer, Popover, Menu, Tooltip, CommandPalette
-    data/         DataTable, DataView, Column, KpiCard, KpiUnavailable,
-                  BarChart
+    overlays/     Modal, ConfirmDialog, Drawer
+                  — later: Popover, Menu, Tooltip, CommandPalette
+    data/         DataTable, DataView, Column, Pair, KpiCard, KpiUnavailable,
+                  BarChart, FilterBar
                   — later: TableToolbar, BulkBar, SavedViews
     feedback/     ToastProvider, useToast, ErrorBoundary
                   — later: charts/, views/ (Timeline, Kanban, Gantt, Calendar)
   utils/          cn, format
                   — later: date, number, file, sort
-  hooks/          — later: useDebounced, useDisclosure, useLocalStorage
+  hooks/          useDebounced, useMutation, useUnsavedGuard
+                  — later: useDisclosure, useLocalStorage
   types/          — later: Paginated<T>, ApiError, ID, Money
 ```
+
+**Native until native genuinely cannot.** `Select`, `DatePicker` and every text
+input are the platform's own, styled — they bring keyboard handling, the mobile
+picker, form association and screen-reader semantics that a custom widget has to
+rebuild and usually rebuilds incompletely. `Combobox` is the one exception and
+the reason is narrow: `<select>` cannot filter, and a list of 400 employees is a
+scroll nobody can use. Because it is hand-built, its keyboard is written out in
+the file rather than assumed.
+
+**`shared/` may import `core/`.** The layer diagram puts `core` underneath, so
+that is a downward arrow — `useMutation` reads `ApiError` for its per-field
+messages, and `useUnsavedGuard` registers the router's navigation blocker.
+`architecture.test.ts` enforces the direction.
 
 **Each family has its own barrel and there is no barrel above them.** A call
 site imports `@/shared/ui/forms`, not `@/shared/ui`, so the import line says
