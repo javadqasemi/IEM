@@ -535,6 +535,38 @@ Admin could reach the dashboard at all. **The other half of the fix is in the sh
 gated on the permission rather than on being signed in, because one nobody can see should cost no
 request.
 
+**Two tabs restoring a session is not a stolen token.** Refresh tokens rotate on
+every use and a rotated one presented again revokes the whole family — correct, and
+the only defence against a stolen cookie. But the replacement travels back in a
+`Set-Cookie`, so anything already in flight is still carrying the old value: every tab
+refreshes when it boots, two opened together sent the same cookie twice, and the second
+was read as a replay. **The answer to a replay is to revoke every session the account
+has**, so opening a second tab signed the user out of every device they owned, including
+the tab that had just succeeded. Nothing failed, nothing logged an error, and no client
+could fix it alone because the second request was sent before the first reply existed.
+Two halves, each argued on its own: `REFRESH_GRACE_MS` in `server/src/auth/auth.rules.ts`
+serves a token rotated within thirty seconds and audits it as
+`auth.refresh_concurrent`, and `withRefreshLock` in `core/api/client.ts` makes tabs take
+turns through `navigator.locks` so the race mostly does not happen. Outside the window
+the family still goes, and `e2e/auth.spec.ts` proves both directions against the running
+API — the unit tests cannot, because one process has one cookie jar.
+
+**A `false` from a refresh used to mean two different things.** "The server refused this
+session" and "the request never arrived" were the same value, so a restart, a laptop
+changing network or a 502 from a proxy ended a session nobody had asked about — and
+ended it expensively, because the access token lives in memory and cannot come back
+without a password. `RefreshOutcome` is three-valued (`renewed`/`rejected`/`offline`)
+and only `rejected` signs anybody out; `App.tsx` renders a *"Server antwortet nicht"*
+screen with a retry rather than a login form, because a login form is the one screen
+that cannot help when the API is unreachable.
+
+**An expired lockout used to keep its count.** `failedLogins` was cleared only by a
+successful sign-in, so an account locked once came back holding five: the first mistype
+after the fifteen minutes took it to six, six is still over the threshold, and it locked
+again. For ever. It reads as an account that locks at random and stays locked, and it is
+`afterFailedLogin` in `auth.rules.ts` that makes five attempts mean five attempts every
+time rather than only the first time.
+
 **`updateMany` takes scalar fields; it has no relation operations at all.** `toProjectUpdateData`
 emits `managerId`, never `manager: { connect }`, and that is forced rather than preferred: the
 optimistic lock needs the version inside the `where`, only `updateMany` allows that, and a relation
