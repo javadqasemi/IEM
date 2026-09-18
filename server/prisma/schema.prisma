@@ -854,6 +854,14 @@ model Employee {
   meetingItemsOwned   MeetingItem[]        @relation("MeetingResponsible")
   meetingsApproved    MeetingApproval[]    @relation("MeetingApprover")
   decisionsTaken      Decision[]           @relation("DecisionDecidedBy")
+  drawingsDrawn       Drawing[]            @relation("DrawingDrawnBy")
+  drawingsChecked     Drawing[]            @relation("DrawingCheckedBy")
+  drawingsApproved    Drawing[]            @relation("DrawingApprovedBy")
+  revisionsDrawn      DrawingRevision[]    @relation("RevisionDrawnBy")
+  revisionsChecked    DrawingRevision[]    @relation("RevisionCheckedBy")
+  revisionsApproved   DrawingRevision[]    @relation("RevisionApprovedBy")
+  transmittalsSent    Transmittal[]        @relation("TransmittalSentBy")
+  transmittalsReceived TransmittalRecipient[] @relation("TransmittalRecipient")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -907,6 +915,7 @@ model Discipline {
   tasks              Task[]
   meetingItems       MeetingItem[]
   decisions          Decision[]
+  drawings           Drawing[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1052,6 +1061,7 @@ model Building {
   office   Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
 
   projects Project[]
+  drawings Drawing[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1153,6 +1163,8 @@ model Project {
   tasks       Task[]
   meetings    Meeting[]
   decisions   Decision[]
+  drawings     Drawing[]
+  transmittals Transmittal[]
 
   /// The record's own revision — `P-2026-014 v12`.
   ///
@@ -1998,4 +2010,257 @@ model Decision {
   @@index([status, decidedAt])
   @@index([disciplineId])
   @@index([meetingId])
+}
+
+/* ==================================================================== */
+/* Pläne — Wave 2, module 3                                             */
+/* ==================================================================== */
+
+/// What a plan *is*, and it is deliberately not a Document.
+///
+/// Three things separate them and all three are lost by collapsing the two:
+/// a plan carries a revision **letter** rather than a version number, it is
+/// *issued* to named recipients on a date, and which revision somebody
+/// received is a liability question. `docs/data-model.md` §3.13.
+model Drawing {
+  id String @id @default(cuid())
+
+  /// The plan number, e.g. `4723-HZG-EG-101`. Unique within its project, like
+  /// a decision's number and for the same reason: it is quoted in e-mails and
+  /// printed in a title block, so it may never be reissued.
+  number String
+  title  String
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  /// Required. A plan without a Gewerk cannot answer "alle Lüftungspläne",
+  /// which is the question the anchors exist for.
+  disciplineId String
+  discipline   Discipline @relation(fields: [disciplineId], references: [id])
+
+  /// What it depicts. Nullable because a Prinzipschema often depicts no single
+  /// building. `floorId`, `buildingSystemId` and the `DrawingRoom` join wait
+  /// for Wave 2 module 6 — see the note in CLAUDE.md.
+  buildingId String?
+  building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+
+  type   DrawingType
+  scale  String?
+  format DrawingFormat @default(A3)
+  phase  SiaPhase?
+
+  status DrawingStatus @default(WIP)
+
+  /// The letter or number of the newest revision, `null` before the first one.
+  /// Denormalised so a list can show and sort by it without a join; written by
+  /// exactly one method, like `Project.progressPercent`.
+  currentRevision String?
+
+  /// Gezeichnet / geprüft / freigegeben — three different people's authority in
+  /// an engineering office, which is why they are three columns and four
+  /// permissions rather than one `approvedById`.
+  drawnById    String?
+  drawnBy      Employee? @relation("DrawingDrawnBy", fields: [drawnById], references: [id], onDelete: SetNull)
+  checkedById  String?
+  checkedBy    Employee? @relation("DrawingCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+  approvedById String?
+  approvedBy   Employee? @relation("DrawingApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  version Int @default(1)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+
+  revisions DrawingRevision[]
+
+  @@unique([projectId, number])
+  @@index([projectId, status])
+  @@index([disciplineId])
+  @@index([buildingId])
+  @@index([status, updatedAt])
+}
+
+/// One issued state of a plan. **Append-only** — the bytes of every revision
+/// survive, exactly as `MediaAssetVersion` does, because "which revision did
+/// the Sanitär contractor have on 14 March" has to be answerable with the file.
+model DrawingRevision {
+  id String @id @default(cuid())
+
+  drawingId String
+  drawing   Drawing @relation(fields: [drawingId], references: [id], onDelete: Cascade)
+
+  /// `A`, `B`, … from `core/versioning/revision.ts` in its ALPHA scheme, which
+  /// is bijective base-26 and therefore has no zero digit: after `Z` comes
+  /// `AA`. A naive `String.fromCharCode(65 + n)` puts `[` in a title block.
+  revision String
+
+  /// **Required.** What changed is the whole point of a revision; a revision
+  /// with an empty note is the row nobody can act on. Same principle as
+  /// `Decision.rationale`.
+  changeNote String
+  reason     RevisionReason @default(ERSTAUSGABE)
+
+  storageKey String
+  fileName   String
+  size       Int
+  checksum   String
+  mimeType   String
+
+  drawnById    String?
+  drawnBy      Employee? @relation("RevisionDrawnBy", fields: [drawnById], references: [id], onDelete: SetNull)
+  checkedById  String?
+  checkedBy    Employee? @relation("RevisionCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+  approvedById String?
+  approvedBy   Employee? @relation("RevisionApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  /// Stamped by the acts, never typed — the same argument as
+  /// `Meeting.minutesSentAt`.
+  releasedAt   DateTime?
+  supersededAt DateTime?
+
+  createdAt   DateTime @default(now())
+  createdById String?
+
+  items TransmittalItem[]
+
+  @@unique([drawingId, revision])
+  @@index([drawingId, createdAt])
+  @@index([releasedAt])
+}
+
+/// Planversand — the entity that makes the liability question answerable.
+///
+/// **Never updated and never deleted**, which is why it carries no `version`
+/// and no `deletedAt`. A transmittal is a statement about the past; correcting
+/// one means issuing another, the same reason `AuditLog` has no edit route.
+model Transmittal {
+  id     String @id @default(cuid())
+  number String @unique
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  sentAt   DateTime
+  sentById String?
+  sentBy   Employee? @relation("TransmittalSentBy", fields: [sentById], references: [id], onDelete: SetNull)
+
+  purpose TransmittalPurpose @default(ZUR_INFORMATION)
+  medium  TransmittalMedium  @default(EMAIL)
+  note    String?
+
+  createdAt   DateTime @default(now())
+  createdById String?
+
+  items      TransmittalItem[]
+  recipients TransmittalRecipient[]
+
+  @@index([projectId, sentAt])
+}
+
+model TransmittalItem {
+  id String @id @default(cuid())
+
+  transmittalId String
+  transmittal   Transmittal @relation(fields: [transmittalId], references: [id], onDelete: Cascade)
+
+  drawingRevisionId String
+  drawingRevision   DrawingRevision @relation(fields: [drawingRevisionId], references: [id])
+
+  copies Int            @default(1)
+  format DrawingFormat?
+
+  @@unique([transmittalId, drawingRevisionId])
+  @@index([drawingRevisionId])
+}
+
+/// Who received it. `externalName` rather than a `contactId` because there is
+/// no `Contact` table until Wave 3 — the same compromise `MeetingAttendee`
+/// makes, and for the same reason: the Unternehmer receiving the plan is not a
+/// user of this system and a Planversand without them in the list is not one.
+model TransmittalRecipient {
+  id String @id @default(cuid())
+
+  transmittalId String
+  transmittal   Transmittal @relation(fields: [transmittalId], references: [id], onDelete: Cascade)
+
+  employeeId String?
+  employee   Employee? @relation("TransmittalRecipient", fields: [employeeId], references: [id], onDelete: SetNull)
+
+  externalName String?
+  externalOrg  String?
+  externalMail String?
+
+  role RecipientRole @default(TO)
+
+  /// Set when the recipient confirms. Null is "not confirmed", which is not
+  /// "did not receive" — the same three-state distinction as
+  /// `MeetingAttendee.attended`.
+  acknowledgedAt DateTime?
+
+  @@index([transmittalId])
+}
+
+enum DrawingType {
+  GRUNDRISS
+  SCHNITT
+  ANSICHT
+  SCHEMA
+  PRINZIPSCHEMA
+  DETAIL
+  STRANGSCHEMA
+  ISOMETRIE
+}
+
+enum DrawingFormat {
+  A0
+  A1
+  A2
+  A3
+  A4
+  SONDER
+}
+
+/// `RELEASED` is internal, `ISSUED` is external, and a single `APPROVED` state
+/// cannot hold both: a released plan is approved in-house, an issued one has
+/// left the building and somebody is building from it.
+enum DrawingStatus {
+  WIP
+  IN_CHECK
+  CHECKED
+  RELEASED
+  ISSUED
+  SUPERSEDED
+  WITHDRAWN
+}
+
+enum RevisionReason {
+  ERSTAUSGABE
+  KUNDENWUNSCH
+  KOORDINATION
+  FEHLERKORREKTUR
+  BEHOERDE
+  AUSFUEHRUNG
+}
+
+enum TransmittalPurpose {
+  ZUR_INFORMATION
+  ZUR_PRUEFUNG
+  ZUR_AUSFUEHRUNG
+  ZUR_FREIGABE
+}
+
+enum TransmittalMedium {
+  EMAIL
+  POST
+  PLATTFORM
+  UEBERGABE
+}
+
+enum RecipientRole {
+  TO
+  CC
 }

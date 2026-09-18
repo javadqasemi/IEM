@@ -274,6 +274,59 @@ export const RESOURCES: ResourceDef[] = [
   }),
 
   /**
+   * Pläne — `docs/permissions.md` §3.10, and the resource with the most extra
+   * keys in the catalogue.
+   *
+   * **Four, because gezeichnet, geprüft, freigegeben and ausgegeben are four
+   * different people's authority in an engineering office.** Collapsing them
+   * into `update` and `approve` loses the distinction that matters most:
+   *
+   * | | |
+   * | --- | --- |
+   * | `check` | somebody other than the draftsman has looked at it. The four-eyes rule is in `drawings.rules.ts`, because the question is not what the caller holds but whose name is in the other column |
+   * | `release` | **internal**. Approved in-house, and nothing has left the building |
+   * | `issue` | **external**. Somebody is now building from it, and that is a liability rather than a workflow step |
+   * | `withdraw` | the plan is wrong and everyone holding it must be told |
+   *
+   * `release` and `issue` are held by different roles on purpose: an engineer
+   * checks and releases, and issuing is usually the project manager's. A single
+   * `approve` would have made the person who signs off the drawing the same
+   * person who ships it, which is exactly the pair this office separates.
+   */
+  resource("drawing", "Pläne", "Projekte", {
+    read: "Pläne der eigenen Projekte ansehen",
+    readAll: "Alle Pläne der Firma ansehen",
+    create: "Pläne anlegen und Revisionen hochladen",
+    update: "Planangaben bearbeiten",
+    check: "Pläne prüfen",
+    release: "Pläne intern freigeben",
+    issue: "Pläne ausgeben und versenden",
+    withdraw: "Pläne zurückziehen",
+    delete: "Pläne löschen",
+    export: "Planlisten exportieren",
+  }),
+
+  /**
+   * Planversand — and it has **no `update` and no `delete`**, by design.
+   *
+   * A transmittal is a statement about the past: *"diese Revisionen sind am
+   * 14. März an diese Empfänger gegangen"*. Correcting one means issuing
+   * another, the same reason `AuditLog` has no API to edit a row. The absence
+   * is enforced by there being no route rather than by a rule, which is the
+   * cheapest enforcement there is.
+   *
+   * `acknowledge` exists because the recipient's confirmation is a separate
+   * fact from the sending, and the person recording it is usually not the
+   * person who sent it.
+   */
+  resource("transmittal", "Planversand", "Projekte", {
+    read: "Planversände ansehen",
+    create: "Pläne versenden",
+    acknowledge: "Empfang bestätigen",
+    export: "Versandlisten exportieren",
+  }),
+
+  /**
    * The Wave 1 master data, read-only for now — and that is the whole
    * declaration, deliberately.
    *

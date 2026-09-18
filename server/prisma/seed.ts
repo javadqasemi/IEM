@@ -655,12 +655,15 @@ async function seedDomain() {
 
   const tasks = await seedTasks(byNumber);
   const meetings = await seedMeetings(byNumber);
+  const drawings = await seedDrawings(byNumber);
 
   console.log(
     `  ✓ ${offices.length} Standorte, ${departments.length} Abteilungen, ` +
       `${employees.length} Mitarbeitende, ${disciplines.length} Gewerke, ` +
       `${customers.length} Kunden, ${buildings.length} Gebäude, ${projectSeed.length} Projekte, ` +
-      `${tasks} Aufgaben, ${meetings.meetings} Sitzungen, ${meetings.decisions} Entscheide`,
+      `${tasks} Aufgaben, ${meetings.meetings} Sitzungen, ${meetings.decisions} Entscheide, ` +
+      `${drawings.drawings} Pläne mit ${drawings.revisions} Revisionen, ` +
+      `${drawings.transmittals} Planversand`,
   );
 }
 
@@ -1005,6 +1008,34 @@ async function seedMeetings(
       where: { meetingId: seed.meeting, order: seed.order },
       select: { id: true },
     });
+
+    /*
+      Detach the decision from whatever else is holding it, first.
+
+      `MeetingItem.decisionId` is `@unique` — one decision is recorded by one
+      protocol line — so writing it here fails if *any other* row already has
+      it. That is not hypothetical: re-running the seed against a database
+      where the line had moved to a different `order` (a reorder, or an earlier
+      version of this array) raised
+
+          Unique constraint failed on the constraint: `MeetingItem_decisionId_key`
+
+      and the whole seed stopped, after the permissions and before the
+      projects. A seed the documentation calls idempotent has to survive being
+      run twice against a database that has been used, not only against an
+      empty one.
+
+      Clearing the old link rather than skipping is right: this array is the
+      statement of what the protocol should say, so the line named here is the
+      one that should carry the decision.
+    */
+    if (values.decisionId) {
+      await prisma.meetingItem.updateMany({
+        where: { decisionId: values.decisionId, id: existing ? { not: existing.id } : undefined },
+        data: { decisionId: null },
+      });
+    }
+
     if (existing) await prisma.meetingItem.update({ where: { id: existing.id }, data: values });
     else
       await prisma.meetingItem.create({
@@ -1041,6 +1072,259 @@ async function seedMeetings(
   await prisma.meeting.update({ where: { id: twelve }, data: { minutesSentAt: ago(33) } });
 
   return { meetings: meetingSeed.length, decisions: decisionSeed.length };
+}
+
+/* ------------------------------------------------------------------ */
+/* Pläne und Planversand — Wave 2, module 3                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Six plans, eight revisions and one Planversand, and none of them is filler.
+ *
+ * Each exists to make one part of the module reachable from a screen that would
+ * otherwise only be reachable by hand:
+ *
+ * | | |
+ * | --- | --- |
+ * | `4723-HZG-EG-101` at Rev. **C**, issued | the whole chain — three revisions, the older two superseded, and a transmittal saying who holds which. This is the row that answers *"welche Revision hatte der Sanitär am 14. März"* |
+ * | `4723-LFT-OG2-201` at Rev. **B**, released | released but **not** issued, which is the distinction a single `APPROVED` status cannot hold |
+ * | `4723-SAN-EG-301` at Rev. **A**, in check | somebody is waiting on it — the `awaitingCheck` tile, and the four-eyes rule with two different names on it |
+ * | `4723-HZG-PS-001` at Rev. **A**, WIP | a Prinzipschema with **no building**, which is why `buildingId` is nullable |
+ * | `4723-ELT-EG-401`, no revision at all | a plan created and not yet drawn. `refuseTransition` refuses to check it, and that refusal is invisible without a row in this state |
+ * | `4723-LFT-OG1-202` at Rev. **B**, withdrawn | the `archived` figure in `/metrics/modules`, and the one status that is reachable from everywhere |
+ *
+ * **Nothing here is stored under `MEDIA_ROOT`.** The `storageKey`s are plausible
+ * and point at no file, because a seed that wrote PDFs would make
+ * `npm run server:seed` depend on a filesystem it does not own. The download
+ * route answers 404 for these, which is honest: the row is the record, the file
+ * is the artefact, and this seed has the first and not the second.
+ */
+async function seedDrawings(
+  byNumber: (n: string) => { id: string },
+): Promise<{ drawings: number; revisions: number; transmittals: number }> {
+  const guglera = await prisma.project.findUnique({
+    where: { number: "P-2026-001" },
+    select: { id: true, buildingId: true },
+  });
+  if (!guglera) return { drawings: 0, revisions: 0, transmittals: 0 };
+
+  const disciplines = await prisma.discipline.findMany({ select: { id: true, code: true } });
+  const byCode = (code: string) => disciplines.find((d) => d.code === code)?.id ?? null;
+
+  const day = 86_400_000;
+  const ago = (n: number) => new Date(Date.now() - n * day);
+
+  const drawingSeed = [
+    {
+      number: "4723-HZG-EG-101",
+      title: "Grundriss EG — Heizung",
+      discipline: "HZG",
+      type: "GRUNDRISS" as const,
+      format: "A1" as const,
+      scale: "1:50",
+      status: "ISSUED" as const,
+      withBuilding: true,
+      revisions: [
+        { rev: "A", note: "Erstausgabe für die Ausschreibung.", reason: "ERSTAUSGABE" as const, age: 60 },
+        { rev: "B", note: "Verteiler UG nach Osten verschoben, Steigzone angepasst.", reason: "KOORDINATION" as const, age: 30 },
+        { rev: "C", note: "Heizkörper Zimmer 012 auf Wandkonvektor geändert.", reason: "KUNDENWUNSCH" as const, age: 10 },
+      ],
+    },
+    {
+      number: "4723-LFT-OG2-201",
+      title: "Grundriss OG2 — Lüftung",
+      discipline: "LFT",
+      type: "GRUNDRISS" as const,
+      format: "A1" as const,
+      scale: "1:50",
+      status: "RELEASED" as const,
+      withBuilding: true,
+      revisions: [
+        { rev: "A", note: "Erstausgabe Ausführungsprojekt.", reason: "ERSTAUSGABE" as const, age: 40 },
+        { rev: "B", note: "Kanalführung über Korridor wegen Unterzug geändert.", reason: "KOORDINATION" as const, age: 12 },
+      ],
+    },
+    {
+      number: "4723-SAN-EG-301",
+      title: "Grundriss EG — Sanitär",
+      discipline: "SAN",
+      type: "GRUNDRISS" as const,
+      format: "A1" as const,
+      scale: "1:50",
+      status: "IN_CHECK" as const,
+      withBuilding: true,
+      revisions: [
+        { rev: "A", note: "Erstausgabe, Abwasserleitungen noch ohne Gefälleangaben.", reason: "ERSTAUSGABE" as const, age: 5 },
+      ],
+    },
+    {
+      number: "4723-HZG-PS-001",
+      title: "Prinzipschema Wärmeerzeugung",
+      discipline: "HZG",
+      type: "PRINZIPSCHEMA" as const,
+      format: "A3" as const,
+      scale: "o.M.",
+      status: "WIP" as const,
+      // No building: a Prinzipschema depicts the plant, not the object. This is
+      // the row that makes `buildingId` nullable rather than convenient.
+      withBuilding: false,
+      revisions: [
+        { rev: "A", note: "Erster Entwurf mit Wärmepumpe und Spitzenlastkessel.", reason: "ERSTAUSGABE" as const, age: 3 },
+      ],
+    },
+    {
+      number: "4723-ELT-EG-401",
+      title: "Grundriss EG — Elektro",
+      discipline: "ELT",
+      type: "GRUNDRISS" as const,
+      format: "A1" as const,
+      scale: "1:50",
+      status: "WIP" as const,
+      withBuilding: true,
+      // Deliberately none. `refuseTransition` refuses to check a plan with no
+      // revision, and that refusal cannot be seen without a row in this state.
+      revisions: [],
+    },
+    {
+      number: "4723-LFT-OG1-202",
+      title: "Grundriss OG1 — Lüftung (zurückgezogen)",
+      discipline: "LFT",
+      type: "GRUNDRISS" as const,
+      format: "A1" as const,
+      scale: "1:50",
+      status: "WITHDRAWN" as const,
+      withBuilding: true,
+      revisions: [
+        { rev: "A", note: "Erstausgabe.", reason: "ERSTAUSGABE" as const, age: 50 },
+        { rev: "B", note: "Geschossbezeichnung war falsch — Plan wird durch OG2-201 ersetzt.", reason: "FEHLERKORREKTUR" as const, age: 20 },
+      ],
+    },
+  ];
+
+  const revisionIds = new Map<string, string>();
+  let revisionCount = 0;
+
+  for (const seed of drawingSeed) {
+    const values = {
+      title: seed.title,
+      projectId: guglera.id,
+      disciplineId: byCode(seed.discipline) ?? disciplines[0].id,
+      buildingId: seed.withBuilding ? guglera.buildingId : null,
+      type: seed.type,
+      format: seed.format,
+      scale: seed.scale,
+      phase: "P51" as const,
+      status: seed.status,
+      currentRevision: seed.revisions.at(-1)?.rev ?? null,
+      drawnById: byNumber("MA-004").id,
+      // Two different people, so the four-eyes rule is satisfied by the data
+      // rather than by the rule being unreachable.
+      checkedById: seed.revisions.length ? byNumber("MA-002").id : null,
+      approvedById:
+        seed.status === "RELEASED" || seed.status === "ISSUED" ? byNumber("MA-002").id : null,
+    };
+
+    const existing = await prisma.drawing.findFirst({
+      where: { projectId: guglera.id, number: seed.number },
+      select: { id: true },
+    });
+
+    const drawing = existing
+      ? await prisma.drawing.update({ where: { id: existing.id }, data: values })
+      : await prisma.drawing.create({ data: { number: seed.number, ...values } });
+
+    for (const [index, revision] of seed.revisions.entries()) {
+      const isNewest = index === seed.revisions.length - 1;
+      const released = seed.status === "RELEASED" || seed.status === "ISSUED";
+
+      const revisionValues = {
+        changeNote: revision.note,
+        reason: revision.reason,
+        // Plausible and pointing at no file — see the note above.
+        storageKey: `plaene/2026/${seed.number}-${revision.rev}.pdf`,
+        fileName: `${seed.number}-${revision.rev}.pdf`,
+        size: 180_000 + index * 12_500,
+        checksum: `seed-${seed.number}-${revision.rev}`,
+        mimeType: "application/pdf",
+        drawnById: byNumber("MA-004").id,
+        checkedById: byNumber("MA-002").id,
+        approvedById: isNewest && released ? byNumber("MA-002").id : null,
+        releasedAt: isNewest ? (released ? ago(revision.age) : null) : ago(revision.age),
+        // Everything but the newest is history, which is what `currentRevision`
+        // means and what the transmittal rules refuse to send.
+        supersededAt: isNewest ? null : ago(revision.age - 2),
+      };
+
+      const found = await prisma.drawingRevision.findFirst({
+        where: { drawingId: drawing.id, revision: revision.rev },
+        select: { id: true },
+      });
+
+      const row = found
+        ? await prisma.drawingRevision.update({ where: { id: found.id }, data: revisionValues })
+        : await prisma.drawingRevision.create({
+            data: { drawingId: drawing.id, revision: revision.rev, ...revisionValues },
+          });
+
+      revisionIds.set(`${seed.number}:${revision.rev}`, row.id);
+      revisionCount += 1;
+    }
+  }
+
+  /* ---- One Planversand --------------------------------------------- */
+
+  /**
+   * `PV-2026-0001`: Rev. C of the Heizung plan, to two recipients.
+   *
+   * One of them has acknowledged and the other has not, because `acknowledgedAt`
+   * being null is *"not confirmed"* rather than *"did not receive"* — the same
+   * three-state distinction `MeetingAttendee.attended` makes, and it is
+   * invisible on a screen unless both states exist.
+   */
+  const issued = revisionIds.get("4723-HZG-EG-101:C");
+  let transmittals = 0;
+
+  if (issued) {
+    const existing = await prisma.transmittal.findUnique({
+      where: { number: "PV-2026-0001" },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      await prisma.transmittal.create({
+        data: {
+          number: "PV-2026-0001",
+          projectId: guglera.id,
+          sentAt: ago(9),
+          sentById: byNumber("MA-001").id,
+          purpose: "ZUR_AUSFUEHRUNG",
+          medium: "EMAIL",
+          note: "Ausführungsstand EG Heizung. Rev. B ist damit überholt.",
+          items: { create: [{ drawingRevisionId: issued, copies: 2, format: "A1" }] },
+          recipients: {
+            create: [
+              {
+                externalName: "M. Brunner",
+                externalOrg: "Brunner Haustechnik AG",
+                externalMail: "brunner@example.ch",
+                role: "TO",
+                acknowledgedAt: ago(8),
+              },
+              {
+                externalName: "S. Aebi",
+                externalOrg: "Architektur Aebi + Partner",
+                role: "CC",
+                acknowledgedAt: null,
+              },
+            ],
+          },
+        },
+      });
+    }
+    transmittals = 1;
+  }
+
+  return { drawings: drawingSeed.length, revisions: revisionCount, transmittals };
 }
 
 /* ------------------------------------------------------------------ */

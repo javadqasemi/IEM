@@ -114,6 +114,20 @@ export type DomainEvents = {
   DeliverableReleased: { projectPhaseId: string; name: string };
 
   /* ---- Drawings ---------------------------------------------------- */
+  /**
+   * These three were declared during F7, before the module existed, and the
+   * module was built to them rather than beside them.
+   *
+   * That is what the catalogue is for: `DrawingWithdrawn.reason` is a `string`
+   * and not `string | null`, which turned out to be a rule — withdrawing a plan
+   * people are building from without saying why is exactly the thing that
+   * should not be possible. The payload settled the question before the service
+   * asked it.
+   *
+   * `DrawingReleased` is internal and `DrawingIssued` is external, matching the
+   * two statuses; `DrawingIssued` carries the revision *and* the transmittal
+   * because "which revision, to whom, when" is one question.
+   */
   DrawingReleased: { projectId: string; number: string; revision: string };
   DrawingIssued: { projectId: string; number: string; revision: string; transmittalId: string };
   DrawingWithdrawn: { projectId: string; number: string; reason: string };
@@ -152,6 +166,51 @@ export type DomainEvents = {
   DecisionUpdated: { projectId: string; number: string; fields: string[] };
   DecisionStatusChanged: { projectId: string; number: string; from: string; to: string };
   DecisionSuperseded: { projectId: string; number: string; bySupersedingId: string };
+
+  /* ---- Pläne und Planversand (Wave 2) ------------------------------ */
+  /**
+   * What the F7 block above did not anticipate, added when the module was
+   * built rather than renamed into it.
+   *
+   * `DrawingReleased`, `DrawingIssued` and `DrawingWithdrawn` are up there and
+   * are the three that matter; these are the ordinary record events plus the
+   * two the Planversand needs.
+   */
+  DrawingCreated: { projectId: string; number: string; disciplineId: string; type: string };
+  DrawingUpdated: { projectId: string; number: string; fields: string[] };
+  DrawingStatusChanged: { projectId: string; number: string; from: string; to: string };
+  DrawingDeleted: { projectId: string; number: string };
+  /** A new revision exists. `supersedes` is the letter it replaced, if any. */
+  RevisionCreated: {
+    projectId: string;
+    number: string;
+    revision: string;
+    reason: string;
+    supersedes: string | null;
+  };
+  /** The Planversand itself, once, beside the per-drawing `DrawingIssued`. */
+  TransmittalSent: {
+    projectId: string;
+    transmittalNumber: string;
+    drawings: number;
+    recipients: number;
+    purpose: string;
+  };
+  /**
+   * Raised when a transmittal supersedes a revision somebody already holds.
+   *
+   * It is a **warning, not a refusal** — reissuing a revised plan is the normal
+   * case — and it is an event so that Notifications (module 9) can tell the
+   * person holding the old one without this module knowing it exists.
+   */
+  PriorRevisionSuperseded: {
+    projectId: string;
+    number: string;
+    previousRevision: string;
+    newRevision: string;
+    recipientLabel: string;
+  };
+  TransmittalAcknowledged: { projectId: string; transmittalNumber: string; recipientLabel: string };
 
   /* ---- Issues ------------------------------------------------------ */
   IssueRaised: { projectId: string; number: string; kind: string; severity: string };
@@ -280,6 +339,14 @@ export const DOMAIN_EVENT_NAMES = [
   "DecisionUpdated",
   "DecisionStatusChanged",
   "DecisionSuperseded",
+  "DrawingCreated",
+  "DrawingUpdated",
+  "DrawingStatusChanged",
+  "DrawingDeleted",
+  "RevisionCreated",
+  "TransmittalSent",
+  "PriorRevisionSuperseded",
+  "TransmittalAcknowledged",
   "IssueRaised",
   "IssueAssigned",
   "IssueResolved",

@@ -1,4 +1,4 @@
-import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
+﻿import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { ScheduleModule } from "@nestjs/schedule";
@@ -26,6 +26,7 @@ import { AuditModule } from "./audit/audit.module";
 import { ApplicationsModule } from "./applications/applications.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { MeetingsModule } from "./meetings/meetings.module";
+import { DrawingsModule } from "./drawings/drawings.module";
 import { SchedulerModule } from "./scheduler/scheduler.module";
 import { TasksModule } from "./tasks/tasks.module";
 
@@ -112,6 +113,7 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     DisciplinesModule,
     EmployeesModule,
     MeetingsModule,
+    DrawingsModule,
     ProjectsModule,
     RbacModule,
     SchedulerModule,

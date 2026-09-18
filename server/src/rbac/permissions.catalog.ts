@@ -310,6 +310,22 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "meeting.hold", "meeting.approve", "meeting.sendMinutes", "meeting.export",
       "decision.read", "decision.create", "decision.update", "decision.supersede",
       "decision.export",
+      /*
+        Pläne: reads everything, issues, withdraws — and **checks and releases
+        nothing**.
+
+        `docs/permissions.md` §3.10 puts `check` and `release` at `○` for the
+        Geschäftsleitung, which looks like an oversight and is the opposite: they
+        are *technical* acts. Somebody who has not opened the drawing should not
+        be the one certifying that it was checked, however senior they are.
+        `issue` is theirs because it is a commercial act — a plan leaving the
+        building is the firm's liability — and `withdraw` follows `issue` for
+        the same reason.
+      */
+      "drawing.read", "drawing.readAll", "drawing.create", "drawing.update",
+      "drawing.issue", "drawing.withdraw", "drawing.export",
+      "transmittal.read", "transmittal.create", "transmittal.acknowledge",
+      "transmittal.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview", "content.history",
       "contentType.read", "media.read",
@@ -363,6 +379,20 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "meeting.approve", "meeting.sendMinutes", "meeting.delete", "meeting.export",
       "decision.read", "decision.create", "decision.update", "decision.supersede",
       "decision.export",
+      /*
+        Pläne: everything except `readAll`, and that includes `check` and
+        `release`.
+
+        In a firm this size the Projektleiter is an engineer who also runs the
+        project, and `docs/permissions.md` §3.10 grants them both. The four-eyes
+        rule still applies and is not a permission: `drawings.rules.ts` refuses
+        a check by whoever drew it, whatever the checker holds.
+      */
+      "drawing.read", "drawing.create", "drawing.update", "drawing.check",
+      "drawing.release", "drawing.issue", "drawing.withdraw", "drawing.delete",
+      "drawing.export",
+      "transmittal.read", "transmittal.create", "transmittal.acknowledge",
+      "transmittal.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",
@@ -407,6 +437,24 @@ export const SYSTEM_ROLES: RoleDef[] = [
       */
       "meeting.read",
       "decision.read", "decision.create",
+      /*
+        **The role Drawings was built around.** An engineer draws, checks and
+        releases — `docs/permissions.md` §3.10 puts `check` and `release` at `●`
+        here and `issue` at `○`, which is the whole shape of the module: the
+        technical acts are theirs, and putting the plan in a contractor's hands
+        is not.
+
+        `drawing.update` rather than an `updateOwn` of the kind Tasks needed:
+        a plan is the project's artefact, not the draftsman's, and two people
+        working the same sheet is the normal case. The four-eyes rule is what
+        stops that being a problem, and it is a rule rather than a permission.
+
+        `transmittal.read` and no `create`: they see who received what, which is
+        what they need to answer a contractor's question, and they do not send.
+      */
+      "drawing.read", "drawing.create", "drawing.update", "drawing.check",
+      "drawing.release", "drawing.export",
+      "transmittal.read",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",
@@ -447,6 +495,14 @@ export const SYSTEM_ROLES: RoleDef[] = [
       */
       "meeting.read", "meeting.readAll", "meeting.export",
       "decision.read", "decision.export",
+      /*
+        Read and export again, and `transmittal.read` is the one that earns its
+        place: a Planversand is what a variation order is argued from — "die
+        Ausführungspläne gingen am 14. März raus" is a date Finance needs when a
+        Nachtrag lands. They check nothing and release nothing.
+      */
+      "drawing.read", "drawing.readAll", "drawing.export",
+      "transmittal.read", "transmittal.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",
