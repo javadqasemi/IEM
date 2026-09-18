@@ -84,6 +84,28 @@ export function notifyUnauthenticated() {
 }
 
 /**
+ * What a refresh attempt concluded.
+ *
+ * Three outcomes rather than a boolean, because **two of them used to be the
+ * same value and the difference decides whether somebody gets signed out.** The
+ * old `false` meant both "the server refused this session" and "the request
+ * never arrived", so a dropped connection at the wrong moment — a laptop
+ * changing network, a server restarting, a tunnel reconnecting — ended the
+ * session and threw away whatever was on screen. The session was still perfectly
+ * valid; nobody had asked anything.
+ *
+ * `offline` is therefore not a sign-out. The call it interrupted fails and says
+ * so, and the next request tries again.
+ */
+export type RefreshOutcome =
+  /** A new access token is in hand. */
+  | "renewed"
+  /** The server refused: no cookie, expired, revoked, replayed. Sign out. */
+  | "rejected"
+  /** Unreachable or broken. Say nothing about the session. */
+  | "offline";
+
+/**
  * The in-flight refresh, shared by every request that hits a 401 at once.
  *
  * Without this, a dashboard page that loads content, media and users in
@@ -92,21 +114,80 @@ export function notifyUnauthenticated() {
  * the server correctly treats as replay and responds to by ending every
  * session. The bug would look like "the dashboard logs me out at random".
  */
-let refreshing: Promise<boolean> | null = null;
+let refreshing: Promise<RefreshOutcome> | null = null;
 
-export async function refreshSession(): Promise<boolean> {
+/**
+ * How long a tab waits for another tab's refresh before going ahead anyway.
+ *
+ * The lock is an optimisation, not a correctness requirement — the server's
+ * grace window is what makes a lost race harmless — so waiting for ever on a
+ * tab that has been frozen or is sitting on a hung socket would trade a rare
+ * double-refresh for a dashboard that never loads.
+ */
+const LOCK_WAIT_MS = 5_000;
+
+/**
+ * Runs the refresh under a cross-tab lock where the browser has one.
+ *
+ * The in-flight promise above dedupes within *one* JavaScript context and can
+ * do nothing about a second tab, which is where the problem actually was: every
+ * tab restores its session on boot, so opening two at once sent two refreshes
+ * carrying the same cookie. The second arrived after the first had rotated it,
+ * the server read that as a replayed credential, and it answered the way it
+ * should — by revoking every session the account had. Both tabs fell to the
+ * login screen, and so did the phone in the user's pocket.
+ *
+ * `navigator.locks` makes the tabs take turns, so the second one presents the
+ * cookie the first one was issued. It is a secure-context API and is absent in
+ * old browsers and in a test environment, so its absence has to be survivable —
+ * and it is, because `REFRESH_GRACE_MS` on the server tolerates exactly the race
+ * this prevents. Belt and braces, and each was argued on its own.
+ */
+async function withRefreshLock<T>(run: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (!locks?.request) return run();
+
+  // Aborting the *wait* (not the work) puts a ceiling on how long one stuck tab
+  // can hold everyone else up. An aborted wait rejects, which is why this is in
+  // a try: the fallback is simply to go ahead unlocked.
+  const signal =
+    typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+      ? AbortSignal.timeout(LOCK_WAIT_MS)
+      : undefined;
+
+  try {
+    return await locks.request("iem.auth.refresh", signal ? { signal } : {}, run);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return run();
+    throw err;
+  }
+}
+
+export async function refreshSession(): Promise<RefreshOutcome> {
   refreshing ??= (async () => {
     try {
-      const res = await fetch(`${BASE}${PREFIX}/auth/refresh`, {
-        method: "POST",
-        credentials: "include",
+      return await withRefreshLock(async () => {
+        const res = await fetch(`${BASE}${PREFIX}/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
+        /*
+          A 5xx is the server having a bad day, not an answer about this
+          session. Reading it as a refusal is what turned a thirty-second
+          restart into everybody being signed out — and the sign-out is the
+          expensive half, because the access token in memory is then gone and
+          the session cannot come back by itself.
+        */
+        if (res.status >= 500) return "offline";
+        if (!res.ok) return "rejected";
+        const body = (await res.json()) as { data: { accessToken: string } };
+        accessToken = body.data.accessToken;
+        return "renewed";
       });
-      if (!res.ok) return false;
-      const body = (await res.json()) as { data: { accessToken: string } };
-      accessToken = body.data.accessToken;
-      return true;
     } catch {
-      return false;
+      // `fetch` rejects for DNS, refused connections, CORS and aborts — every
+      // one of which is "we could not ask", never "the answer was no".
+      return "offline";
     } finally {
       // Cleared in a microtask so every caller awaiting this promise reads the
       // same result before the next 401 can start a second refresh.
@@ -158,10 +239,15 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   });
 
   if (res.status === 401 && !options.retried) {
-    if (await refreshSession()) {
+    const outcome = await refreshSession();
+    if (outcome === "renewed") {
       return request<T>(path, { ...options, retried: true });
     }
-    onUnauthenticated?.();
+    // `offline` deliberately falls through without ending the session: the
+    // refresh never reached the server, so nothing has been said about whether
+    // this session is still good. The 401 below is reported to the caller, the
+    // screen shows an error, and the next request tries again.
+    if (outcome === "rejected") onUnauthenticated?.();
   }
 
   if (res.status === 204) return undefined as T;

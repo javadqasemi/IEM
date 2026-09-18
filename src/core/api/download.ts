@@ -48,11 +48,12 @@ export async function download(
 
   let res = await send();
   if (res.status === 401) {
-    if (await refreshSession()) {
-      res = await send();
-    } else {
-      notifyUnauthenticated();
-    }
+    // Same three-way answer as `request`: only an outright refusal ends the
+    // session. A download attempted while the network is down fails as a
+    // download, not as a sign-out.
+    const outcome = await refreshSession();
+    if (outcome === "renewed") res = await send();
+    else if (outcome === "rejected") notifyUnauthenticated();
   }
 
   if (!res.ok) {

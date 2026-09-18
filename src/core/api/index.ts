@@ -17,6 +17,7 @@ export {
   BASE,
   PREFIX,
   type ApiErrorBody,
+  type RefreshOutcome,
   type RequestOptions,
   type QueryValue,
 } from "./client";

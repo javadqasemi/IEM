@@ -6,6 +6,7 @@ import { ApiError } from "@/core/api";
 import { authRepository } from "@/core/auth";
 import { useAuth } from "@/core/auth";
 import { navigate, useRoute } from "@/core/router";
+import { SPENT_AUTH_ROUTES } from "../routes";
 
 /**
  * Sign-in, password reset and invitation acceptance.
@@ -49,7 +50,8 @@ export function LoginPage() {
 /* ------------------------------------------------------------------ */
 
 function SignIn() {
-  const { login } = useAuth();
+  const { login, sessionExpired } = useAuth();
+  const route = useRoute();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -59,11 +61,30 @@ function SignIn() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    // A second submit while the first is in flight costs an attempt against the
+    // ten-per-minute throttle and can only ever produce the same answer. The
+    // button is disabled while busy; this covers the form being submitted by
+    // other means.
+    if (busy) return;
     setError("");
     setBusy(true);
     try {
       await login(email, password);
-      navigate("/", { replace: true });
+      /*
+        Stay where they were trying to go.
+
+        The shell renders this form *in place of* the requested screen rather
+        than navigating to a sign-in route, so the hash is still
+        `#/projekte/abc/gewerke` while the password is being typed — and going
+        to `/` on success threw that away. Somebody following a colleague's
+        link landed on the dashboard and had to find the plan again, which is
+        the moment the link was supposed to save.
+
+        The exception is a route that has now been used up: an invitation or a
+        reset link is spent the moment it works, and leaving somebody on it
+        would show them a form for a token that is gone.
+      */
+      if (SPENT_AUTH_ROUTES.includes(route.path)) navigate("/", { replace: true });
     } catch (err) {
       // The server's message is shown as-is. It is deliberately the same for a
       // wrong password and an unknown address, and it says something useful
@@ -77,6 +98,22 @@ function SignIn() {
   return (
     <form onSubmit={submit} className="panel flex flex-col gap-5 p-6">
       <h1 className="font-display text-xl font-semibold text-ink">Anmelden</h1>
+
+      {/*
+        Why they are looking at this form.
+
+        Without it an expiring session is indistinguishable from a bug: the
+        screen someone was working on is replaced by a login box with no
+        explanation, and the reasonable conclusion is that the dashboard threw
+        them out for no reason. `role="status"` rather than `role="alert"` —
+        it is context for a form they are about to fill in, not an error in it.
+      */}
+      {sessionExpired && !error ? (
+        <p role="status" className="text-[13px] leading-relaxed text-muted">
+          Ihre Sitzung ist abgelaufen oder wurde beendet. Bitte melden Sie sich erneut an — Sie
+          kommen danach auf die Seite zurück, auf der Sie waren.
+        </p>
+      ) : null}
 
       <Field label="E-Mail" htmlFor={emailId}>
         <Input

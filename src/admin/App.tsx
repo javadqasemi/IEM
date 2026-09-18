@@ -27,7 +27,7 @@ import { LoginPage } from "./pages/Login";
  * screen in order to save bytes on a bundle that is otherwise not fetched yet.
  */
 export function App() {
-  const { user, loading, can, canAny } = useAuth();
+  const { user, loading, unreachable, retry, can, canAny } = useAuth();
   const route = useRoute();
 
   // Counts for the rail's badges. Only fetched once signed in, and failures
@@ -127,6 +127,17 @@ export function App() {
       </div>
     );
   }
+
+  /*
+    The server could not be asked, which is not the same as being signed out.
+
+    Rendering the sign-in form here is what the shell used to do, and it is the
+    one screen that cannot help: the credentials would go to the same
+    unreachable API and come back as "Die Anmeldung ist fehlgeschlagen", which
+    reads as a wrong password. The session in the cookie is very probably still
+    good, so this says what happened and offers to try again.
+  */
+  if (!user && unreachable) return <Unreachable onRetry={retry} />;
 
   if (!user) return <LoginPage />;
 
@@ -239,6 +250,30 @@ function NoAccess({ label, sections }: { label: string; sections: NavSection[] }
         ) : null
       }
     />
+  );
+}
+
+/**
+ * What a reader sees when the API cannot be reached at all.
+ *
+ * Deliberately says nothing about whether they are signed in, because nobody
+ * knows: the refresh never got an answer. The retry re-runs the same restore, so
+ * a session that was live the whole time comes straight back with no password
+ * typed — which is the outcome that separates this from the sign-in form.
+ */
+function Unreachable({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="grid min-h-dvh place-items-center bg-base px-6">
+      <EmptyState
+        title="Der Server antwortet nicht."
+        description="Die Verbindung zum Dashboard-Server ist unterbrochen. Ihre Sitzung ist davon nicht betroffen — sobald der Server wieder erreichbar ist, geht es ohne erneute Anmeldung weiter."
+        action={
+          <Button variant="primary" onClick={onRetry}>
+            Erneut versuchen
+          </Button>
+        }
+      />
+    </div>
   );
 }
 
