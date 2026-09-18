@@ -9,7 +9,7 @@ import type { ProjectDetail } from "@/entities/project";
  *
  * > Das Projekt ist der Container, nicht der Besitzer.
  *
- * Six of these tabs are the project's **own** data — its overview, its team,
+ * Seven of these tabs are the project's **own** data — its overview, its team,
  * its Gewerke, its milestones, and the two records it points at. The other
  * eight are *other modules*, scoped by `projectId` and embedded in this view.
  * Tasks are not part of a project; tasks have a project. When `features/tasks`
@@ -46,7 +46,11 @@ export type ProjectTab = {
 };
 
 /**
- * The eight tabs that are other modules.
+ * The seven tabs that are other modules.
+ *
+ * `aktivitaet` left this list when the version history arrived (F13): it was a
+ * placeholder for "wer hat wann was geändert", and that record now exists. A
+ * placeholder is removed by building the thing, never by hiding the tab.
  *
  * Declared as data here — rather than each being written out in the detail
  * screen — so that replacing one with a real screen is a one-line change and so
@@ -118,13 +122,5 @@ export const EMBEDDED_TABS: ProjectTab[] = [
     status: "planned",
     wave: "Wave 3",
   },
-  {
-    slug: "aktivitaet",
-    label: "Aktivität",
-    owned: false,
-    description:
-      "Wer wann was an diesem Projekt geändert hat. Die Einträge entstehen bereits — jede Änderung schreibt eine Audit-Zeile mit Vorher und Nachher.",
-    status: "in-progress",
-    wave: "Wave 2",
-  },
+
 ];

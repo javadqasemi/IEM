@@ -29,6 +29,8 @@ export {
   prime,
   peek,
   clearQueryCache,
+  fetchQuery,
+  peekError,
   type QueryKey,
   type QueryState,
 } from "./query";

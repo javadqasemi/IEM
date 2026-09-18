@@ -146,7 +146,7 @@ describe("the routes", () => {
   it("edits with PATCH and changes the status with PUT", async () => {
     // The separation is the server's contract, not a style choice: a transition
     // has preconditions, its own permission and its own event.
-    await projectRepository.update("p1", { name: "Anders" });
+    await projectRepository.update("p1", { expectedVersion: 3, name: "Anders" });
     expect(calls[0].init?.method).toBe("PATCH");
 
     calls = [];

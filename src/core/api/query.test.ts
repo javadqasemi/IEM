@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
-import { clearQueryCache, invalidate, peek, prime } from "./query";
+import { clearQueryCache, fetchQuery, invalidate, peek, peekError, prime } from "./query";
 
 /**
  * The cache's behaviour, tested without React.
@@ -122,5 +122,85 @@ describe("ApiError", () => {
     // form, and showing it beside a field would say that it is.
     const err = new ApiError({ statusCode: 403, code: "forbidden", message: "x" });
     expect(err.isValidation).toBe(false);
+  });
+});
+
+/**
+ * The failure path, and the loop it used to produce.
+ *
+ * This is the one piece of the cache that has actually been wrong in
+ * production, and it was wrong in the worst available way. `load` settles →
+ * `notify` → every subscriber's `sync` → `load` again; a failed entry was never
+ * *fresh*, so it fetched again, failed again and notified again. One rail badge
+ * that 403'd made **a thousand requests** and exhausted the rate limit for
+ * everything else on the page — including the save the user was trying to make.
+ *
+ * It stayed hidden because every query the shell issues had succeeded for every
+ * role that existed: until the operational roles arrived, only Super Admin
+ * could reach the dashboard. The first account without `application.read` found
+ * it in seconds.
+ */
+describe("a failed key", () => {
+  it("is not fetched again straight away", async () => {
+    const fetcher = vi.fn(() => Promise.reject(new ApiError({ statusCode: 403, code: "forbidden", message: "Keine Berechtigung." })));
+
+    await fetchQuery(["applications", "stats"], fetcher);
+    await fetchQuery(["applications", "stats"], fetcher);
+    await fetchQuery(["applications", "stats"], fetcher);
+
+    // Once. Three calls, one request — the cooldown is what stands between a
+    // 403 and an unbounded retry loop.
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the error rather than throwing it at the caller", async () => {
+    const fetcher = () => Promise.reject(new ApiError({ statusCode: 403, code: "forbidden", message: "Keine Berechtigung." }));
+
+    // No rejection: a prefetch that threw would be an unhandled rejection at
+    // every call site, and the error is on the entry where the hook reads it.
+    await expect(fetchQuery(["projects", "stats"], fetcher)).resolves.toBeNull();
+    expect(peekError(["projects", "stats"])?.message).toContain("Keine Berechtigung");
+  });
+
+  it("does not make a failure look like fresh data", async () => {
+    prime(["media", "list"], ["a"]);
+    await fetchQuery(["media", "list"], () => Promise.reject(new Error("weg")), 0);
+
+    // `peek` still returns the last good value — stale-while-revalidate — and
+    // the error is recorded beside it. A failed refresh must not blank a list
+    // that is already on screen, and must not pretend the value is current.
+    expect(peek(["media", "list"])).toEqual(["a"]);
+    expect(peekError(["media", "list"])).toBeTruthy();
+  });
+
+  it("tries again once the cooldown has passed", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn(() => Promise.reject(new Error("weg")));
+      await fetchQuery(["jobs"], fetcher);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      // Still inside the window.
+      vi.advanceTimersByTime(4_000);
+      await fetchQuery(["jobs"], fetcher);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      // Past it: a server that has come back up must be reachable again without
+      // a reload.
+      vi.advanceTimersByTime(2_000);
+      await fetchQuery(["jobs"], fetcher);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a 401 is not recorded as an error at all", async () => {
+    // The client is already refreshing and retrying, or ending the session.
+    // "Nicht angemeldet" in the middle of a screen while that happens is noise.
+    prime(["users"], ["u1"]);
+    await fetchQuery(["users"], () => Promise.reject(new ApiError({ statusCode: 401, code: "unauthorized", message: "Nicht angemeldet." })));
+    expect(peekError(["users"])).toBeNull();
+    expect(peek(["users"])).toEqual(["u1"]);
   });
 });

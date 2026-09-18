@@ -44,6 +44,7 @@ export type ProjectDto = {
   contractValue: string | null;
   currency: string;
   budgetHours: number | null;
+  version: number;
   createdAt: string | null;
   updatedAt: string | null;
   archivedAt: string | null;
@@ -124,7 +125,11 @@ export type CreateProjectBody = {
  * has preconditions, its own permission and its own event. Including it here
  * would produce a field the API silently strips.
  */
-export type UpdateProjectBody = Partial<{
+export type UpdateProjectBody = {
+  /** The optimistic lock. Required by the server — see `UpdateProjectDto`. */
+  expectedVersion: number;
+  versionNote?: string;
+} & Partial<{
   name: string;
   architectId: string | null;
   buildingId: string | null;
@@ -142,6 +147,19 @@ export type UpdateProjectBody = Partial<{
 }>;
 
 export type ChangeStatusBody = { status: string; reason?: string };
+
+export type ProjectVersionDto = {
+  id: string;
+  version: number;
+  label: string;
+  changed: string[];
+  note: string | null;
+  changedById: string | null;
+  changedByEmail: string | null;
+  changedByName: string | null;
+  correlationId: string | null;
+  createdAt: string;
+};
 
 export type AddMemberBody = {
   employeeId: string;

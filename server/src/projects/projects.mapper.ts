@@ -45,6 +45,7 @@ export const PROJECT_LIST_SELECT = {
   contractValue: true,
   currency: true,
   budgetHours: true,
+  version: true,
   updatedAt: true,
   createdAt: true,
   archivedAt: true,
@@ -170,6 +171,15 @@ export function toProjectListItem(row: ProjectListRow) {
     contractValue: money(row.contractValue),
     currency: row.currency,
     budgetHours: row.budgetHours,
+    /**
+     * The record's own revision, sent with **every** row.
+     *
+     * On the list as well as the detail, so a caller holding a row holds what
+     * an edit needs. A version available only on the detail would mean every
+     * inline edit fetching the record first — and that fetch is exactly the
+     * window the lock exists to close.
+     */
+    version: row.version,
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
     archivedAt: iso(row.archivedAt),
@@ -380,17 +390,22 @@ export type ProjectWriteInput = {
 /**
  * The edit body → a Prisma update.
  *
- * Relations are written as `connect`/`disconnect` rather than as raw foreign
- * keys, so a `null` clears the link instead of failing the type. The repository
- * could have taken the scalar and done this itself; it is here because "how a
- * link is cleared" is a persistence *shape* decision, and the repository's job
- * is to run the statement, not to decide what the statement means.
+ * **Scalar foreign keys, not `connect`/`disconnect`**, and that is not a style
+ * choice — it is what `updateMany` accepts. The optimistic lock needs the
+ * version inside the `where`, which only `updateMany` allows, and
+ * `ProjectUpdateManyMutationInput` has no relation operations at all: a body
+ * carrying `manager: { connect: … }` is rejected at runtime with *Unknown
+ * argument `manager`*. It typechecked, because the parameter was the looser
+ * `ProjectUpdateInput` and the object is spread into the call.
+ *
+ * The scalar form works with `update` and `updateMany` both, and `null` still
+ * clears the link — which is the only thing `disconnect` was buying.
  */
 export function toProjectUpdateData(
   input: ProjectWriteInput,
   updatedById: string | null,
-): Prisma.ProjectUpdateInput {
-  const data: Prisma.ProjectUpdateInput = { updatedById };
+): Prisma.ProjectUncheckedUpdateInput {
+  const data: Prisma.ProjectUncheckedUpdateInput = { updatedById };
 
   if (input.name !== undefined) data.name = input.name;
   if (input.priority !== undefined) data.priority = input.priority as Prisma.ProjectUpdateInput["priority"];
@@ -414,14 +429,22 @@ export function toProjectUpdateData(
       : toMoney(input.contractValue, "Auftragswert");
   }
 
-  link(data, "architect", input.architectId);
-  link(data, "building", input.buildingId);
-  link(data, "manager", input.managerId);
-  link(data, "office", input.officeId);
+  if (input.architectId !== undefined) data.architectId = input.architectId;
+  if (input.buildingId !== undefined) data.buildingId = input.buildingId;
+  if (input.managerId !== undefined) data.managerId = input.managerId;
+  if (input.officeId !== undefined) data.officeId = input.officeId;
 
   return data;
 }
 
+/**
+ * A relation on a **create**, where `connect` is the only form the checked
+ * input accepts.
+ *
+ * Deliberately not used by `toProjectUpdateData` — see the note there: an
+ * update has to go through `updateMany`, which takes scalar foreign keys and
+ * refuses relation operations outright.
+ */
 function link(
   data: Record<string, unknown>,
   relation: string,

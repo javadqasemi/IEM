@@ -15,6 +15,7 @@ export {
   type ProjectMember,
   type ProjectDiscipline,
   type ProjectStats,
+  type ProjectVersion,
   type Milestone,
   type MilestoneStatus,
   type MemberRole,

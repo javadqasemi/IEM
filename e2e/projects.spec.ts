@@ -10,8 +10,8 @@ import { expect, expectClean, setTheme, test } from "./fixtures";
  * at three widths, because the list is in `SCREENS`. The **detail** cannot be,
  * because its path needs an id from the database — and it is also the one
  * screen in the dashboard whose interesting behaviour is not "it rendered": it
- * has fourteen tabs, six of which are this feature's own and eight of which are
- * a placeholder standing in for a module that does not exist.
+ * has fourteen tabs, seven of which are this feature's own and seven of which
+ * are a placeholder standing in for a module that does not exist.
  *
  * Three things are asserted here that nothing else can reach:
  *
@@ -48,6 +48,8 @@ const OWNED = [
   { slug: "termine", heading: "Meilensteine" },
   { slug: "kunde", heading: "Bauherrschaft" },
   { slug: "gebaeude", heading: "Objekt" },
+  // Promoted out of the placeholders when the version history arrived (F13).
+  { slug: "verlauf", heading: "Verlauf" },
 ];
 
 const card = (page: Page, name: string) => page.getByRole("heading", { name, exact: true });
@@ -61,7 +63,6 @@ const EMBEDDED = [
   "plaene",
   "bim",
   "finanzen",
-  "aktivitaet",
 ];
 
 /**

@@ -38,6 +38,7 @@ const dto: ProjectDto = {
   contractValue: "1450000.00",
   currency: "CHF",
   budgetHours: 2400,
+  version: 3,
   createdAt: "2026-01-02T06:00:00.000Z",
   updatedAt: "2026-09-18T06:00:00.000Z",
   archivedAt: null,
@@ -158,15 +159,29 @@ describe("inbound: entity → request body", () => {
     expect(toDatePart(null)).toBeNull();
   });
 
-  it("omits every key that was not supplied", () => {
-    const body = toUpdateBody({ name: "Anders" });
-    expect(body).toEqual({ name: "Anders" });
+  it("omits every key that was not supplied, but never the version", () => {
+    const body = toUpdateBody({ expectedVersion: 3, name: "Anders" });
+    expect(body).toEqual({ expectedVersion: 3, name: "Anders" });
     expect("managerId" in body).toBe(false);
     expect("startDate" in body).toBe(false);
   });
 
+  it("always carries the version the screen read", () => {
+    // The optimistic lock (F13). `defined()` drops `undefined` keys and this one
+    // is never undefined, because the type requires it — which is the whole
+    // reason it is required rather than optional: a lock a caller may omit is
+    // one every caller omits exactly once, and the failure is a silent
+    // overwrite nobody can detect afterwards.
+    expect(toUpdateBody({ expectedVersion: 7 }).expectedVersion).toBe(7);
+    expect(toUpdateBody({ expectedVersion: 1, versionNote: "Baustopp" }).versionNote).toBe(
+      "Baustopp",
+    );
+    // An absent note is omitted rather than sent as an empty string.
+    expect("versionNote" in toUpdateBody({ expectedVersion: 1 })).toBe(false);
+  });
+
   it("sends an explicit null to clear a link", () => {
-    const body = toUpdateBody({ managerId: null, plannedEndDate: null });
+    const body = toUpdateBody({ expectedVersion: 3, managerId: null, plannedEndDate: null });
     expect(body.managerId).toBeNull();
     expect(body.plannedEndDate).toBeNull();
   });

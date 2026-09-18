@@ -1141,6 +1141,23 @@ model Project {
   disciplines ProjectDiscipline[]
   milestones  Milestone[]
 
+  /// The record's own revision — `P-2026-014 v12`.
+  ///
+  /// Two jobs in one column, and the second is why it is a column rather than a
+  /// count of `EntityVersion` rows:
+  ///
+  /// 1. **What to show.** "v12" beside the number, and the history to match.
+  /// 2. **Optimistic locking.** An update names the version it read, and the
+  ///    write is `updateMany({ where: { id, version: expected } })` — which
+  ///    matches no rows if somebody else saved first. Without it the second
+  ///    save wins silently and the first person's work is gone with nothing
+  ///    recording that it existed.
+  ///
+  /// Counting rows could answer the first and never the second: the check has
+  /// to be in the same statement as the write, or it is a race with extra
+  /// steps.
+  version     Int       @default(1)
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
@@ -1153,6 +1170,80 @@ model Project {
   @@index([customerId])
   @@index([managerId])
   @@index([health, plannedEndDate])
+}
+
+/// How a record counts its own revisions — see `core/versioning/revision.ts`.
+enum RevisionScheme {
+  /// 1, 2, 3 … — Project, Meeting, Document, Offer.
+  NUMERIC
+  /// A, B, C … Z, AA — SIA/ISO drawing practice. Drawing, Transmittal.
+  ALPHA
+}
+
+/// One recorded state of one business record.
+///
+/// **Fachliche Versionierung, not git** (foundation stage F13): the number a
+/// person writes on a drawing, quotes in an e-mail and signs off against.
+///
+/// One table for every entity rather than a `ProjectVersion`, a
+/// `DrawingVersion` and seventeen more. The trade is deliberate and worth
+/// stating, because the other choice is defensible too:
+///
+/// * **What a shared table buys** — one place that knows how to record a
+///   version, one place that knows how to read a history, and a module gets
+///   versioning by calling a service rather than by writing a migration. At
+///   nineteen modules that is nineteen tables and nineteen slightly different
+///   history screens avoided.
+/// * **What it costs** — no foreign key. `entityId` cannot reference twenty
+///   tables at once, so a deleted record can leave versions behind. That is
+///   *correct* here: everything is soft-deleted, and a version history that
+///   vanished with the row would be a history of nothing. `AuditLog` makes
+///   exactly the same trade for exactly the same reason.
+///
+/// The payload is the **whole record as the API returns it**, not a diff.
+/// Diffs are cheap to store and expensive to read — reconstructing v7 means
+/// replaying six of them and being right about all six — and the thing anybody
+/// ever asks is "what did it look like then".
+model EntityVersion {
+  id String @id @default(cuid())
+
+  /// `project`, `drawing`, `meeting`. The same vocabulary `AuditLog.resource`
+  /// and `DomainEvent.entity` use, so the three can be joined by eye.
+  entity   String
+  entityId String
+
+  /// 1-based, and dense per record. The unique below is what makes a
+  /// concurrent write collide rather than produce two v7s.
+  version  Int
+  scheme   RevisionScheme @default(NUMERIC)
+  /// The rendered form — `v7`, `C`. Stored rather than derived so a history
+  /// list needs no lookup table and an exported PDF cannot disagree with the
+  /// screen.
+  label    String
+
+  /// The record as the API returned it at this version.
+  data Json
+  /// Which fields the writer changed, for a history that reads as a sentence
+  /// rather than as two JSON blobs side by side.
+  changed String[]
+  /// Why. Free text from the writer — a Baustopp, a client instruction.
+  note    String?
+
+  /// Denormalised, like the audit log's: the person may be deleted, and a
+  /// history that says "unknown" about who signed off is not a history.
+  changedById    String?
+  changedByEmail String?
+  changedByName  String?
+
+  /// Ties this version to the request that produced it, and therefore to its
+  /// audit rows and its events.
+  correlationId String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([entity, entityId, version])
+  @@index([entity, entityId, createdAt])
+  @@index([correlationId])
 }
 
 enum ProjectMemberRole {

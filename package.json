@@ -27,6 +27,7 @@
     "e2e:install": "playwright install chromium",
     "e2e:budgets": "playwright test e2e/budgets.spec.ts --project=desktop",
     "e2e:security": "playwright test e2e/security.spec.ts --project=desktop",
+    "e2e:versioning": "playwright test e2e/versioning.spec.ts --project=desktop",
     "// verify:all": "Everything, for a release. Assumes the servers are up.",
     "verify:all": "npm run verify && npm run e2e",
     "// server": "The API lives in server/ and has its own package.json and node_modules.",

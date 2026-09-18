@@ -97,6 +97,30 @@ export class CreateProjectDto {
  * refused rather than unimplemented, and the controller says so.
  */
 export class UpdateProjectDto {
+  /**
+   * The version the caller read before editing. **Required** (F13).
+   *
+   * Optimistic locking, and it is required rather than optional on purpose.
+   * An optional lock is one every caller forgets exactly once, and the failure
+   * is the worst kind: the second save wins silently, the first person's work
+   * is gone, and nothing anywhere records that it existed. A caller that cannot
+   * supply it has not read the record, and a caller that has read the record
+   * has it — `GET /projects/:id` returns `version` in the same payload.
+   *
+   * This is the reference module, so the eighteen that copy it inherit the
+   * strictness rather than the convenience.
+   */
+  @IsInt() @Min(1) expectedVersion!: number;
+
+  /**
+   * Why, for the version history. Free text, optional.
+   *
+   * The history records *what* changed by itself; only a person can say what
+   * for. "Baustopp Gemeinde" beside a status change is the line somebody reads
+   * two years later, and there is nowhere else it can be written.
+   */
+  @IsOptional() @IsString() @MaxLength(500) versionNote?: string;
+
   @IsOptional() @IsString() @MinLength(2) @MaxLength(200) name?: string;
   @IsOptional() @IsString() architectId?: string | null;
   @IsOptional() @IsString() buildingId?: string | null;

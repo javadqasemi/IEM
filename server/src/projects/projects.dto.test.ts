@@ -120,31 +120,67 @@ describe("CreateProjectDto", () => {
 });
 
 describe("UpdateProjectDto", () => {
-  it("accepts an empty body", async () => {
-    // A PATCH that changes nothing is not an error.
-    const out = await through(UpdateProjectDto, {});
-    expect(Object.keys(out)).toEqual([]);
+  /**
+   * Every body carries the version it read (F13).
+   *
+   * These tests used to send `{}` and `{ managerId: null }`. They now send
+   * `expectedVersion` with everything, and that is the *contract* changing
+   * rather than the tests being loosened to fit it: an optimistic lock that a
+   * caller may omit is one every caller omits exactly once, and the failure is
+   * a silent overwrite nobody can detect afterwards.
+   */
+  const at = (version: number, body: Record<string, unknown> = {}) => ({
+    expectedVersion: version,
+    ...body,
+  });
+
+  it("refuses a body with no version", async () => {
+    // The assertion the strictness is for. Without it this DTO would accept
+    // `{}` and the service would have nothing to lock on.
+    await expect(through(UpdateProjectDto, {})).rejects.toThrow();
+    await expect(through(UpdateProjectDto, { name: "Ohne Version" })).rejects.toThrow();
+  });
+
+  it("refuses a version that is not one", async () => {
+    await expect(through(UpdateProjectDto, { expectedVersion: 0 })).rejects.toThrow();
+    await expect(through(UpdateProjectDto, { expectedVersion: -1 })).rejects.toThrow();
+    await expect(through(UpdateProjectDto, { expectedVersion: "3" })).rejects.toThrow();
+  });
+
+  it("accepts a body that changes nothing but the version it saw", async () => {
+    // A PATCH that changes no field is not an error — a form saved without
+    // edits still has to succeed.
+    const out = await through(UpdateProjectDto, at(3));
+    expect(out.expectedVersion).toBe(3);
+    expect(Object.keys(out)).toEqual(["expectedVersion"]);
+  });
+
+  it("keeps the version note, which only a person can supply", async () => {
+    const out = await through(UpdateProjectDto, at(3, { versionNote: "Baustopp Gemeinde" }));
+    expect(out.versionNote).toBe("Baustopp Gemeinde");
   });
 
   it("strips status, which has its own route", async () => {
     // The guard that keeps `refuseTransition` on the only path to the column.
-    const out = (await through(UpdateProjectDto, { status: "COMPLETED" })) as unknown as Record<string, unknown>;
+    const out = (await through(UpdateProjectDto, at(3, { status: "COMPLETED" }))) as unknown as Record<string, unknown>;
     expect("status" in out).toBe(false);
   });
 
   it("strips customerId, because moving a project is not a field edit", async () => {
-    const out = (await through(UpdateProjectDto, { customerId: "c9" })) as unknown as Record<string, unknown>;
+    const out = (await through(UpdateProjectDto, at(3, { customerId: "c9" }))) as unknown as Record<string, unknown>;
     expect("customerId" in out).toBe(false);
   });
 
   it("keeps an explicit null, which is how a link is cleared", async () => {
-    const out = await through(UpdateProjectDto, { managerId: null });
+    const out = await through(UpdateProjectDto, at(3, { managerId: null }));
     expect(out.managerId).toBeNull();
     expect("managerId" in out).toBe(true);
   });
 
   it("keeps every field it declares", async () => {
     const body = {
+      expectedVersion: 3,
+      versionNote: "Grund",
       name: "Neuer Name",
       architectId: "c2",
       buildingId: "b1",

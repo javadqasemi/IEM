@@ -14,6 +14,7 @@ import type {
   ProjectDraft,
   ProjectEdit,
   ProjectStats,
+  ProjectVersion,
   StatusChange,
 } from "@/entities/project";
 import {
@@ -28,6 +29,7 @@ import {
   toProjectDetail,
   toProjectPage,
   toProjectStats,
+  toProjectVersion,
   toScopeBody,
   toStatusBody,
   toUpdateBody,
@@ -102,6 +104,20 @@ export function useActiveProjectCount(enabled: boolean): number | undefined {
 export function useProject(id: string | null) {
   return useQuery<ProjectDetail>(id ? [KEY, "detail", id] : null, () =>
     projectRepository.get(id!).then(toProjectDetail),
+  );
+}
+
+/**
+ * The record's version history (F13).
+ *
+ * `null` disables it, so the tab fetches nothing until it is opened. A history
+ * is the one sub-resource nobody looks at on most visits, and loading it with
+ * the detail would put a request on every project opening for the few that want
+ * it.
+ */
+export function useProjectHistory(id: string | null) {
+  return useQuery<ProjectVersion[]>(id ? [KEY, "versions", id] : null, () =>
+    projectRepository.history(id!).then((rows) => rows.map(toProjectVersion)),
   );
 }
 

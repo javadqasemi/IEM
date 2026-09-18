@@ -1,5 +1,5 @@
-import { request, type APIRequestContext } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD, API, expect, test } from "./fixtures";
+import type { APIRequestContext } from "@playwright/test";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, API, apiAs, expect, test } from "./fixtures";
 import {
   API_BUDGETS,
   CLIENT_BUDGETS,
@@ -34,17 +34,8 @@ let projectCount = 0;
 let sampleProjectId = "";
 
 test.beforeAll(async () => {
-  const anonymous = await request.newContext();
-  const login = await anonymous.post(`${API}/auth/login`, {
-    data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-  });
-  expect(login.ok(), `Anmeldung fehlgeschlagen (HTTP ${login.status()})`).toBe(true);
-  const { data } = (await login.json()) as { data: { accessToken: string } };
-  await anonymous.dispose();
-
-  api = await request.newContext({
-    extraHTTPHeaders: { Authorization: `Bearer ${data.accessToken}` },
-  });
+  // The shared token — see `apiToken` in the fixtures.
+  api = await apiAs(ADMIN_EMAIL, ADMIN_PASSWORD);
 
   const list = await api.get(`${API}/projects?perPage=1`);
   const body = (await list.json()) as { data: { items: { id: string }[]; total: number } };

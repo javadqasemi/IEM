@@ -92,6 +92,15 @@ export type Project = {
   contractValue: string | null;
   currency: string;
   budgetHours: number | null;
+  /**
+   * The record's own revision — P-2026-014 v12 (F13).
+   *
+   * Carried on every row, not only on the detail, because an edit has to send
+   * back the version it read. A version available only on the detail would
+   * make every inline edit fetch the record first, and that fetch is the
+   * window the lock exists to close.
+   */
+  version: number;
   createdAt: Date | null;
   updatedAt: Date | null;
   archivedAt: Date | null;
@@ -217,6 +226,33 @@ export type ProjectDraft = {
 export type ProjectEdit = Partial<Omit<ProjectDraft, "customerId">> & {
   currentPhase?: SiaPhase | null;
   actualEndDate?: Date | null;
+  /**
+   * The version the screen was showing. **Required** (F13).
+   *
+   * Not optional, and the type is where that is enforced first: a caller who
+   * cannot supply it has not read the record, and one who has read it holds it.
+   * The server refuses a body without it, but a compile error is a better place
+   * to find out than a 400.
+   */
+  expectedVersion: number;
+  /** Why, for the history. Only a person can supply this. */
+  versionNote?: string;
+};
+
+/** One recorded state of a project, as the history lists it. */
+export type ProjectVersion = {
+  id: string;
+  version: number;
+  /** The rendered form — `v7`. Stored, so a list needs no lookup. */
+  label: string;
+  /** Which fields the writer touched, for a one-line summary. */
+  changed: string[];
+  note: string | null;
+  changedById: string | null;
+  changedByEmail: string | null;
+  changedByName: string | null;
+  correlationId: string | null;
+  createdAt: Date;
 };
 
 export type StatusChange = {

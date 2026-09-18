@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Res } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Res,
+} from "@nestjs/common";
 import type { Response } from "express";
 import { CurrentUser, RequirePermissions, type AuthUser } from "../common/decorators";
 import { ListQuery, type RawListQuery } from "../core/list/list.decorator";
@@ -135,6 +146,44 @@ export class ProjectsController {
   @RequirePermissions("project.delete")
   remove(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.projects.remove(id, user);
+  }
+
+  /* ---- Versionsverlauf --------------------------------------------- */
+
+  /**
+   * What this project has looked like, newest first.
+   *
+   * `project.read` and not a permission of its own, and that is the argument:
+   * a version history is the record's own contents over time, so anyone who may
+   * read the record may read what it used to say. A separate `project.history`
+   * would be a permission that is either always granted with `read` — in which
+   * case it is noise — or occasionally withheld, which would mean somebody can
+   * see a number and not how it got there.
+   *
+   * The **row-level** rules still apply: `ProjectsService.history` goes through
+   * the same `require` as every other read. A history endpoint is a classic
+   * place for a scope to be forgotten, because the route looks like metadata
+   * rather than data.
+   */
+  @Get(":id/versions")
+  @RequirePermissions("project.read")
+  history(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.projects.history(id, user);
+  }
+
+  /** One recorded state, in full. The only version route that returns a payload. */
+  @Get(":id/versions/:version")
+  @RequirePermissions("project.read")
+  versionAt(
+    @Param("id") id: string,
+    @Param("version") version: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const n = Number(version);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new BadRequestException(`„${version}“ ist keine Versionsnummer.`);
+    }
+    return this.projects.versionAt(id, n, user);
   }
 
   /* ---- Team -------------------------------------------------------- */

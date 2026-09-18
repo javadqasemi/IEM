@@ -20,6 +20,7 @@ import type {
   ProjectDetailDto,
   ProjectDto,
   ProjectStatsDto,
+  ProjectVersionDto,
   ScopeDisciplineBody,
   UpdateMilestoneBody,
   UpdateProjectBody,
@@ -119,6 +120,18 @@ export const projectRepository = {
    */
   changeStatus: (id: string, body: ChangeStatusBody) =>
     request<ProjectDetailDto>(`/projects/${id}/status`, { method: "PUT", body }),
+
+  /**
+   * The record's history, newest first.
+   *
+   * Without payloads — the server sends the summaries and `versionAt` fetches
+   * one in full. Twenty rows of several kilobytes each, so that one might be
+   * opened, is the same mistake as an unpaginated list.
+   */
+  history: (id: string) => request<ProjectVersionDto[]>(`/projects/${id}/versions`),
+
+  versionAt: (id: string, version: number) =>
+    request<ProjectVersionDto & { data: unknown }>(`/projects/${id}/versions/${version}`),
 
   remove: (id: string) => request<{ ok: boolean }>(`/projects/${id}`, { method: "DELETE" }),
 

@@ -50,6 +50,17 @@ permissions and the tests, not a folder with the same names in it.
 | F11 | `core/list` — one paginate/filter/sort/search contract, plus saved views, columns, export, bulk |
 | F12 | A Nest module per feature; `app.module.ts` lists modules and nothing else |
 | W1·4 | **Projects** — ten tables, the five layers on both sides, ten events, row-level scope, fourteen tabs |
+| F13 | **Versionierung** — `EntityVersion`, the optimistic lock, and both revision schemes |
+
+**Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
+three are done. They are here rather than after the next module because every module inherits them
+and each is far more expensive to retrofit than to establish:
+
+| | |
+| --- | --- |
+| Security validation | `e2e/security.spec.ts` — the role × verb × resource matrix against the live API, plus direct-id, query-manipulation and nested-route attempts |
+| Performance budgets | `e2e/budgets.spec.ts` and `e2e/budgets.ts` — the numbers, the method, and the N+1 slope check |
+| Versionierung | F13 above, demonstrated on Projects: `v12`, the history tab, and a lock a concurrent write actually loses |
 
 **The rule the firm set, and it holds for every layer:** one fully tested reference
 implementation before the pattern is copied. `features/applications/` was that reference for the
@@ -110,10 +121,11 @@ npm run e2e          # Playwright: 3 widths x 2 themes, every screen, + axe
 npm run e2e:report   # the HTML report from the last run
 npm run verify:all   # verify + e2e, for a release
 
-# The two cross-cutting suites, runnable on their own. Both are `--project=desktop`
-# only: neither says anything different at a phone width, and both are slow.
-npm run e2e:security # the role x verb x resource matrix, against the live API
-npm run e2e:budgets  # the performance budgets, with the measurements printed
+# The cross-cutting suites, runnable on their own. All `--project=desktop` only:
+# none says anything different at a phone width, and all are slow.
+npm run e2e:security   # the role x verb x resource matrix, against the live API
+npm run e2e:budgets    # the performance budgets, with the measurements printed
+npm run e2e:versioning # the optimistic lock, including two writers racing
 ```
 
 **Both need a seed that ordinary development does not.** `e2e:security` needs
@@ -370,6 +382,65 @@ sends `application/octet-stream` + `nosniff` + `Content-Length` and **no** `Cont
 **A DTO type may be named in `repository.ts` and `mapper.ts` and nowhere else.** That rule is what
 makes the mapper a seam rather than a decoration, and `src/architecture.test.ts` enforces it along
 with feature isolation, the `index.ts` boundary and the direction of every layer arrow.
+
+**A failed query used to retry itself forever.** `load` settles → `notify` → every subscriber's
+`sync` → `load` again, and a failed entry was never *fresh*. One rail badge that answered 403 made
+**a thousand requests** and exhausted the rate limit for everything else on the page — including the
+save the user was trying to make. `RETRY_AFTER_MS` in `core/api/query.ts` is the loop-breaker, and
+`failedAt` is deliberately separate from `updatedAt`: one is how old the data is, the other is how
+long since we were refused, and conflating them would make a failure look like fresh data. It stayed
+hidden because every query the shell issues had succeeded for every role that existed — only Super
+Admin could reach the dashboard at all. **The other half of the fix is in the shell**: a badge is
+gated on the permission rather than on being signed in, because one nobody can see should cost no
+request.
+
+**`updateMany` takes scalar fields; it has no relation operations at all.** `toProjectUpdateData`
+emits `managerId`, never `manager: { connect }`, and that is forced rather than preferred: the
+optimistic lock needs the version inside the `where`, only `updateMany` allows that, and a relation
+operation there is rejected at runtime with *Unknown argument `manager`*. It **typechecks** — the
+parameter was the looser `ProjectUpdateInput` and the object is spread into the call — and the e2e
+suite passed, because every case in it changed a scalar. A matrix that only exercises the easy
+column confirms what somebody already believed.
+
+**An optimistic lock has to be one statement, or it is a race with extra steps.**
+`ProjectsRepository.updateIfUnchanged` is `updateMany({ where: { id, version: expected } })` and
+reads the returned count. Reading the version, comparing it, then writing looks equivalent and is
+not: two callers both read 7, both find it equal to 7, and both write 8. Postgres's row lock on the
+`UPDATE … WHERE version = 7` is what actually decides. `updateMany` rather than `update` because
+`update` takes only a *unique* filter — the version cannot be part of it — and because a count is a
+value this code can read where an exception would have to be parsed.
+
+`expectedVersion` is **required** on `UpdateProjectDto`, not optional. A lock a caller may omit is
+one every caller omits exactly once, and the failure is the single data-loss bug a user cannot
+detect, report or work around: the second save wins silently and the first person's work is gone.
+The client always has the number — `version` is on every row, list included, so an inline edit does
+not have to fetch the record first, and that fetch is exactly the window the lock closes.
+
+**409 and 404 are different answers and both are needed.** A stale write is a conflict; a write to a
+project the caller cannot see is a 404, because whether a project exists is itself information.
+`refuseStale` tells them apart by re-reading. On the client, a 409 is the one error the form cannot
+be saved past: `ProjectEditDialog` offers *reload*, never "save anyway" — a button that resubmitted
+with the new version would be a two-click way to do the overwrite the lock exists to prevent, and it
+would look like the safe option.
+
+**The version history is not the audit log, and both are kept.** The audit log records *the change*
+— who did what, across the system, including failures and denials. `EntityVersion` records *the
+state*: what the record said at v7, reconstructable without replaying anything. Rebuilding a project
+from a hundred audit rows is not something anybody does under pressure, and "what did the contract
+value say in March" is a question this firm is asked. One table for every entity rather than
+nineteen, which costs the foreign key — the same trade `AuditLog` makes, and correct for the same
+reason: everything is soft-deleted, and a history that vanished with its row would be a history of
+nothing.
+
+**A stored version payload is the mapped record, never the Prisma row.** `toProjectDetail(row)`, so
+a document read in five years does not contain `{"s":1,"e":6,"d":[…]}` where a contract value should
+be and does not depend on a schema that has since changed.
+
+**Revision numbering is bijective base-26, which has no zero digit.** `core/versioning/revision.ts`:
+after `Z` comes `AA`, not `[`, and `AA` is 27 rather than 26 because `A` means one. A naive
+`String.fromCharCode(65 + n)` produces `[` in a title block on a drawing that has been issued to a
+contractor. Two schemes, because the firm uses two — `NUMERIC` for projects, meetings and documents,
+`ALPHA` for drawings and transmittals — and `revision.test.ts` round-trips the first thousand.
 
 **A performance budget measured through the test harness measures the harness.**
 `e2e/budgets.ts` holds the numbers; the *method* is most of what makes them a regression test. The

@@ -29,6 +29,7 @@ import {
   type ProjectMember,
   type ProjectStats,
   type ProjectStatus,
+  type ProjectVersion,
   type SiaPhase,
   type StatusChange,
 } from "@/entities/project";
@@ -47,6 +48,7 @@ import type {
   ProjectDto,
   ProjectMemberDto,
   ProjectStatsDto,
+  ProjectVersionDto,
   ScopeDisciplineBody,
   UpdateMilestoneBody,
   UpdateProjectBody,
@@ -134,6 +136,7 @@ export function toProject(dto: ProjectDto): Project {
     contractValue: dto.contractValue,
     currency: dto.currency,
     budgetHours: dto.budgetHours,
+    version: dto.version,
     createdAt: toDate(dto.createdAt),
     updatedAt: toDate(dto.updatedAt),
     archivedAt: toDate(dto.archivedAt),
@@ -232,6 +235,28 @@ export function toProjectStats(dto: ProjectStatsDto): ProjectStats {
   return { total: dto.total, byStatus };
 }
 
+/**
+ * One row of the version history.
+ *
+ * A mapper for a read-only list looks like ceremony until the dates: the
+ * history is sorted and grouped by `createdAt`, and a string that sorts
+ * correctly by luck is a bug waiting for a timezone.
+ */
+export function toProjectVersion(dto: ProjectVersionDto): ProjectVersion {
+  return {
+    id: dto.id,
+    version: dto.version,
+    label: dto.label,
+    changed: [...dto.changed],
+    note: dto.note,
+    changedById: dto.changedById,
+    changedByEmail: dto.changedByEmail,
+    changedByName: dto.changedByName,
+    correlationId: dto.correlationId,
+    createdAt: new Date(dto.createdAt),
+  };
+}
+
 /* ---- The pickers --------------------------------------------------- */
 
 export function toCustomerOption(dto: CustomerOptionDto): CustomerOption {
@@ -328,6 +353,10 @@ export function toCreateBody(draft: ProjectDraft): CreateProjectBody {
 
 export function toUpdateBody(edit: ProjectEdit): UpdateProjectBody {
   return defined({
+    // Never dropped by `defined`, because it is never `undefined`: the type
+    // requires it and the server refuses a body without it.
+    expectedVersion: edit.expectedVersion,
+    versionNote: edit.versionNote,
     name: edit.name,
     architectId: edit.architectId,
     buildingId: edit.buildingId,

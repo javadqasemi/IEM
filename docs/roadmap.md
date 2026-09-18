@@ -226,6 +226,39 @@ recording rather than quietly correcting:
   entry in this table and is not done; the tab that will hold it exists, says
   so, and carries its wave.
 
+### Between the waves — three cross-cutting pieces
+
+Set by the firm after Wave 1, and the ordering argument is the same one that put
+Domain Events, Audit and Jobs before the first module: **every module after this
+inherits all three, and each is far more expensive to retrofit than to
+establish.** A security hole here is a hole in nineteen modules; a performance
+baseline taken later is an average of whatever was already slow; and versioning
+added to a table that has been written to for a year has no history for the
+year that matters.
+
+| | What it is | Where |
+| --- | --- | --- |
+| **Security validation** | The role × verb × resource matrix, against the live API. Plus direct-id access, query manipulation and nested routes | `e2e/security.spec.ts` |
+| **Performance budgets** | Response-time budgets as regression tests, with the method that makes them one | `e2e/budgets.ts`, `e2e/budgets.spec.ts` |
+| **Versionierung** | `EntityVersion`, the optimistic lock, both revision schemes | `server/src/core/versioning/`, `e2e/versioning.spec.ts` |
+
+**All three are done.** Three things they changed that are worth recording,
+because each was a real finding rather than a confirmation:
+
+- **Eleven roles held no `project.*` permission at all.** The module shipped
+  visible to Super Admin and to nobody else. This document's own rule — a role
+  is seeded in the same commit as the module that gives it something to do — had
+  been holding `management`, `project_manager`, `engineer` and `finance` back,
+  and Projects is that commit. `draftsman` still waits: every cell that
+  distinguishes it from `engineer` is in a module that does not exist.
+- **The navigation budget read 155 ms and the navigation takes 40.** The rest
+  was the test harness. Raising the budget would have written 115 ms of overhead
+  into the contract, where no regression under that size could ever be seen
+  again.
+- **`aktivitaet` stopped being a placeholder.** It stood in for "wer hat wann
+  was geändert"; the version history is that record, so the tab is now owned.
+  A placeholder is removed by building the thing.
+
 ### Wave 2 — the building, and the working day
 
 | # | Module | Size | Depends on | Reuses | DB impact | API impact |

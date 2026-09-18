@@ -40,6 +40,7 @@ const row = {
   contractValue: new Prisma.Decimal("1450000.00"),
   currency: "CHF",
   budgetHours: 2400,
+  version: 3,
   updatedAt: new Date("2026-09-18T06:00:00.000Z"),
   createdAt: new Date("2026-01-02T06:00:00.000Z"),
   archivedAt: null,
@@ -252,17 +253,39 @@ describe("inbound: DTO → Prisma", () => {
     const untouched = toProjectUpdateData({}, "u1");
     expect("name" in untouched).toBe(false);
     expect("startDate" in untouched).toBe(false);
-    expect("manager" in untouched).toBe(false);
+    expect("managerId" in untouched).toBe(false);
 
     const cleared = toProjectUpdateData({ startDate: null, managerId: null }, "u1");
     expect(cleared.startDate).toBeNull();
-    expect(cleared.manager).toEqual({ disconnect: true });
+    expect(cleared.managerId).toBeNull();
   });
 
-  it("writes a relation as connect, not as a raw foreign key", () => {
-    const data = toProjectUpdateData({ buildingId: "b9" }, "u1");
-    expect(data.building).toEqual({ connect: { id: "b9" } });
-    expect("buildingId" in data).toBe(false);
+  it("writes a relation as a scalar foreign key, never as connect", () => {
+    /*
+      The regression guard for a 500 that typechecked.
+
+      An update goes through `updateMany` — the optimistic lock needs the
+      version inside the `where`, and only `updateMany` allows that. Its input
+      has **no relation operations at all**, so a body carrying
+      `manager: { connect: … }` is rejected at runtime with *Unknown argument
+      `manager`*. It compiled, because the parameter was the looser
+      `ProjectUpdateInput` and the object is spread into the call; it was found
+      by pressing Save.
+    */
+    const data = toProjectUpdateData({ buildingId: "b9", managerId: "e1" }, "u1");
+    expect(data.buildingId).toBe("b9");
+    expect(data.managerId).toBe("e1");
+    expect("building" in data).toBe(false);
+    expect("manager" in data).toBe(false);
+
+    // Nothing anywhere in an update body may be a relation operation.
+    for (const [key, value] of Object.entries(data)) {
+      const looksLikeRelation =
+        value !== null &&
+        typeof value === "object" &&
+        ("connect" in value || "disconnect" in value);
+      expect(looksLikeRelation, `${key} is a relation operation`).toBe(false);
+    }
   });
 
   it("records who wrote it", () => {

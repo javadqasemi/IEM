@@ -1,4 +1,11 @@
-import { test as base, expect, type BrowserContext, type Page } from "@playwright/test";
+import {
+  request,
+  test as base,
+  expect,
+  type APIRequestContext,
+  type BrowserContext,
+  type Page,
+} from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -91,6 +98,60 @@ export const API_ORIGIN =
   "http://localhost:3100";
 
 export const API = `${API_ORIGIN}/api/v1`;
+
+/**
+ * One API sign-in per account, shared by every spec in the worker.
+ *
+ * **Memoised because `/auth/login` allows ten attempts a minute per IP**, and
+ * the API-level suites together wanted twelve: `security.spec.ts` signs in
+ * seven roles, `versioning.spec.ts` and `budgets.spec.ts` each signed in the
+ * administrator again, and three browser sessions follow. The eleventh got a
+ * 429 that reads as a permissions bug.
+ *
+ * The alternative repairs were both wrong. Raising the limit would weaken a
+ * real control to suit a test — and a throttle the tests do not exercise is a
+ * throttle nobody notices breaking. Dropping a role would shrink the matrix
+ * that is the point of the suite. Signing in once and sharing the token is what
+ * a person does.
+ *
+ * Lives here rather than in a spec because module state is per worker, and this
+ * runs with one worker: three files importing this get one token each.
+ */
+const tokens = new Map<string, string>();
+
+export async function apiToken(email: string, password: string): Promise<string> {
+  const cached = tokens.get(email);
+  if (cached) return cached;
+
+  const anonymous = await request.newContext();
+  let response = await anonymous.post(`${API}/auth/login`, { data: { email, password } });
+
+  // Ridden out rather than raised — see above. Sixty seconds, only on a re-run
+  // inside the window, and a security suite can afford it.
+  if (response.status() === 429) {
+    await new Promise((resolve) => setTimeout(resolve, 61_000));
+    response = await anonymous.post(`${API}/auth/login`, { data: { email, password } });
+  }
+
+  if (!response.ok()) {
+    await anonymous.dispose();
+    throw new Error(
+      `${email} konnte sich nicht anmelden (HTTP ${response.status()}). ` +
+        `Für die Rollenkonten: SEED_TEST_USERS=true npm run server:seed`,
+    );
+  }
+
+  const body = (await response.json()) as { data: { accessToken: string } };
+  await anonymous.dispose();
+  tokens.set(email, body.data.accessToken);
+  return body.data.accessToken;
+}
+
+/** A request context carrying that account's bearer token. */
+export async function apiAs(email: string, password: string): Promise<APIRequestContext> {
+  const token = await apiToken(email, password);
+  return request.newContext({ extraHTTPHeaders: { Authorization: `Bearer ${token}` } });
+}
 
 /**
  * Fails here rather than at the sign-in.

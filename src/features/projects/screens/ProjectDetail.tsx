@@ -22,6 +22,8 @@ import { TeamTab } from "./TeamTab";
 import { DisciplinesTab } from "./DisciplinesTab";
 import { MilestonesTab } from "./MilestonesTab";
 import { BuildingTab, CustomerTab } from "./PartiesTab";
+import { HistoryTab } from "./HistoryTab";
+import { ProjectEditDialog } from "./ProjectEditDialog";
 
 /**
  * One project, and the fourteen tabs around it.
@@ -88,6 +90,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <ProjectHealthDot health={record.health} />
             <ProjectStatusBadge status={record.status} />
             {readOnly ? <Badge tone="bronze">Schreibgeschützt</Badge> : null}
+            {can("project.update") && !readOnly ? <EditButton project={record} /> : null}
             {can("project.update") && !readOnly && record.allowedTransitions.length ? (
               <StatusButton project={record} />
             ) : null}
@@ -161,7 +164,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 }
 
 /**
- * The six tabs this feature owns.
+ * The seven tabs this feature owns.
  *
  * A function rather than a module constant because the components import this
  * file's siblings, and a constant would make the import graph a cycle the
@@ -194,6 +197,15 @@ function ownedTabs(): ProjectTab[] {
     },
     { slug: "kunde", label: "Bauherrschaft", owned: true, component: CustomerTab },
     { slug: "gebaeude", label: "Gebäude", owned: true, component: BuildingTab },
+    {
+      // Was a placeholder until F13 gave it something to show. The count is the
+      // record's own version, so the tab says "v12" before it is opened.
+      slug: "verlauf",
+      label: "Verlauf",
+      owned: true,
+      component: HistoryTab,
+      count: (p) => p.version,
+    },
   ];
 }
 
@@ -289,6 +301,36 @@ function StatusButton({ project }: { project: Project }) {
           </Field>
         </Form>
       </Modal>
+    </>
+  );
+}
+
+/**
+ * Editing the project record.
+ *
+ * Separate from the status control beside it, because they are separate acts
+ * with separate permissions and separate preconditions — the same split the
+ * server makes between `PATCH /projects/:id` and `PUT /projects/:id/status`.
+ */
+function EditButton({ project }: { project: Project }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
+        Bearbeiten
+      </Button>
+      {open ? (
+        <ProjectEditDialog
+          project={project}
+          onClose={() => setOpen(false)}
+          onSaved={(next) => {
+            setOpen(false);
+            toast.success(`Gespeichert — ${project.number} v${next.version}`);
+          }}
+        />
+      ) : null}
     </>
   );
 }

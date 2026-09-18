@@ -20,6 +20,27 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
 
+/**
+ * Suites that talk to the API and never open a page — desktop only.
+ *
+ * Two reasons, and the second is the one that actually bit.
+ *
+ * **They say nothing different at a phone width.** A bearer token and a JSON
+ * body do not have a viewport; running the permission matrix three times
+ * measures the same thing three times.
+ *
+ * **And they cannot.** Each signs in several accounts, `/auth/login` allows ten
+ * attempts a minute per IP, and three widths triples the count — so the second
+ * and third projects failed with what looked like a permissions bug and was a
+ * rate limit. Lowering the matrix or raising the limit would both be the wrong
+ * repair; running the suite once is the right one.
+ *
+ * `security.spec.ts` does contain three *browser* cases at the foot, and they
+ * check that the shell hides what a role cannot reach — which is also not a
+ * width-dependent question.
+ */
+const API_ONLY = [/security\.spec\.ts/, /versioning\.spec\.ts/, /budgets\.spec\.ts/];
+
 export default defineConfig({
   testDir: "./e2e",
   /**
@@ -94,10 +115,12 @@ export default defineConfig({
     {
       name: "tablet",
       use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } },
+      testIgnore: API_ONLY,
     },
     {
       name: "mobile",
       use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 }, isMobile: false },
+      testIgnore: API_ONLY,
     },
   ],
 });

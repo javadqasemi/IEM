@@ -24,7 +24,7 @@ import { LoginPage } from "./pages/Login";
  * screen in order to save bytes on a bundle that is otherwise not fetched yet.
  */
 export function App() {
-  const { user, loading, canAny } = useAuth();
+  const { user, loading, can, canAny } = useAuth();
   const route = useRoute();
 
   // Counts for the rail's badges. Only fetched once signed in, and failures
@@ -36,10 +36,10 @@ export function App() {
   // Applications is the one group that has moved to a feature folder, so its
   // count comes through the feature's public surface rather than off the shared
   // `api` object. It shares a cache entry with the list screen's filter chips.
-  const newApplications = useNewApplicationCount(Boolean(user));
+  const newApplications = useNewApplicationCount(can("application.read"));
   // Live projects — `ACTIVE` plus `ON_HOLD`, not all of them. A badge that only
   // ever grows stops being read.
-  const liveProjects = useActiveProjectCount(Boolean(user));
+  const liveProjects = useActiveProjectCount(can("project.read"));
 
   /**
    * The content types the menu's Website groups are made of.

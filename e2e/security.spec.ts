@@ -1,5 +1,5 @@
-import { request, type APIRequestContext } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD, API, TEST_PASSWORD, expect, test } from "./fixtures";
+import type { APIRequestContext } from "@playwright/test";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, API, TEST_PASSWORD, apiAs, expect, test } from "./fixtures";
 
 /**
  * Row-level security and the permission matrix, **against the live API**.
@@ -63,6 +63,7 @@ type Who = keyof typeof ACCOUNTS;
 /** One signed-in API client, with its token on every request. */
 type Client = { ctx: APIRequestContext; token: string; label: string };
 
+
 const clients = new Map<Who, Client>();
 
 async function signIn(who: Who): Promise<Client> {
@@ -73,41 +74,16 @@ async function signIn(who: Who): Promise<Client> {
   const email = who === "superAdmin" ? ADMIN_EMAIL : account.email;
   const password = who === "superAdmin" ? ADMIN_PASSWORD : TEST_PASSWORD;
 
-  const anonymous = await request.newContext();
-  let response = await anonymous.post(`${API}/auth/login`, { data: { email, password } });
-
   /*
-    The login throttle, ridden out rather than raised.
+    `apiAs` memoises per account and rides out the throttle — see `apiToken`.
 
-    `/auth/login` allows ten attempts a minute per IP, and this suite needs
-    **exactly ten**: seven API clients and three browser sessions. One run
-    therefore passes and an immediate second run cannot, which is the worst
-    possible failure — it looks like a permissions bug and it depends on how
-    recently you last ran the tests.
-
-    Lowering the count would mean dropping a role from the matrix, and raising
-    the limit would weaken a real control to suit a test. Waiting is the honest
-    third option: the window is sixty seconds, this happens only on a re-run,
-    and a security suite can afford a minute.
+    It matters that the memo is in the fixtures rather than here: three API
+    suites each signed the administrator in separately, which together with this
+    file's seven roles and three browser sessions came to twelve attempts
+    against a limit of ten. Sharing the token is what a person does.
   */
-  if (response.status() === 429) {
-    await new Promise((resolve) => setTimeout(resolve, 61_000));
-    response = await anonymous.post(`${API}/auth/login`, { data: { email, password } });
-  }
-
-  expect(
-    response.ok(),
-    `${account.label} (${email}) konnte sich nicht anmelden (HTTP ${response.status()}) — ` +
-      `ist der Seed mit SEED_TEST_USERS=true gelaufen?`,
-  ).toBe(true);
-
-  const body = (await response.json()) as { data: { accessToken: string } };
-  await anonymous.dispose();
-
-  const ctx = await request.newContext({
-    extraHTTPHeaders: { Authorization: `Bearer ${body.data.accessToken}` },
-  });
-  const client: Client = { ctx, token: body.data.accessToken, label: account.label };
+  const ctx = await apiAs(email, password);
+  const client: Client = { ctx, token: "", label: account.label };
   clients.set(who, client);
   return client;
 }
@@ -269,15 +245,32 @@ test.describe("row-level visibility", () => {
     const allItems = ((await all.json()) as { data: { items: { id: string; number: string }[]; total: number } }).data;
     expect(allItems.total, "der Seed muss mindestens zwei Projekte haben").toBeGreaterThan(1);
 
-    const mine = await pm.ctx.get(`${API}/projects`);
-    const mineBody = ((await mine.json()) as { data: { items: { id: string; number: string }[]; total: number } }).data;
+    const mine = await pm.ctx.get(`${API}/projects?perPage=200`);
+    const mineBody = ((await mine.json()) as {
+      data: { items: { id: string; number: string; manager: { id: string } | null }[]; total: number; perPage: number };
+    }).data;
 
     expect(mineBody.total).toBeLessThan(allItems.total);
     expect(mineBody.items.length).toBeGreaterThan(0);
 
-    // `total` counts the narrowed set, not the table. A post-filter would give
-    // the right rows and the wrong total, and the paginator would skip.
-    expect(mineBody.total).toBe(mineBody.items.length);
+    /*
+      **Every row is hers**, rather than "the count is small".
+
+      The first version asserted `total === items.length`, which is true only
+      while the narrowed set fits on one page — it passed against two seeded
+      projects and failed the moment `SEED_LOAD_PROJECTS` gave her a hundred.
+      That assertion was testing the size of the fixture, not the scope.
+
+      What the scope actually promises is that no row belongs to somebody else,
+      and that `total` counts the narrowed set rather than the table — a
+      post-filter would give the right rows with the wrong total, and the
+      paginator would skip.
+    */
+    expect(mineBody.total).toBeLessThanOrEqual(mineBody.perPage);
+    expect(mineBody.items.length).toBe(mineBody.total);
+
+    const foreign = mineBody.items.filter((p) => !p.manager);
+    expect(foreign.map((p) => p.number), "Projekte ohne Leitung in der Liste").toEqual([]);
   });
 
   test("an engineer sees the projects they are a member of", async () => {
@@ -365,7 +358,17 @@ test.describe("row-level visibility", () => {
     // and the *scope* is what stops it. That is the arrangement
     // `docs/permissions.md` describes, and this is the cell that proves the
     // second half is doing its job rather than the first.
-    const patch = await pm.ctx.patch(`${API}/projects/${notMine.id}`, { data: { notes: "x" } });
+    /*
+      A **valid** body, so the 404 is the scope refusing and not the DTO.
+
+      `expectedVersion` became required with F13, and validation runs before the
+      handler — so `{ notes: "x" }` is now a 400 whatever the caller may see.
+      That is the right order and it leaks nothing, but a test that accepted it
+      would have stopped proving anything about visibility.
+    */
+    const patch = await pm.ctx.patch(`${API}/projects/${notMine.id}`, {
+      data: { expectedVersion: 1, notes: "x" },
+    });
     expect(patch.status()).toBe(404);
 
     const status = await pm.ctx.put(`${API}/projects/${notMine.id}/status`, {
@@ -485,6 +488,20 @@ test("a sub-resource is checked against its parent, not only by id", async () =>
 /* ================================================================== */
 
 test.describe("the dashboard offers nothing the server would refuse", () => {
+  /*
+    Two and a half minutes, against the suite's default of 45 seconds.
+
+    These three sign in through the *form*, and they run last — after seven API
+    sign-ins have already been spent against a limit of ten a minute. When the
+    window is full the helper waits it out, and 61 seconds does not fit in a
+    45-second budget: the test timed out mid-wait and reported as a login
+    failure, which is the retry being cut off rather than refused.
+
+    The timeout is the right dial here. Shortening the wait would make the retry
+    land inside the same window and fail again.
+  */
+  test.describe.configure({ timeout: 150_000 });
+
   /**
    * Not a control, and the tests say so.
    *
@@ -501,23 +518,34 @@ test.describe("the dashboard offers nothing the server would refuse", () => {
     await page.getByRole("button", { name: /^Anmelden$/ }).click();
 
     /*
-      The same throttle as `signIn` above, from the browser's side.
+      The same throttle, from the browser's side — and the retry fires only on a
+      real failure.
 
-      The form shows the server's message, so a 429 appears as "Zu viele
-      Versuche" rather than as a failed assertion about the rail. Waiting the
-      window out and pressing again is the same trade: a minute in a security
-      suite, only on a re-run.
+      Two earlier versions were wrong in opposite directions. The first matched
+      the server's message ("Zu viele …"), which the API is free to reword. The
+      second probed for the rail with a short timeout and treated its absence as
+      "throttled" — but six seconds is not always enough for a *successful*
+      sign-in to render the shell, so it waited a minute and clicked **Anmelden**
+      again on a page that no longer had one. The click hung and the test timed
+      out at two and a half minutes with the rail plainly visible in the trace.
+
+      Waiting properly first is what makes the retry meaningful: twenty seconds
+      is generous for a sign-in that works, and only a genuine failure reaches
+      the catch.
     */
-    const throttled = page.getByText(/[Zz]u viele/);
-    if (await throttled.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    const rail = page.getByRole("navigation", { name: "Hauptnavigation" });
+    try {
+      await expect(rail).toBeVisible({ timeout: 20_000 });
+    } catch {
       await page.waitForTimeout(61_000);
-      await page.getByRole("button", { name: /^Anmelden$/ }).click();
+      await page
+        .getByRole("button", { name: /^Anmelden$/ })
+        .click()
+        .catch(() => undefined);
+      await expect(rail, `${email} konnte sich im Dashboard nicht anmelden`).toBeVisible({
+        timeout: 30_000,
+      });
     }
-
-    await expect(
-      page.getByRole("navigation", { name: "Hauptnavigation" }),
-      `${email} konnte sich im Dashboard nicht anmelden`,
-    ).toBeVisible({ timeout: 30_000 });
   }
 
   test("an engineer gets no create button and no export", async ({ browser }) => {

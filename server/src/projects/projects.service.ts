@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type { ProjectStatus } from "@prisma/client";
 import { EventBus } from "../core/events/event-bus";
+import { VersioningService } from "../core/versioning/versioning.service";
 import type { AuthUser } from "../common/decorators";
 import type { RawListQuery } from "../core/list/list.decorator";
 import { paginated } from "../core/list/list";
@@ -77,6 +78,7 @@ export class ProjectsService {
   constructor(
     private readonly repo: ProjectsRepository,
     private readonly events: EventBus,
+    private readonly versions: VersioningService,
   ) {}
 
   /* ================================================================ */
@@ -178,7 +180,43 @@ export class ProjectsService {
     if (missing.length) throw new BadRequestException(`Unbekannt: ${missing.join(", ")}.`);
 
     const before = toAuditSnapshot(current);
-    const row = await this.repo.update(id, toProjectUpdateData(dto, user.id));
+    const fields = Object.keys(dto).filter((key) => key !== "expectedVersion");
+
+    /*
+      One transaction: the guarded write and the version it produces.
+
+      The history has to be written where the row is, or it records a state that
+      may yet roll back — a history with a gap is recoverable and a history
+      containing something that never happened is not.
+    */
+    const row = await this.repo.transaction(async (tx) => {
+      const changed = await this.repo.updateIfUnchanged(
+        id,
+        dto.expectedVersion,
+        toProjectUpdateData(dto, user.id),
+        tx,
+      );
+      if (changed === 0) await this.refuseStale(id, dto.expectedVersion);
+
+      // Re-read inside the transaction: `updateMany` returns a count and not a
+      // row, which is the price of being able to put the version in the `where`.
+      const updated = await this.repo.findDetail(id, {}, tx);
+      if (!updated) throw new NotFoundException("Projekt nicht gefunden.");
+
+      await this.versions.record(tx, {
+        entity: "project",
+        entityId: id,
+        version: dto.expectedVersion + 1,
+        // The mapped record, not the Prisma row: a history read in five years
+        // must not contain `{"s":1,"e":6,"d":[…]}` where a contract value
+        // should be, and must not depend on a schema that has since changed.
+        data: toProjectDetail(updated),
+        changed: fields,
+        note: dto.versionNote ?? null,
+      });
+
+      return updated;
+    });
 
     /*
       `fields`, not the whole body.
@@ -191,13 +229,52 @@ export class ProjectsService {
     this.events.publish("ProjectUpdated", {
       entity: "project",
       entityId: id,
-      payload: { number: current.number, fields: Object.keys(dto) },
+      payload: { number: current.number, fields },
       before,
       after: toAuditSnapshot(row),
     });
 
     await this.recompute(id);
     return this.detail(id, user);
+  }
+
+  /**
+   * Turns a failed guarded write into the right refusal.
+   *
+   * Two things can make `updateIfUnchanged` match nothing, and they are
+   * different answers: the row is at a later version (**409**, somebody saved
+   * first) or it is gone (**404**). Reporting a conflict for a deleted project
+   * would send the reader to reload a page that no longer exists.
+   */
+  private async refuseStale(id: string, expected: number): Promise<never> {
+    const now = await this.repo.versionOf(id);
+    if (!now) throw new NotFoundException("Projekt nicht gefunden.");
+
+    const by = now.updatedById ? await this.repo.nameOfUser(now.updatedById) : null;
+    // Both numbers, not just the current one: "Sie hatten v3, es steht auf v5"
+    // tells the reader how far behind they are, which is the difference between
+    // reloading and wondering whether they lost much.
+    throw VersioningService.conflict(`${now.number} — ${now.name}`, now.version, by, expected);
+  }
+
+  /**
+   * The record's own history.
+   *
+   * Scoped through `require`, so the row-level rules apply: a version list is
+   * the record's contents over time, and somebody who may not read the project
+   * may not read what it used to say either. That is easy to miss on a
+   * sub-route, and it is exactly where a history endpoint leaks.
+   */
+  async history(id: string, user: AuthUser) {
+    await this.require(id, user);
+    return this.versions.history("project", id);
+  }
+
+  async versionAt(id: string, version: number, user: AuthUser) {
+    await this.require(id, user);
+    const row = await this.versions.at("project", id, version);
+    if (!row) throw new NotFoundException(`Version v${version} gibt es nicht.`);
+    return row;
   }
 
   /**

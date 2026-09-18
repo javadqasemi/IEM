@@ -36,11 +36,41 @@ type Entry = {
   error: Error | null;
   /** 0 means "never resolved" — the distinction between empty and unfetched. */
   updatedAt: number;
+  /**
+   * When the last attempt failed. 0 means it has not.
+   *
+   * Separate from `updatedAt`, because the two answer different questions: one
+   * is "how old is the data", the other is "how long since we last tried and
+   * were refused". Conflating them would make a failure look like fresh data.
+   */
+  failedAt: number;
   /** Non-null while a request for this key is in the air. Dedups callers. */
   promise: Promise<unknown> | null;
   /** Bumped on every settle, so a reader can tell two identical values apart. */
   revision: number;
 };
+
+/**
+ * How long a failed key refuses to be fetched again.
+ *
+ * **This is a loop-breaker, not a retry policy**, and the loop it breaks was
+ * real and unbounded. `load` settles → `notify` → every subscriber's `sync` →
+ * `load` again; and a failed entry was never *fresh*, so `load` fetched again,
+ * failed again, notified again. One component with one 403 made **a thousand
+ * requests** and exhausted the rate limit for everything else on the page.
+ *
+ * It was invisible until the operational roles arrived: every query the shell
+ * issues had succeeded for every role that existed, because only Super Admin
+ * could reach the dashboard at all. The first user without `application.read`
+ * found it in seconds.
+ *
+ * Five seconds, and the number is chosen against the failure it must survive: a
+ * server restart or a momentary network drop should recover on the reader's
+ * next interaction rather than needing a reload, and a permanent 403 should
+ * cost twelve requests a minute rather than a thousand. `refetch()` clears it,
+ * so pressing *Erneut versuchen* is always immediate.
+ */
+const RETRY_AFTER_MS = 5_000;
 
 const cache = new Map<string, Entry>();
 const listeners = new Map<string, Set<() => void>>();
@@ -60,7 +90,7 @@ function serialise(key: QueryKey): string {
 function entryFor(key: string): Entry {
   let entry = cache.get(key);
   if (!entry) {
-    entry = { data: null, error: null, updatedAt: 0, promise: null, revision: 0 };
+    entry = { data: null, error: null, updatedAt: 0, failedAt: 0, promise: null, revision: 0 };
     cache.set(key, entry);
   }
   return entry;
@@ -90,8 +120,21 @@ function subscribe(key: string, fn: () => void): () => void {
 function load(key: string, fetcher: () => Promise<unknown>, staleMs: number): Promise<unknown> {
   const entry = entryFor(key);
   if (entry.promise) return entry.promise;
+
   const fresh = entry.updatedAt > 0 && Date.now() - entry.updatedAt < staleMs && !entry.error;
   if (fresh) return Promise.resolve(entry.data);
+
+  /*
+    Recently refused, so do not ask again yet — the loop-breaker.
+
+    It resolves with whatever the entry holds (usually `null`) rather than
+    rejecting, and that is the same contract the fetch path below settles on:
+    the *error* is already on the entry and the hook renders it from there.
+    Manufacturing a second rejection here would report one failure twice.
+  */
+  if (entry.error && Date.now() - entry.failedAt < RETRY_AFTER_MS) {
+    return Promise.resolve(entry.data);
+  }
 
   entry.promise = fetcher()
     .then((data) => {
@@ -110,9 +153,13 @@ function load(key: string, fetcher: () => Promise<unknown>, staleMs: number): Pr
        */
       if (err instanceof ApiError && err.status === 401) return entry.data;
       entry.error = err instanceof Error ? err : new Error("Unbekannter Fehler.");
-      // Marked resolved so the hook stops showing a spinner; `error` is what
-      // the screen renders. Not marked *fresh* — `updatedAt` stays where it
-      // was, so the next mount retries rather than caching the failure.
+      /*
+        `failedAt`, not `updatedAt`. The data is no fresher than it was — a
+        failed refresh must not make a stale value look current — but the *key*
+        is now on a cooldown, which is what stops `notify → sync → load` from
+        becoming an unbounded retry loop. See `RETRY_AFTER_MS`.
+      */
+      entry.failedAt = Date.now();
       throw entry.error;
     })
     .finally(() => {
@@ -180,6 +227,31 @@ export function peek<T>(key: QueryKey): T | undefined {
  * before the refetch lands. The cache is per-tab and in memory, so this is the
  * only thing that clears it.
  */
+/**
+ * Fetch a key outside React.
+ *
+ * The same `load` every `useQuery` goes through, exported because two callers
+ * want it without a component: a route that prefetches on hover, and
+ * `query.test.ts`, which needs the failure path — the one piece of behaviour
+ * here that `prime` and `peek` cannot reach and the one that has actually been
+ * wrong.
+ *
+ * It never rejects. The error is recorded on the entry and rendered from there;
+ * a prefetch that threw would be an unhandled rejection at every call site.
+ */
+export function fetchQuery(
+  key: QueryKey,
+  fetcher: () => Promise<unknown>,
+  staleMs = 30_000,
+): Promise<unknown> {
+  return load(serialise(key), fetcher, staleMs);
+}
+
+/** The error recorded for a key, if the last attempt failed. */
+export function peekError(key: QueryKey): Error | null {
+  return cache.get(serialise(key))?.error ?? null;
+}
+
 export function clearQueryCache(): void {
   const keys = [...cache.keys()];
   cache.clear();
@@ -235,7 +307,12 @@ export function useQuery<T>(
 
   const refetch = useCallback(() => {
     if (!serialised) return;
-    entryFor(serialised).updatedAt = 0;
+    const entry = entryFor(serialised);
+    entry.updatedAt = 0;
+    // The cooldown is cleared too: this is a person pressing "Erneut
+    // versuchen", and making them wait out a backoff they cannot see would be
+    // a button that does nothing.
+    entry.failedAt = 0;
     void load(serialised, () => fetcherRef.current(), staleMs);
     rerender();
   }, [serialised, staleMs]);

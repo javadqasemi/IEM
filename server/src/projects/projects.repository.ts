@@ -108,11 +108,23 @@ export class ProjectsRepository {
     });
   }
 
-  findDetail(id: string, scope: Prisma.ProjectWhereInput = {}) {
-    return this.prisma.project.findFirst({
+  findDetail(id: string, scope: Prisma.ProjectWhereInput = {}, tx: PrismaTx = this.prisma) {
+    return tx.project.findFirst({
       where: { id, deletedAt: null, ...scope },
       select: PROJECT_DETAIL_SELECT,
     });
+  }
+
+  /**
+   * A display name for a user id, for the conflict message.
+   *
+   * "Geändert von Anna Meier" turns an error into a conversation; "Konflikt"
+   * turns it into a support ticket. `null` when the account is gone — the
+   * message then says only that somebody did, which is still true.
+   */
+  async nameOfUser(id: string): Promise<string | null> {
+    const row = await this.prisma.user.findUnique({ where: { id }, select: { name: true } });
+    return row?.name ?? null;
   }
 
   /**
@@ -173,6 +185,44 @@ export class ProjectsRepository {
 
   update(id: string, data: Prisma.ProjectUpdateInput, tx: PrismaTx = this.prisma) {
     return tx.project.update({ where: { id }, data, select: PROJECT_DETAIL_SELECT });
+  }
+
+  /**
+   * The optimistic-lock write: update **only if** the row is still at
+   * `expectedVersion`, and say how many rows that matched.
+   *
+   * `updateMany` rather than `update`, and the reason is the whole mechanism:
+   * `update` throws when the `where` matches nothing, but it also only takes a
+   * *unique* filter — so the version cannot be part of it. `updateMany` takes
+   * an arbitrary `where` and returns a count, which is what turns "somebody
+   * else saved first" into a value this code can read instead of an exception
+   * it would have to parse.
+   *
+   * **The check and the write are one statement.** Reading the version, then
+   * comparing it, then writing is the same race with extra steps: two callers
+   * both read 7, both find it equal to 7, and both write 8. Postgres's row lock
+   * on `UPDATE … WHERE version = 7` is what actually decides, and only one of
+   * them gets `count: 1`.
+   */
+  async updateIfUnchanged(
+    id: string,
+    expectedVersion: number,
+    data: Prisma.ProjectUpdateInput,
+    tx: PrismaTx = this.prisma,
+  ): Promise<number> {
+    const { count } = await tx.project.updateMany({
+      where: { id, version: expectedVersion, deletedAt: null },
+      data: { ...data, version: { increment: 1 } },
+    });
+    return count;
+  }
+
+  /** The current version and who last touched it — for the conflict message. */
+  versionOf(id: string, tx: PrismaTx = this.prisma) {
+    return tx.project.findUnique({
+      where: { id },
+      select: { version: true, number: true, name: true, updatedById: true },
+    });
   }
 
   /**
