@@ -38,14 +38,16 @@ business feature; every module depends on all of them.
 | F3 | `core/api`: client, **query cache**, and the repository/**mapper**/service/hooks split per feature (architecture §3.1), with **one feature taken through all five layers** as the validated reference (§3.1.1) | M | **Done.** `features/applications` is the reference; `architecture.test.ts` enforces the DTO boundary and the layering in both directions. The other eight endpoint groups deliberately stay on the shared `api` object until the reference has been driven |
 | F4 | Nested router + breadcrumbs + route-declared actions | M | **Done.** A route names its `parent`; the trail and the screen's actions are derived and rendered in the sticky bar |
 | F5 | Form layer: `useForm`, `EntityForm`, unsaved-changes guard | M | **Done.** `dirty` is computed rather than flagged, server field errors map back, and the guard covers a hash change — which `beforeunload` never could |
-| F6 | Server `core/list`: filter/sort/paginate contract | M | W5. Every list endpoint, one implementation |
-| F7 | Generated permission catalogue + agreement test | S | W7. Cheap now, unmanageable at 180 entries |
-| F8 | Feature modules on the server + domain event bus | M | W8 + W10. The seam Finance needs to hear Time Tracking, and the one Notifications and Workflow are both built on |
+| F6 | Generated permission catalogue + agreement test | S | W7. Cheap now, unmanageable at 180 entries — and 12 of today's 51 are already enforced nowhere |
+| F7 | **Domain events**: a named catalogue, not just a bus | M | W10. The seam Finance needs to hear Time Tracking, and the one Notifications, Audit, Reporting and Workflow are all built on |
+| F8 | **Audit as infrastructure**: derived from events, with `correlationId` | M | Every module would otherwise write its own audit calls, and forget some |
 | F9 | `EntityPicker`, `DatePicker`, `DateRangePicker`, `Combobox`, `Drawer`, `FilterBar` | M | **Done.** `FilterBar` + `DateRangePicker` are in use on the audit log; `Combobox` and `EntityPicker` wait for the first entity list to point at |
-| F10 | Job seam (`core/jobs`) | S | W12. Reports, BIM ingestion and notification digests cannot run in a request |
+| F10 | **Background jobs** (`core/jobs`): durable, retried, attributable | M | W12. Exports, PDFs, IFC analysis, backups, reminders, reports and the notification digest are all already known to be coming |
+| F11 | Server `core/list`: filter/sort/paginate contract | M | W5. Every list endpoint, one implementation |
+| F12 | Feature modules on the server | M | W8. `app.module.ts` lists modules, never controllers |
 
-**F2–F5 and F9 are done.** F6–F8 block the first server module; F10 blocks
-Reports, BIM and the notification digest.
+**F2–F5 and F9 are done — the client half.** F6–F12 are the server half, and
+every one of them blocks the first business module.
 
 Two of F9's six ship without a call site, and that is stated rather than
 glossed: `Combobox` and `EntityPicker` need a list of *entities* to point at,
@@ -63,7 +65,7 @@ schedule:
 | Exists today | Still owed |
 | --- | --- |
 | Argon2id, rotating refresh tokens with replay detection, per-account lockout, per-IP throttle | MFA flow (columns and toggle exist, the flow does not) |
-| Deny-by-default `JwtAuthGuard`, permissions resolved per request, Super Admin by role key | F7's generated catalogue — 12 of 51 permissions are enforced nowhere |
+| Deny-by-default `JwtAuthGuard`, permissions resolved per request, Super Admin by role key | F6's generated catalogue — 12 of 51 permissions are enforced nowhere |
 | 11 seeded roles, a working role editor | The engineering roles, seeded when the modules they grant exist |
 | — | **Route-level enforcement on the client**: `renderRoute` renders any page to any signed-in user and the server's 403 is what stops the data |
 
@@ -85,6 +87,45 @@ application already runs — so the shape is validated against the existing e2e
 suite rather than against a module written to fit it. Architecture §3.1.1 holds
 the checklist.
 
+### 2.3 Three cross-cutting pieces, deliberately before the modules
+
+Added at the firm's request, and the request is right for a reason worth
+writing down: **all three are cheap now and expensive later, and the expense is
+not the code.**
+
+| | Cost now | Cost after ten modules |
+| --- | --- | --- |
+| **Domain events** | one catalogue file and a bus | ten modules already import each other; the bus arrives to a mesh that has to be untangled first |
+| **Audit** | a listener | ten modules' worth of hand-written audit calls, each slightly different, and the ones nobody wrote are invisible |
+| **Jobs** | one table and a poller | ten features shaped around doing their work inside a request, and the slow ones already shipped that way |
+
+The second row is the one that decides it. Audit is not a feature you can add
+afterwards and have be *true*: a log that starts in month six describes a
+system that has been running for five months without one, and the gaps are
+exactly where nobody thought to look.
+
+**Events are named, not free text.** `core/events/catalogue.ts` declares every
+event with its payload type and `publish` accepts nothing else — a bus with
+string names is a mesh that has learned to use strings, and a typo produces a
+listener that never fires *and* an event nobody handles, both silent.
+
+**Audit is derived from those events**, so a module that raises its events
+correctly is audited without writing a line of audit code. `correlationId` is
+what makes the result readable rather than merely complete: one publish request
+writes eight rows, and without a shared id they are eight unrelated facts.
+
+**Jobs are durable, retried, attributable and visible.** The fourth is the one
+usually skipped and the one an operator needs: "the export never arrived" has
+to have an answer that is not a log file.
+
+The ordering below is the firm's:
+
+```
+Foundation → Repository → Mapper → Service → Generated permissions
+          → Domain events → Audit infrastructure → Background jobs
+          → Feature modules → Project
+```
+
 ---
 
 ## 3. Build order
@@ -103,8 +144,8 @@ and the Employee table ship **inside** this wave, not as preceding CRM modules.
 
 | # | Module | Size | Depends on | Reuses | DB impact | API impact |
 | --- | --- | :-: | --- | --- | --- | --- |
-| 1 | **Customer + Building (minimal)** | S | F2–F9 | DataTable, EntityForm, EntityPicker | `Customer`, `Building` core fields only | `/customers`, `/buildings` CRUD + search |
-| 2 | **Employees** | M | F2–F9 | + PropertyList, FileList | `Employee`, `Department`, `Office`, `Skill`, `Certificate` | `/employees`, `/departments` |
+| 1 | **Customer + Building (minimal)** | S | F2–F12 | DataTable, EntityForm, EntityPicker | `Customer`, `Building` core fields only | `/customers`, `/buildings` CRUD + search |
+| 2 | **Employees** | M | F2–F12 | + PropertyList, FileList | `Employee`, `Department`, `Office`, `Skill`, `Certificate` | `/employees`, `/departments` |
 | 3 | **Disciplines** | S | Employees | DataTable | `Discipline` master data | `/disciplines` |
 | 4 | **Projects** | L | 1–3 | + DetailTabs, StatCard, ProgressRing, Timeline, Wizard | `Project`, `ProjectMember`, `ProjectDiscipline`, `Milestone` | `/projects` + sub-resources |
 | 5 | **SIA phases & deliverables** | M | Projects, Disciplines | + Timeline, Checklist | `ProjectPhase`, `Deliverable`, `PhaseApproval` | `/projects/:id/phases` |
@@ -138,7 +179,7 @@ list with a customer attached.
 | 6 | **Buildings (full): floors, systems, rooms, loads** | L | Wave 1 slice | + TreeView, spreadsheet import | `Floor`, `BuildingSystem`, `RoomSystem`, `Room`, `RoomLoad` | `/buildings/:id/*`, import |
 | 7 | **Meetings + Decisions** | L | Projects, Employees | + RichText, PDF | `Meeting`, `MeetingAgendaItem`, `MeetingItem`, `MeetingAttendee`, `MeetingApproval`, `Decision` | `/meetings`, protocol, Pendenz → task |
 | 8 | **Tasks** | M | Projects, Employees | + KanbanBoard, Combobox | `Task`, `TaskDependency`, `ChecklistItem`, `Comment` | `/tasks` + board reorder |
-| 9 | **Notifications** | M | F8, F10, Tasks | + bell, NotificationList, preferences pane | `Notification`, `NotificationDelivery`, `NotificationPreference` | `/notifications`, mark-read, preferences |
+| 9 | **Notifications** | M | F7, F10, Tasks | + bell, NotificationList, preferences pane | `Notification`, `NotificationDelivery`, `NotificationPreference` | `/notifications`, mark-read, preferences |
 | 10 | **Drawings + Transmittals** | L | Projects, Disciplines, Buildings | + FilePreview, VersionList, DataTable | `Drawing`, `DrawingRoom`, `DrawingRevision`, `Transmittal`, `TransmittalItem`, `TransmittalRecipient` | `/drawings`, revisions, `/transmittals` |
 | 11 | **Documents** | L | Projects | + FileTree, Uploader, FilePreview, VersionList | `Document`, `DocumentVersion`, `Folder` | `/documents`, upload, versions |
 | 12 | **Issues** | M | Drawings, Buildings, Disciplines | + FilterBar, PhotoUpload, DataTable | `Issue` | `/issues`, resolve, verify |
@@ -236,7 +277,7 @@ is solid, it produces confident wrong invoices.
 | --- | --- | :-: | --- | --- | --- | --- |
 | 22 | **Quality** | M | Projects, Issues, Documents | + ChecklistItem, PhotoUpload | `Inspection`, `Risk`, `ChecklistItem` | `/inspections`, `/risks` |
 | 23 | **Reports** | L | everything above | + all charts, Wizard, `core/jobs` | *(read-only + `ReportDefinition`)* | `/reports`, `/reports/:id/run`, export |
-| 24 | **Automation (Workflow)** | L | F8, Notifications, and the modules whose events it reacts to | + rule builder, FilterBar, Drawer | `WorkflowRule`, `WorkflowCondition`, `WorkflowAction`, `WorkflowRun` | `/workflows`, test-run, `/workflow-runs` |
+| 24 | **Automation (Workflow)** | L | F7, Notifications, and the modules whose events it reacts to | + rule builder, FilterBar, Drawer | `WorkflowRule`, `WorkflowCondition`, `WorkflowAction`, `WorkflowRun` | `/workflows`, test-run, `/workflow-runs` |
 | 25 | **Company Administration** | M | Employees | + existing settings UI | `Office`, `HolidayCalendar`, `Template` | `/company/*` |
 | 26 | **Dashboard (role-based)** | M | the modules it shows | + widget grid, all charts | `DashboardPreference` | `/dashboard/widgets` |
 
@@ -252,7 +293,7 @@ is the right place for a reason worth stating.** A rule engine built before the
 events it reacts to exist is a configuration screen with an empty dropdown; one
 built after them is a way for the firm to encode habits a developer would
 otherwise be asked for one at a time. The line under it does not move:
-`data-model.md` §3.24 and architecture §7.6 — a rule may notify, assign, create
+`data-model.md` §3.24 and architecture §7.7 — a rule may notify, assign, create
 or set a free field, and may **not** perform a transition that has a rule.
 
 **The role-based Dashboard is last on purpose.** It is a view over every other
@@ -264,7 +305,7 @@ module; built first it would be twenty `KpiUnavailable` tiles.
 
 ```
   F2─F3─F4─F5─F9 ──┬─ Customer+Building (slice) ─┐
-  F6─F7─F8─F10  ───┼─ Employees ─→ Disciplines ──┼─→ PROJECT ─→ Phases ─┐
+  F6─F7─F8─F10─F11─F12┼─ Employees ─→ Disciplines ──┼─→ PROJECT ─→ Phases ─┐
                    └─────────────────────────────┘      │               │
                                                         │               │
                     ┌───────────────────────────────────┤               │
@@ -323,7 +364,7 @@ work.
 
 | Risk | Why it matters here | Mitigation |
 | --- | --- | --- |
-| **Foundation skipped under pressure** | The first module ships faster and the next twenty inherit its shortcuts | F2–F9 are a gate, not a suggestion |
+| **Foundation skipped under pressure** | The first module ships faster and the next twenty inherit its shortcuts | F2–F12 are a gate, not a suggestion |
 | **The pattern copied before it is proven** | An architecture error reaches twenty modules and the mistake is not in the part anybody looked at | §2.2's gate: five layers, one feature, fully tested, before the second |
 | **The DTO boundary erodes** | It erodes silently — one import, and the mapper is decorative | An import test, in `verify`, from the first feature |
 | **Finance built on unapproved time** | Confident wrong invoices | Finance does not start until time approval has run for a real month |
@@ -331,7 +372,7 @@ work.
 | **Gantt underestimated** | Planning stalls the wave behind it | Prototype the Gantt as a spike before committing Planning's scope |
 | **Permission drift** | Already happened: 12 of 51 enforced nowhere | F7's two-way agreement test |
 | **Notification fatigue** | A bell nobody reads is worse than no bell, and it is not recoverable | `groupKey` collapses at the record level; preferences and digests ship *with* the module, not after |
-| **Automation hiding business rules** | "Why was this approved" becomes a database row somebody edited | A rule may not perform a guarded transition — architecture §7.6 |
+| **Automation hiding business rules** | "Why was this approved" becomes a database row somebody edited | A rule may not perform a guarded transition — architecture §7.7 |
 | **The CMS regresses** | It is live and it works | It becomes a feature folder and keeps its tests; `e2e` covers it every run |
 | **Personal data** | Employees, salaries, dossiers, revDSG | `employee.compensation` / `employee.documents` separated from day one; retention on every personal entity |
 | **Legal blockers shipped past** | No privacy consent on a form already collecting personal data | Fixed before any new personal data is collected, not after |
@@ -347,7 +388,7 @@ Named so nobody assumes they were forgotten:
 - **S3 / Azure media.** The `StorageAdapter` seam exists. Local disk is fine
   until Drawings and BIM make it not — which is Wave 2, so this is the one
   deferred item with a known expiry.
-- **Real multi-tenancy.** Explicitly rejected — architecture §7.7.
+- **Real multi-tenancy.** Explicitly rejected — architecture §7.8.
 - **A mobile app.** The dashboard is responsive and tested at 390px. A native
   app is a separate product decision.
 - **Google / Outlook calendar sync.** Designed for (Calendar is a view over

@@ -26,7 +26,7 @@ per table.
 | Money | `Decimal @db.Decimal(12, 2)` plus a `currency` field defaulting `"CHF"`. **Never `Float`** |
 | Enums | Postgres enums, not strings. A status typo should fail at the database |
 | Numbering | Human-readable business keys (`P-2026-014`) `@unique`, alongside the cuid |
-| Office | `officeId String?` on operational entities — Thun/Bern, not tenancy (see architecture §7.7) |
+| Office | `officeId String?` on operational entities — Thun/Bern, not tenancy (see architecture §7.8) |
 | Search | A `tsvector` generated column on the two or three text fields a module searches, not `LIKE` on JSON |
 
 ### 1.1 Shared enums
@@ -734,7 +734,7 @@ The `cad/audit_ifc.py` toolchain already produces exactly this shape of finding
 offline; `Issue` is where its output lands when it is wired in.
 **Validation** — an IFC upload is checked for schema and unit declarations
 before `SHARED`; ingestion runs as a job, never in the request (architecture
-§7.5).
+§7.6).
 
 **ModelLink** — `modelFileId`, exactly one of `drawingId` / `documentId` /
 `roomId` / `buildingId` / `buildingSystemId` / `issueId` / `modelFileId2`,

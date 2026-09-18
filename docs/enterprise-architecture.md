@@ -636,19 +636,83 @@ which is the state twelve permissions are in right now.
 
 ### 7.4 Domain events (W10)
 
-An in-process event bus in `core/events/`. A time entry approved raises
-`TimeEntryApproved`; Finance listens and updates project cost. Without it,
-`TimeTrackingService` imports `FinanceService` and the module graph becomes a
-mesh. Nest's `EventEmitterModule` or ~80 lines of our own — decided in Stage D.
+**A named catalogue, not just a bus.** The firm's review is right that the
+difference matters: a bus with free-text event names is a mesh that has learned
+to use strings, and the first typo produces a listener that never fires and an
+event nobody handles — both silent.
 
-### 7.5 Jobs (W12)
+So `core/events/catalogue.ts` declares every event with its payload type, and
+`publish` accepts nothing else:
 
-`core/jobs/` with a single `enqueue(name, payload)` seam, backed by the existing
-`@Cron` + Redis lock until a queue is justified. Reports, exports, BIM ingestion
-and scheduled publishing are its first users. `main.ts` already refuses to run
-clustered without Redis, so the constraint is already enforced.
+```
+ProjectCreated · ProjectArchived · PhaseApproved · DrawingIssued
+MeetingApproved · IssueResolved · TimeEntryApproved · InvoiceSent
+CertificateExpiring · OfferAccepted …
+```
 
-### 7.6 Automation, and the line under it
+Four consumers are already known and none of them may be reached by an import:
+notifications, the audit log, reporting, and the workflow engine. A time entry
+approved raises `TimeEntryApproved`; Finance listens and updates project cost.
+Without the bus, `TimeTrackingService` imports `FinanceService` and the module
+graph becomes exactly the mesh `features/README.md` forbids on the client.
+
+Two rules that are not negotiable, because both failures are quiet:
+
+1. **An event is published after its transaction commits**, never inside it. A
+   listener that reads the record mid-transaction sees the old row or deadlocks;
+   one that sends an e-mail for a transaction that then rolls back has told the
+   world about something that did not happen.
+2. **A listener never fails its publisher.** Handlers run detached and their
+   errors are logged, not propagated. Finance being down must not roll back an
+   approved time entry.
+
+### 7.5 Audit as infrastructure
+
+Today `AuditService.record` is called by hand from each service that performs an
+action, and the file argues for that: only the service has both versions of the
+record in hand. That argument is sound and it is also why the log has holes —
+every new write is a place someone can forget.
+
+The firm's requirement, adopted: **audit is derived from domain events.** An
+event carries `entity`, `entityId`, `before`, `after`, `actor` and a
+`correlationId`; the audit listener writes the row. A module that raises its
+events correctly is audited without writing a line of audit code.
+
+`correlationId` is the addition that makes the log usable rather than merely
+complete. One request can produce eight rows — a publish touches entries,
+versions, a snapshot and a settings read — and without a shared id they are
+eight unrelated facts. It is generated per request in `AsyncLocalStorage`, so
+nothing has to thread it through a call chain, and a job inherits the id of the
+request that enqueued it.
+
+The explicit call survives for the cases an event cannot express: a **failed**
+action (`auth.login_failed` has no entity and no after), and a denial. Those
+stay direct, and the reason is written where the method is.
+
+### 7.6 Jobs (W12)
+
+`core/jobs/` with one `enqueue(name, payload)` seam. Promoted out of "later" at
+the firm's request, and the argument for doing it now rather than when the first
+long-running feature lands is that every one of these is *already* known to be
+coming: PDF generation, exports, IFC analysis and BIM import, backups,
+reminders, report runs, the notification digest, and scheduled publishing, which
+exists today as a `@Cron` with a Redis lock.
+
+The properties a request cannot provide and a job must:
+
+| | |
+| --- | --- |
+| **Durable** | a restart mid-run does not lose the work |
+| **Retried** | with backoff, and a dead-letter state after the last attempt |
+| **Attributable** | it carries the `correlationId` and the actor of whatever asked for it |
+| **Visible** | a row an operator can read, because "the export never arrived" needs an answer |
+
+Backed by a `Job` table and the existing `@Cron` + Redis lock rather than a
+queue server: one table and a poller is ~200 lines, and Redis is already a
+documented dependency for clustered deployments. The seam is `enqueue`, so
+moving to BullMQ later changes one file.
+
+### 7.7 Automation, and the line under it
 
 `data-model.md` §3.24 adds a workflow engine — trigger, conditions, actions —
 and §3.23 makes notifications a domain. Both sit *on top of* the event bus in
@@ -672,7 +736,7 @@ and the transitions table stops being the truth.
 whose history cannot be read is an automation nobody trusts, and *"why did this
 task appear"* has to be answerable.
 
-### 7.7 Multi-tenancy
+### 7.8 Multi-tenancy
 
 **Single tenant, multiple locations.** IEM is one firm with Thun and Bern. Every
 entity gets an optional `officeId`, not a `tenantId`. Adding real multi-tenancy

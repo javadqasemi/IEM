@@ -3,6 +3,7 @@ import { ApplicationStatus, Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { EventBus } from "../core/events/event-bus";
 import { SettingsService } from "../settings/settings.service";
 import { MailService } from "../mail/mail.service";
 import { STORAGE, type StorageAdapter } from "../media/storage";
@@ -67,7 +68,23 @@ export class ApplicationsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    /**
+     * Both, and the split is the rule (architecture §7.5).
+     *
+     * **Events** describe things that happened to records: received, status
+     * changed, deleted. `AuditListener` turns each into a row, so the audit
+     * trail is a consequence of raising the event rather than a second call
+     * somebody has to remember.
+     *
+     * **`audit` directly** is for the two that are not changes at all —
+     * opening a dossier and downloading one. Those are *accesses*: there is no
+     * before, no after, and nothing for a notification or a report to react
+     * to. They are in the log because personal data was looked at, which is a
+     * revDSG matter and exactly the kind of thing an event-shaped record would
+     * distort.
+     */
     private readonly audit: AuditService,
+    private readonly events: EventBus,
     private readonly settings: SettingsService,
     private readonly mail: MailService,
     @Inject(STORAGE) private readonly storage: StorageAdapter,
@@ -145,12 +162,20 @@ export class ApplicationsService {
       },
     });
 
-    this.audit.record({
-      action: "application.received",
-      resource: "job_application",
-      resourceId: application.id,
+    /*
+      An event, not an audit call (foundation stage F8).
+
+      The audit row is written by `AuditListener` from this — one fact, one
+      publication, and three other consumers (notifications, reporting, the
+      workflow engine) get it for free without this service knowing they exist.
+      The actor is null here on purpose: an applicant has no account, and
+      `RequestContextInterceptor` has nobody to record.
+    */
+    this.events.publish("ApplicationReceived", {
+      entity: "job_application",
+      entityId: application.id,
       after: { position: application.position, files: stored.length },
-      ...ctx,
+      payload: { position: application.position, files: stored.length },
     });
 
     // Notification and confirmation are sent after the record is committed, so
@@ -225,12 +250,17 @@ export class ApplicationsService {
     return application;
   }
 
-  async update(
-    id: string,
-    input: { status?: ApplicationStatus; note?: string },
-    actor: AuthUser,
-    ctx: Ctx,
-  ) {
+  /**
+   * No `actor` and no `ctx` any more.
+   *
+   * They were passed in solely to be forwarded to `audit.record`, and the
+   * event carries neither: `EventBus` reads the actor, the IP and the user
+   * agent from the ambient request context. That is the concrete payoff of
+   * foundation stage F8 — two parameters that existed only to be threaded
+   * through a call chain are gone, and the same will be true of every module
+   * that raises events instead of writing audit calls.
+   */
+  async update(id: string, input: { status?: ApplicationStatus; note?: string }) {
     const before = await this.prisma.jobApplication.findUniqueOrThrow({ where: { id } });
     const after = await this.prisma.jobApplication.update({
       where: { id },
@@ -239,14 +269,12 @@ export class ApplicationsService {
         ...(input.note !== undefined ? { note: input.note } : {}),
       },
     });
-    this.audit.record({
-      actor,
-      action: "application.updated",
-      resource: "job_application",
-      resourceId: id,
+    this.events.publish("ApplicationStatusChanged", {
+      entity: "job_application",
+      entityId: id,
       before: { status: before.status },
       after: { status: after.status },
-      ...ctx,
+      payload: { from: before.status, to: after.status },
     });
     return after;
   }
@@ -271,21 +299,19 @@ export class ApplicationsService {
   }
 
   /** Hard delete — this is personal data, so there is no soft form of it. */
-  async remove(id: string, actor: AuthUser, ctx: Ctx) {
+  async remove(id: string) {
     const application = await this.prisma.jobApplication.findUniqueOrThrow({ where: { id } });
     for (const file of application.files as unknown as StoredFile[]) {
       await this.storage.delete(file.storageKey);
     }
     await this.prisma.jobApplication.delete({ where: { id } });
-    this.audit.record({
-      actor,
-      action: "application.deleted",
-      resource: "job_application",
-      resourceId: id,
+    this.events.publish("ApplicationDeleted", {
+      entity: "job_application",
+      entityId: id,
       // Name and position only. Deleting a record and then keeping its full
       // contents in the audit log would defeat the deletion.
       before: { position: application.position, name: `${application.firstName} ${application.lastName}` },
-      ...ctx,
+      payload: { position: application.position },
     });
   }
 

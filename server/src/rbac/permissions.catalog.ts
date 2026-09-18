@@ -1,23 +1,19 @@
+import { RESOURCES } from "./resources";
+
 /**
- * Every permission the system knows about.
+ * Every permission the system knows about — **derived**, not typed.
  *
- * This file is the source of truth, not the database. A guard checks a key,
- * and that key has to be spelled somewhere in the source anyway — so letting
- * an administrator invent one through the UI could only ever produce a
- * permission that grants nothing and is checked by nothing. The seeder
- * reconciles the `Permission` table against this list on every boot: new keys
- * are inserted, and keys that have disappeared from here are reported rather
- * than silently dropped, because a role may still reference one.
+ * `resources.ts` is where a module declares what it is and what can be done to
+ * it; this file flattens those declarations into the list the guard, the
+ * seeder and the role editor all read. Foundation stage F6.
  *
- * **Permissions, not pages.** The spec asks for a permission system rather than
- * a page-based one, and the difference shows up in `content.publish`: the
- * dashboard has no "publish page", publishing is an action reachable from the
- * entry list, the entry editor, the review queue and the API. One permission
- * covers all four. A page-based model would need the same rule written in four
- * places and would drift.
- *
- * The naming is `<resource>.<action>`, always singular resource, always a verb
- * that appears in the UI. `content.entry.update` rather than `edit_content`.
+ * It remains the source of truth, not the database. A guard checks a key, and
+ * that key has to be spelled somewhere in the source anyway — so letting an
+ * administrator invent one through the UI could only ever produce a permission
+ * that grants nothing and is checked by nothing. The seeder reconciles the
+ * `Permission` table against this list on every boot: new keys are inserted,
+ * and keys that have disappeared are reported rather than silently dropped,
+ * because a role may still reference one.
  */
 
 export type PermissionDef = {
@@ -28,79 +24,15 @@ export type PermissionDef = {
   description: string;
 };
 
-function p(
-  resource: string,
-  action: string,
-  category: string,
-  description: string,
-): PermissionDef {
-  return { key: `${resource}.${action}`, resource, action, category, description };
-}
-
-export const PERMISSIONS: PermissionDef[] = [
-  // ---- Content ----------------------------------------------------
-  p("content", "read", "Inhalte", "Inhalte und Entwürfe ansehen"),
-  p("content", "create", "Inhalte", "Neue Einträge anlegen"),
-  p("content", "update", "Inhalte", "Bestehende Einträge bearbeiten"),
-  p("content", "delete", "Inhalte", "Einträge löschen"),
-  p("content", "reorder", "Inhalte", "Reihenfolge von Einträgen ändern"),
-  p("content", "submit", "Inhalte", "Einträge zur Freigabe einreichen"),
-  p("content", "approve", "Inhalte", "Eingereichte Einträge freigeben oder ablehnen"),
-  p("content", "publish", "Inhalte", "Freigegebene Inhalte veröffentlichen"),
-  p("content", "unpublish", "Inhalte", "Veröffentlichte Inhalte zurückziehen"),
-  p("content", "archive", "Inhalte", "Einträge archivieren und wiederherstellen"),
-  p("content", "schedule", "Inhalte", "Veröffentlichung terminieren"),
-  p("content", "rollback", "Inhalte", "Auf eine frühere Version zurücksetzen"),
-  p("content", "duplicate", "Inhalte", "Einträge duplizieren"),
-  p("content", "preview", "Inhalte", "Unveröffentlichte Inhalte in der Vorschau ansehen"),
-  p("content", "history", "Inhalte", "Versionsverlauf und Vergleiche ansehen"),
-  p("content", "export", "Inhalte", "Inhalte exportieren"),
-  p("content", "import", "Inhalte", "Inhalte importieren"),
-
-  // ---- Content types ----------------------------------------------
-  p("contentType", "read", "Inhaltstypen", "Inhaltstypen ansehen"),
-  p("contentType", "update", "Inhaltstypen", "Inhaltstypen und ihre Felder ändern"),
-
-  // ---- Media -------------------------------------------------------
-  p("media", "read", "Medien", "Medienbibliothek ansehen"),
-  p("media", "upload", "Medien", "Dateien hochladen"),
-  p("media", "update", "Medien", "Metadaten, Alt-Text und Ordner ändern"),
-  p("media", "replace", "Medien", "Datei durch eine neue Version ersetzen"),
-  p("media", "delete", "Medien", "Dateien löschen"),
-  p("media", "download", "Medien", "Originaldateien herunterladen"),
-  p("media", "folder", "Medien", "Ordner anlegen, umbenennen, verschieben"),
-
-  // ---- Users and access --------------------------------------------
-  p("user", "read", "Benutzer", "Benutzerliste ansehen"),
-  p("user", "create", "Benutzer", "Benutzer einladen"),
-  p("user", "update", "Benutzer", "Benutzerprofile bearbeiten"),
-  p("user", "delete", "Benutzer", "Benutzer deaktivieren oder löschen"),
-  p("user", "assign", "Benutzer", "Rollen zuweisen"),
-  p("user", "impersonate", "Benutzer", "Als anderer Benutzer anmelden"),
-  p("role", "read", "Rollen", "Rollen und Berechtigungen ansehen"),
-  p("role", "create", "Rollen", "Eigene Rollen anlegen"),
-  p("role", "update", "Rollen", "Berechtigungen einer Rolle ändern"),
-  p("role", "delete", "Rollen", "Eigene Rollen löschen"),
-
-  // ---- Applications -------------------------------------------------
-  p("application", "read", "Bewerbungen", "Eingegangene Bewerbungen ansehen"),
-  p("application", "update", "Bewerbungen", "Status und Notizen bearbeiten"),
-  p("application", "download", "Bewerbungen", "Bewerbungsunterlagen herunterladen"),
-  p("application", "delete", "Bewerbungen", "Bewerbungen löschen"),
-  p("application", "export", "Bewerbungen", "Bewerbungen exportieren"),
-
-  // ---- Settings and system ------------------------------------------
-  p("settings", "read", "Einstellungen", "Einstellungen ansehen"),
-  p("settings", "update", "Einstellungen", "Einstellungen ändern"),
-  p("settings", "secrets", "Einstellungen", "Geheime Werte wie SMTP-Passwörter sehen und ändern"),
-  p("seo", "read", "SEO", "SEO-Einstellungen und Weiterleitungen ansehen"),
-  p("seo", "update", "SEO", "Meta-Angaben, Weiterleitungen, robots.txt ändern"),
-  p("audit", "read", "System", "Audit-Log ansehen"),
-  p("audit", "export", "System", "Audit-Log exportieren"),
-  p("system", "health", "System", "Systemzustand und Kennzahlen ansehen"),
-  p("system", "backup", "System", "Sicherungen erstellen und einspielen"),
-  p("system", "api", "System", "API-Schlüssel und Integrationen verwalten"),
-];
+export const PERMISSIONS: PermissionDef[] = RESOURCES.flatMap((r) =>
+  Object.entries(r.actions).map(([action, description]) => ({
+    key: `${r.key}.${action}`,
+    resource: r.key,
+    action,
+    category: r.category,
+    description,
+  })),
+);
 
 export const PERMISSION_KEYS = PERMISSIONS.map((x) => x.key);
 

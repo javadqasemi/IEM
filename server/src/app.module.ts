@@ -1,10 +1,13 @@
-import { Module } from "@nestjs/common";
+import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 
 import { CommonModule } from "./common/common.module";
+import { CoreModule } from "./core/core.module";
+import { EventFlushInterceptor } from "./core/context/request-context.interceptor";
+import { RequestContextMiddleware } from "./core/context/request-context.middleware";
 import { SharedThrottlerStorage } from "./common/throttler.storage";
 import { AllExceptionsFilter, EnvelopeInterceptor } from "./common/http";
 import { JwtAuthGuard, PermissionsGuard } from "./auth/guards";
@@ -65,6 +68,14 @@ import { ScheduledTasks } from "./tasks/scheduled.tasks";
       }),
     }),
     CommonModule,
+    /**
+     * The event bus, the audit listener and the job queue.
+     *
+     * `@Global`, so twenty-six feature modules do not each import it — see the
+     * note on the module. It comes before everything that raises events, which
+     * is documentation rather than a requirement: Nest resolves by the graph.
+     */
+    CoreModule,
     // Before `MailModule` and `AuthModule` in the list because both now read
     // settings. Nest resolves providers by the graph rather than by this order,
     // so it is documentation rather than a requirement — but the graph is what
@@ -97,7 +108,28 @@ import { ScheduledTasks } from "./tasks/scheduled.tasks";
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    /**
+     * Interceptor order is load-bearing too, and the other way round from the
+     * guards: Nest runs them outside-in on the way *in* and inside-out on the
+     * way *out*. `EventFlushInterceptor` is listed first so it is the
+     * outermost — the flush has to happen after everything else has finished,
+     * and the actor has to be recorded before the handler runs.
+     */
+    { provide: APP_INTERCEPTOR, useClass: EventFlushInterceptor },
     { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  /**
+   * The request context, opened for every route.
+   *
+   * A middleware rather than an interceptor, and the reason is written in
+   * `request-context.middleware.ts`: an interceptor builds its observable
+   * before Nest subscribes, so the handler runs outside the
+   * `AsyncLocalStorage` scope and every `correlationId()` mints its own. The
+   * symptom was an audit row that never appeared.
+   */
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestContextMiddleware).forRoutes("*");
+  }
+}

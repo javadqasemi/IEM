@@ -1,44 +1,85 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { RedisService } from "../common/redis";
 import { AuditService } from "../audit/audit.service";
+import { JobService } from "../core/jobs/job.service";
 import { ApplicationsService } from "../applications/applications.service";
 import { ContentService } from "../content/content.service";
 
 /**
- * Background work.
+ * Recurring work: the timer, and the handlers behind it.
  *
- * Four jobs, each of which exists because something in the UI would otherwise
- * be a promise nothing keeps: scheduled publishing, dossier retention, session
- * cleanup and reset-token cleanup.
+ * **What changed in foundation stage F10.** The four jobs used to *be* the cron
+ * methods — the work ran inside the timer, in the process, with no record that
+ * it had happened. A publish that failed at 03:00 was a line in a log file, and
+ * "did the retention purge run last night" had no answer at all.
  *
- * **In-process `@Cron`, guarded by a Redis lock.** These are timers inside the
- * API process, so with PM2 running several workers every worker fires every
- * job. Three of the four are idempotent and would only do redundant work; the
- * publish job is **not** — four workers would produce four snapshots of the
- * site. `RedisService.withLock` means exactly one worker runs each tick.
+ * Now the timer **enqueues** and `JobRunner` executes. What that buys, and none
+ * of it was available before:
  *
- * Each lock's TTL has to exceed the longest plausible run of its job, because
- * that TTL is what releases the lock when a worker is killed mid-run. They are
- * generous for that reason, not arbitrary.
+ * | | |
+ * | --- | --- |
+ * | Durable | a restart mid-purge resumes instead of skipping a night |
+ * | Retried | a publish that failed on a locked table tries again in 10 s, not in 5 min |
+ * | Visible | a row an operator can read, with its duration and its error |
+ * | Attributable | the audit rows it writes carry the run's correlation id |
  *
- * Without `REDIS_URL` the lock is a no-op and the work simply runs — correct
- * for one process, wrong for several, which is why `main.ts` refuses to start
- * clustered without Redis rather than degrading quietly.
+ * The two cheap housekeeping deletes stay inline. They are single `deleteMany`
+ * statements with no failure mode worth recording, and wrapping each in a job
+ * row would be more bookkeeping than work.
+ *
+ * **Both mechanisms are still here and both are needed.** The Redis lock
+ * serialises the *tick* — one worker decides to enqueue. `JobService.claim`
+ * serialises the *row* — one worker runs it. Neither replaces the other.
  */
 @Injectable()
-export class ScheduledTasks {
+export class ScheduledTasks implements OnModuleInit {
   private readonly logger = new Logger(ScheduledTasks.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly audit: AuditService,
+    private readonly jobs: JobService,
     private readonly applications: ApplicationsService,
     private readonly content: ContentService,
   ) {}
+
+  /**
+   * The handlers, registered once at boot.
+   *
+   * Registration is separate from enqueueing on purpose: a deploy that adds a
+   * producer before its consumer is legitimate, and a job with no handler is
+   * held as `DEAD` with a message rather than retried three times against
+   * nothing.
+   */
+  onModuleInit(): void {
+    this.jobs.register("content.publishScheduled", () => this.doPublishScheduled());
+    this.jobs.register("applications.purgeExpired", () => this.doPurgeApplications());
+  }
+
+  /* ---- Timers: they enqueue, they do not work --------------------- */
+
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  publishScheduled() {
+    // 30 s now rather than 240: the lock only has to cover *enqueueing*, which
+    // is one insert. It used to have to outlast a full site publish.
+    return this.redis.withLock("cron:publish-scheduled", 30, async () => {
+      const { created } = await this.jobs.enqueueUnique("content.publishScheduled", {});
+      if (!created) this.logger.debug("Zeitgesteuerte Veröffentlichung läuft bereits.");
+    });
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  purgeApplications() {
+    return this.redis.withLock("cron:purge-applications", 30, async () => {
+      await this.jobs.enqueueUnique("applications.purgeExpired", {});
+    });
+  }
+
+  /* ---- Handlers: the work ------------------------------------------ */
 
   /**
    * Publishes entries whose scheduled time has passed.
@@ -47,15 +88,7 @@ export class ScheduledTasks {
    * way around the review step. An entry scheduled while still in draft simply
    * waits, which is the safe failure.
    */
-  @Cron(CronExpression.EVERY_5_MINUTES)
-  publishScheduled() {
-    // 240 s: shorter than the 5-minute interval, so a stuck worker's lock has
-    // expired before the next tick, and long enough for a publish that has to
-    // assemble and validate the whole site document.
-    return this.redis.withLock("cron:publish-scheduled", 240, () => this.doPublishScheduled());
-  }
-
-  private async doPublishScheduled() {
+  private async doPublishScheduled(): Promise<{ published: number; version?: number }> {
     const due = await this.prisma.contentEntry.findMany({
       where: {
         scheduledAt: { lte: new Date() },
@@ -64,7 +97,7 @@ export class ScheduledTasks {
       },
       select: { id: true, key: true },
     });
-    if (!due.length) return;
+    if (!due.length) return { published: 0 };
 
     await this.prisma.contentEntry.updateMany({
       where: { id: { in: due.map((d) => d.id) } },
@@ -90,34 +123,35 @@ export class ScheduledTasks {
         {},
       );
       this.logger.log(`Zeitgesteuert veröffentlicht: Snapshot ${result.version}.`);
+      return { published: due.length, version: result.version };
     } catch (err) {
-      // A scheduled publish that fails validation must not retry silently
-      // every five minutes forever — but nor should it be dropped. It is
-      // logged and audited, and the entries stay APPROVED for a person to
-      // publish by hand.
-      this.logger.error(`Zeitgesteuerte Veröffentlichung fehlgeschlagen: ${(err as Error).message}`);
+      /*
+        Audited, then rethrown.
+
+        The throw is what the job system needs: it records the failure on the
+        row, backs off, and retries twice before giving up — which is strictly
+        better than the old behaviour of swallowing the error and retrying
+        blindly every five minutes forever. The audit row stays because a
+        failed scheduled publish is a fact about the *site*, not only about the
+        job, and the entries remain APPROVED for a person to publish by hand.
+      */
       await this.audit.writeSync({
         action: "content.scheduled_publish_failed",
         resource: "content_snapshot",
         outcome: "FAILURE",
         message: (err as Error).message,
       });
+      throw err;
     }
   }
 
-  /**
-   * Deletes applications past their retention date, files included.
-   *
-   * 30 minutes: this deletes files from storage one by one, and a backlog
-   * after an outage could genuinely take a while.
-   */
-  @Cron(CronExpression.EVERY_DAY_AT_3AM)
-  purgeApplications() {
-    return this.redis.withLock("cron:purge-applications", 1800, async () => {
-      const n = await this.applications.purgeExpired();
-      if (n) this.logger.log(`${n} Bewerbung(en) nach Ablauf der Frist gelöscht.`);
-    });
+  private async doPurgeApplications(): Promise<{ deleted: number }> {
+    const n = await this.applications.purgeExpired();
+    if (n) this.logger.log(`${n} Bewerbung(en) nach Ablauf der Frist gelöscht.`);
+    return { deleted: n };
   }
+
+  /* ---- Inline housekeeping ------------------------------------------ */
 
   /**
    * Removes refresh tokens that are expired or long revoked.
@@ -149,6 +183,30 @@ export class ScheduledTasks {
         },
       });
       if (count) this.logger.log(`${count} Passwort-Token entfernt.`);
+    });
+  }
+
+  /**
+   * Keeps the job table readable.
+   *
+   * A `DONE` row from three months ago answers no question anybody asks, and
+   * the table is on the path of every ten-second tick. Failures are kept
+   * longer, because those are the rows somebody comes looking for.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  pruneJobs() {
+    return this.redis.withLock("cron:prune-jobs", 300, async () => {
+      const done = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const dead = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      const { count } = await this.prisma.job.deleteMany({
+        where: {
+          OR: [
+            { status: { in: ["DONE", "CANCELLED"] }, finishedAt: { lt: done } },
+            { status: "DEAD", finishedAt: { lt: dead } },
+          ],
+        },
+      });
+      if (count) this.logger.log(`${count} alte Aufgaben entfernt.`);
     });
   }
 }

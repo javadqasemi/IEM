@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { AuditOutcome, Prisma } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
+import { correlationId } from "../core/context/request-context";
 import type { AuthUser } from "../common/decorators";
 
 export type AuditInput = {
@@ -15,6 +16,14 @@ export type AuditInput = {
   userAgent?: string | null;
   outcome?: AuditOutcome;
   message?: string;
+  /**
+   * Ties every row one request produced together.
+   *
+   * Filled from `AsyncLocalStorage` when the caller does not pass one, so a
+   * direct `record()` in the middle of a request is grouped with the rows the
+   * event listener wrote for the same request without anybody arranging it.
+   */
+  correlationId?: string | null;
 };
 
 /**
@@ -68,6 +77,7 @@ export class AuditService {
           userAgent: input.userAgent?.slice(0, 500) ?? null,
           outcome: input.outcome ?? AuditOutcome.SUCCESS,
           message: input.message ?? null,
+          correlationId: input.correlationId ?? correlationId(),
         },
       });
     } catch (err) {

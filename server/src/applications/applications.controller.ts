@@ -109,14 +109,10 @@ export class ApplicationsController {
 
   @Patch(":id")
   @RequirePermissions("application.update")
-  update(
-    @Param("id") id: string,
-    @Body() dto: UpdateApplicationDto,
-    @CurrentUser() user: AuthUser,
-    @Req() req: AuthedRequest,
-    @ClientIp() ip: string | null,
-  ) {
-    return this.applications.update(id, dto, user, this.ctx(req, ip));
+  // No actor and no request context: the service raises a domain event, and
+  // `EventBus` reads both from the ambient request context (architecture §7.5).
+  update(@Param("id") id: string, @Body() dto: UpdateApplicationDto) {
+    return this.applications.update(id, dto);
   }
 
   @Get(":id/files/:index")
@@ -189,12 +185,7 @@ export class ApplicationsController {
   @Delete(":id")
   @HttpCode(204)
   @RequirePermissions("application.delete")
-  remove(
-    @Param("id") id: string,
-    @CurrentUser() user: AuthUser,
-    @Req() req: AuthedRequest,
-    @ClientIp() ip: string | null,
-  ) {
-    return this.applications.remove(id, user, this.ctx(req, ip));
+  remove(@Param("id") id: string) {
+    return this.applications.remove(id);
   }
 }

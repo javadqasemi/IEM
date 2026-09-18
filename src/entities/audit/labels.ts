@@ -50,12 +50,29 @@ const ACTION_LABELS: Record<string, string> = {
   "role.updated": "hat eine Rolle geändert",
   "role.deleted": "hat eine Rolle gelöscht",
   "settings.updated": "hat Einstellungen geändert",
-  "application.received": "Neue Bewerbung eingegangen",
   "application.viewed": "hat eine Bewerbung geöffnet",
-  "application.updated": "hat eine Bewerbung bearbeitet",
   "application.file_downloaded": "hat Unterlagen heruntergeladen",
-  "application.deleted": "hat eine Bewerbung gelöscht",
   "application.retention_purge": "Aufbewahrungsfrist abgelaufen",
+
+  /**
+   * These three are now written by the server's audit *listener* rather than
+   * by a hand-called `audit.record` (foundation stage F8).
+   *
+   * The key is derived from the event's name in `core/events/catalogue.ts`, so
+   * the vocabulary has one source on both sides. Two of the three happen to
+   * derive to exactly what they were called before — `ApplicationReceived` →
+   * `application.received` — which is why the migration needed no change here.
+   *
+   * `application_status.changed` is the one that moved: it replaces
+   * `application.updated`, and it says more. The old key stays in this map
+   * because rows written under it still exist — nothing rewrites history, and
+   * a lookup that lost a spelling would turn three months of the log into raw
+   * keys.
+   */
+  "application.received": "Neue Bewerbung eingegangen",
+  "application.deleted": "hat eine Bewerbung gelöscht",
+  "application_status.changed": "hat den Status geändert",
+  "application.updated": "hat eine Bewerbung bearbeitet",
 };
 
 export function actionLabel(action: string): string {

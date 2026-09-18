@@ -482,6 +482,17 @@ model AuditLog {
   userAgent  String?
   outcome    AuditOutcome @default(SUCCESS)
   message    String?
+  /// Ties every row one request produced together.
+  ///
+  /// A publish writes eight rows — entries, versions, a snapshot — and without
+  /// this they are eight unrelated facts. Set from `AsyncLocalStorage`, so no
+  /// service has to thread it through a call chain, and a background job
+  /// inherits the id of the request that enqueued it.
+  ///
+  /// Nullable because every row written before this column existed has none,
+  /// and backfilling a correlation that was never recorded would be inventing
+  /// one.
+  correlationId String?
   createdAt  DateTime     @default(now())
 
   actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
@@ -490,6 +501,7 @@ model AuditLog {
   @@index([actorId, createdAt])
   @@index([resource, resourceId])
   @@index([action])
+  @@index([correlationId])
 }
 
 model Notification {
@@ -566,4 +578,65 @@ model Redirect {
   updatedAt   DateTime @updatedAt
 
   @@index([enabled])
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+  /// Out of attempts. A human decides whether to retry it.
+  DEAD
+  CANCELLED
+}
+
+/// Background work (foundation stage F10, architecture §7.6).
+///
+/// A table rather than a queue server, and the trade is written down in the
+/// architecture: one table plus a poller is ~200 lines, Redis is already a
+/// documented dependency for the lock, and `enqueue()` is the seam that makes
+/// moving to BullMQ a one-file change.
+///
+/// Four properties a request cannot provide and every one of these needs:
+/// durable across a restart, retried with backoff, attributable to whoever
+/// asked for it, and **visible** — "the export never arrived" has to have an
+/// answer that is not a log file.
+model Job {
+  id        String    @id @default(cuid())
+  /// The handler's name, from the registry in `core/jobs/catalogue.ts`.
+  name      String
+  payload   Json      @default("{}")
+  status    JobStatus @default(QUEUED)
+
+  /// When it may first run. Later than now for a scheduled or retried job.
+  runAfter  DateTime  @default(now())
+  attempts  Int       @default(0)
+  maxAttempts Int     @default(3)
+
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  /// Milliseconds, so a job that got slower is visible before it times out.
+  durationMs  Int?
+  error       String?
+  /// The handler's own return value, for a job whose result is the point.
+  result      Json?
+
+  /// Inherited from the request that enqueued it, so the job's audit rows
+  /// group with the click that caused them.
+  correlationId String?
+  /// Denormalised: the actor may be deleted before the job runs.
+  actorId    String?
+  actorEmail String?
+
+  /// Which worker has it. Set with the claim, so a stuck job names its holder.
+  lockedBy  String?
+  lockedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// The claim query: the oldest due job in each status.
+  @@index([status, runAfter])
+  @@index([name, status])
+  @@index([correlationId])
 }

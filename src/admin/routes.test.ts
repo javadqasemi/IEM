@@ -25,18 +25,24 @@ import { buildNavigation, flattenNavigation } from "./lib/navigation";
  *
  * Parsed rather than imported: the API is a separate TypeScript program with
  * its own `node_modules` and CommonJS output, and pulling it into the site's
- * test run to read a list of strings would couple the two builds. The shape it
- * reads — `p("resource", "action", …)` — is stable and is the file's whole
- * content.
+ * test run to read a list of strings would couple the two builds.
+ *
+ * It reads `rbac/resources.ts` now rather than `permissions.catalog.ts`, which
+ * became a derivation of it in foundation stage F6. The move was caught by the
+ * guard below rather than by review — the parser found nothing and thirteen
+ * assertions would have passed against an empty set. That is exactly what the
+ * guard is for, and it is why a parser of somebody else's file needs one.
  */
 const catalogue = (() => {
-  const src = readFileSync(
-    resolve(__dirname, "../../server/src/rbac/permissions.catalog.ts"),
-    "utf8",
-  );
+  const src = readFileSync(resolve(__dirname, "../../server/src/rbac/resources.ts"), "utf8");
   const keys = new Set<string>();
-  for (const m of src.matchAll(/^\s*p\("([a-zA-Z]+)",\s*"([a-zA-Z]+)"/gm)) {
-    keys.add(`${m[1]}.${m[2]}`);
+  // `resource("content", "Inhalte", "Inhalte", { read: "…", create: "…" })`.
+  // The actions run to the closing brace of the object literal, and none of
+  // the descriptions contain one.
+  for (const block of src.matchAll(/resource\(\s*"([a-zA-Z]+)"[^{]*\{([^}]*)\}/g)) {
+    for (const action of block[2].matchAll(/^\s*([a-zA-Z]+):/gm)) {
+      keys.add(`${block[1]}.${action[1]}`);
+    }
   }
   return keys;
 })();
