@@ -8,7 +8,7 @@ import { useToast } from "@/shared/ui/feedback";
 import { WorkflowBadge } from "@/entities/content";
 import { api, type ReviewRow } from "../lib/api";
 import { useAuth } from "@/core/auth";
-import { Link } from "../lib/router";
+import { Link } from "@/core/router";
 import { useMutation } from "@/shared/hooks";
 import { useAsync } from "../lib/useAsync";
 

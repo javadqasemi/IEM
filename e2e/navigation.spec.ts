@@ -200,3 +200,65 @@ test.describe("the rail at this width", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
   });
 });
+
+
+/**
+ * Breadcrumbs and the top bar''s actions (foundation stage F4).
+ *
+ * Both are *derived* rather than written per screen — the trail from `parent`
+ * in the route table, the actions from what the screen publishes — and the
+ * thing worth asserting in a browser is the part unit tests cannot reach: that
+ * the shell renders them, in the sticky bar, on a real route.
+ */
+test.describe("the trail and the bar", () => {
+  test.beforeEach(async ({ signIn }) => {
+    await signIn();
+  });
+
+  test("a top-level screen shows no trail", async ({ page }) => {
+    // One crumb repeating the page''s own heading is noise, not orientation.
+    await page.goto("/admin.html#/medien");
+    await expect(page.getByRole("heading", { name: /Medien/i }).first()).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Brotkrumen" })).toHaveCount(0);
+  });
+
+  test("a nested screen shows the chain, and the parent link works", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === "mobile", "the trail is hidden below sm: the bar already wraps");
+
+    await page.goto("/admin.html#/inhalte/projects");
+    const trail = page.getByRole("navigation", { name: "Brotkrumen" });
+    await expect(trail).toBeVisible();
+
+    // Root first. Two crumbs on the list: the root links, the current does not.
+    await expect(trail.getByRole("link", { name: "Website bearbeiten" })).toBeVisible();
+    await expect(trail.locator("a")).toHaveCount(1);
+
+    /**
+     * Into an entry, and the trail grows a step.
+     *
+     * Matched by href rather than by label on purpose: the middle crumb's text
+     * comes from the *server's* content-type name — "Referenzprojekte", not
+     * "Projekte" — and asserting the German would make this test a duplicate
+     * of the seed rather than of the routing.
+     */
+    await page.locator("main a[href^='#/inhalte/projects/']").first().click();
+    const parentLink = trail.locator("a[href='#/inhalte/projects']");
+    await expect(parentLink).toBeVisible();
+    await expect(trail.locator("a")).toHaveCount(2);
+
+    // The derived parent link goes back to the list.
+    await parentLink.click();
+    await expect(page).toHaveURL(/#\/inhalte\/projects$/);
+  });
+
+  test("the audit export is published to the bar, not to the page", async ({ page }) => {
+    await page.goto("/admin.html#/audit");
+    const header = page.locator("header.glass-bar");
+    await expect(header.getByRole("button", { name: /Als CSV exportieren/i })).toBeVisible();
+
+    // And it leaves with the screen — the bar is shared, so an action that
+    // outlived its route would offer an export of a page nobody is on.
+    await page.goto("/admin.html#/medien");
+    await expect(header.getByRole("button", { name: /Als CSV exportieren/i })).toHaveCount(0);
+  });
+});

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/shared/utils/cn";
 import { Button } from "@/shared/ui/primitives";
+import { Breadcrumb } from "@/shared/ui/navigation";
 import { Wordmark } from "@/components/Wordmark";
 import { useAuth } from "@/core/auth";
-import { Link, useRoute } from "../lib/router";
+import { Link, useRoute, useRouteMeta, type Crumb } from "@/core/router";
 import { useTheme } from "../lib/theme";
 import { activeSection, type NavSection } from "../lib/navigation";
 import { Sidebar } from "../ui/Sidebar";
@@ -29,13 +30,41 @@ import { Sidebar } from "../ui/Sidebar";
 export function AdminLayout({
   children,
   sections,
+  trail = [],
 }: {
   children: ReactNode;
   sections: NavSection[];
+  /**
+   * Derived in `App` from the route table (foundation stage F4). Empty for a
+   * top-level screen, where a single crumb repeating the page's own heading
+   * would be noise rather than orientation.
+   */
+  trail?: Crumb[];
 }) {
   const { path } = useRoute();
+  const { can } = useAuth();
   const [open, setOpen] = useState(false);
   const section = activeSection(sections, path);
+  const { title, actions } = useRouteMeta();
+
+  /**
+   * The trail, with the record's own name substituted into the last step.
+   *
+   * `App` derives the shape from the route table; only the screen knows what
+   * the record is called, and it publishes that through `usePageTitle`. The
+   * two meet here, because this is the one component that is both inside the
+   * provider and holding the trail.
+   */
+  const crumbs =
+    title && trail.length
+      ? [...trail.slice(0, -1), { ...trail[trail.length - 1], label: title }]
+      : trail;
+
+  /**
+   * Filtered here so a screen declares the key once and never asks twice.
+   * Hiding is a courtesy as everywhere else — the server refuses the call.
+   */
+  const visibleActions = actions.filter((a) => !a.permission || can(a.permission));
 
   /**
    * Mounted for its side effects, not for its value.
@@ -214,12 +243,46 @@ export function AdminLayout({
               open.
             */}
             {section && !section.hideBarTitle ? (
-              <div className="order-2 flex min-w-0 items-center gap-4">
+              <div className="order-2 flex min-w-0 flex-col justify-center gap-0.5">
                 {/* `h2`, not `h1`: the page below keeps its own `h1` in
                     `PageHeader`, and the group is the heading above it. */}
                 <h2 className="truncate font-display text-[15px] font-semibold text-ink">
                   {section.label}
                 </h2>
+                {/* The trail sits under the group's name rather than beside it:
+                    on a phone the bar already wraps, and a second horizontal
+                    element is what pushes the account button onto a third row. */}
+                {crumbs.length > 1 ? (
+                  <div className="hidden min-w-0 sm:block">
+                    <Breadcrumb items={crumbs} />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/*
+              The screen's own actions, published through `usePageActions`.
+
+              In the bar rather than on the page because the bar is sticky: the
+              audit export was a button at the top of a 200-row log, which is
+              to say out of reach exactly when it is wanted. Permission-filtered
+              here so a screen never has to ask twice — it declares the key and
+              the shell decides whether to draw it.
+            */}
+            {visibleActions.length ? (
+              <div className="order-4 flex shrink-0 flex-wrap items-center gap-2 lg:order-3">
+                {visibleActions.map((action) => (
+                  <Button
+                    key={action.id}
+                    size="sm"
+                    variant={action.intent ?? "secondary"}
+                    busy={action.busy}
+                    disabled={action.disabled}
+                    onClick={action.run}
+                  >
+                    {action.label}
+                  </Button>
+                ))}
               </div>
             ) : null}
 
@@ -227,7 +290,7 @@ export function AdminLayout({
                 rather than against the group's name. It used to share that job
                 with the entries' `lg:flex-1`; with those gone it is the only
                 thing doing it. */}
-            <div className="order-3 ml-auto shrink-0 lg:order-4 lg:pl-4">
+            <div className="order-3 ml-auto shrink-0 lg:order-5 lg:pl-4">
               <UserMenu />
             </div>
           </div>

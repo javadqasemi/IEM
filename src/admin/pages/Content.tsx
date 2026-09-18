@@ -9,7 +9,7 @@ import { WorkflowBadge } from "@/entities/content";
 import { api, type ContentTypeRow, type EntryRow } from "../lib/api";
 import { useAuth } from "@/core/auth";
 import { attachVisibilitySwitches, buildEntryIndex } from "../lib/inlineEdit";
-import { Link, navigate } from "../lib/router";
+import { Link, navigate } from "@/core/router";
 import { useDebounced, useMutation } from "@/shared/hooks";
 import { useAsync } from "../lib/useAsync";
 

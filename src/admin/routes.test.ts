@@ -135,3 +135,57 @@ describe("the menu and the route table agree", () => {
     }
   });
 });
+
+
+/**
+ * The `parent` links added in foundation stage F4.
+ *
+ * A typo there does not throw — `buildTrail` simply stops walking and the
+ * trail is short, which reads as "this screen has no parent" rather than as a
+ * mistake. That is exactly the failure this catches.
+ */
+describe("the breadcrumb chain", () => {
+  const patterns = new Set(ROUTES.map((r) => r.pattern));
+
+  it("names a parent that exists", () => {
+    const broken = ROUTES.filter((r) => r.parent && !patterns.has(r.parent)).map(
+      (r) => `${r.pattern} -> ${r.parent}`,
+    );
+    expect(broken).toEqual([]);
+  });
+
+  it("never cycles", () => {
+    const byPattern = new Map(ROUTES.map((r) => [r.pattern, r]));
+    for (const route of ROUTES) {
+      const seen = new Set<string>();
+      let current: (typeof ROUTES)[number] | undefined = route;
+      while (current) {
+        expect(seen.has(current.pattern), `cycle through ${current.pattern}`).toBe(false);
+        seen.add(current.pattern);
+        current = current.parent ? byPattern.get(current.parent) : undefined;
+      }
+    }
+  });
+
+  it("gives every trail a resolvable chain from the child's own parameters", () => {
+    /**
+     * A parent needing a parameter the child does not carry would be dropped
+     * from the trail silently. `/inhalte/:type/:id` -> `/inhalte/:type` works
+     * because the child's params are a superset; the reverse would not.
+     */
+    const byPattern = new Map(ROUTES.map((r) => [r.pattern, r]));
+    const paramsOf = (pattern: string) =>
+      pattern.split("/").filter((s) => s.startsWith(":")).map((s) => s.slice(1));
+
+    for (const route of ROUTES) {
+      if (!route.parent) continue;
+      const child = new Set(paramsOf(route.pattern));
+      const parent = byPattern.get(route.parent)!;
+      const missing = paramsOf(parent.pattern).filter((name) => !child.has(name));
+      expect(
+        missing,
+        `${route.pattern} cannot fill ${parent.pattern}: missing ${missing.join(", ")}`,
+      ).toEqual([]);
+    }
+  });
+});

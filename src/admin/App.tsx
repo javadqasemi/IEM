@@ -4,11 +4,11 @@ import { ErrorBoundary } from "@/shared/ui/feedback";
 import { useNewApplicationCount } from "@/features/applications";
 import { api } from "./lib/api";
 import { useAuth } from "@/core/auth";
-import { useRoute } from "./lib/router";
+import { RouteMetaProvider, buildTrail, useRoute, useScrollReset, type Crumb } from "@/core/router";
 import { useAsync } from "./lib/useAsync";
 import { AdminLayout } from "./layout/AdminLayout";
 import { buildNavigation, flattenNavigation, type NavSection } from "./lib/navigation";
-import { matchRoute, SPENT_AUTH_ROUTES } from "./routes";
+import { ROUTES, matchRoute, SPENT_AUTH_ROUTES } from "./routes";
 import { LoginPage } from "./pages/Login";
 
 /**
@@ -65,6 +65,28 @@ export function App() {
     [types.data, reviews.data, newApplications, canAny],
   );
 
+  /**
+   * The breadcrumb trail, derived from the route table rather than written per
+   * screen (weakness W11, foundation stage F4).
+   *
+   * Built here rather than inside the layout because this is where the content
+   * types already are: the middle crumb of `/inhalte/projects/abc` is the
+   * *list's* label, which the editor below it has no reason to know. The
+   * record's own name comes the other way, through `usePageTitle`.
+   *
+   * A one-crumb trail is not drawn — "Medien" above a page whose heading is
+   * already "Medien" is noise, not orientation.
+   */
+  const trail = useMemo<Crumb[]>(() => {
+    const hit = matchRoute(route.path);
+    if (!hit) return [];
+    const labels = Object.fromEntries((types.data ?? []).map((t) => [t.key, t.name]));
+    const crumbs = buildTrail(ROUTES, hit.route.pattern, hit.params, { labels });
+    return crumbs.length > 1 ? crumbs : [];
+  }, [route.path, types.data]);
+
+  useScrollReset(route.path);
+
   if (loading) {
     return (
       <div className="grid min-h-dvh place-items-center bg-base">
@@ -77,18 +99,25 @@ export function App() {
   if (!user) return <LoginPage />;
 
   return (
-    <AdminLayout sections={sections}>
-      {/* Keyed on the path so navigating away remounts the boundary and clears
-          a caught error — the rail stays usable while one screen is broken. */}
-      <ErrorBoundary key={route.path}>
-        {/* Also keyed on the path: without it, navigating between two lazy
-            screens keeps the previous one mounted while the next chunk loads,
-            so the fallback never shows and the page appears frozen. */}
-        <Suspense key={route.path} fallback={<PageSkeleton />}>
-          <Screen path={route.path} sections={sections} />
-        </Suspense>
-      </ErrorBoundary>
-    </AdminLayout>
+    /*
+      The provider sits above both halves on purpose: `AdminLayout` reads the
+      screen's title and actions out of it, and the screen writes them into it.
+      One context, two directions, and neither side imports the other.
+    */
+    <RouteMetaProvider>
+      <AdminLayout sections={sections} trail={trail}>
+        {/* Keyed on the path so navigating away remounts the boundary and clears
+            a caught error — the rail stays usable while one screen is broken. */}
+        <ErrorBoundary key={route.path}>
+          {/* Also keyed on the path: without it, navigating between two lazy
+              screens keeps the previous one mounted while the next chunk loads,
+              so the fallback never shows and the page appears frozen. */}
+          <Suspense key={route.path} fallback={<PageSkeleton />}>
+            <Screen path={route.path} sections={sections} />
+          </Suspense>
+        </ErrorBoundary>
+      </AdminLayout>
+    </RouteMetaProvider>
   );
 }
 

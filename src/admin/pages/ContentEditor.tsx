@@ -2,13 +2,12 @@ import { useEffect, useState } from "react";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import { Button, Card, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
 import { Field, FieldRenderer, Input, Textarea } from "@/shared/ui/forms";
-import { Breadcrumb } from "@/shared/ui/navigation";
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
 import { WorkflowBadge } from "@/entities/content";
 import { api, type EntryRow, type VersionRow } from "../lib/api";
 import { useAuth } from "@/core/auth";
-import { navigate } from "../lib/router";
+import { navigate, usePageTitle } from "@/core/router";
 import { useMutation } from "@/shared/hooks";
 import { useAsync } from "../lib/useAsync";
 import { MediaPickerDialog } from "./Media";
@@ -57,6 +56,18 @@ export function ContentEditorPage({
   const [showVersions, setShowVersions] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
+
+  /**
+   * The last breadcrumb, published to the shell (foundation stage F4).
+   *
+   * Only this screen has fetched the entry, so only it can say what the record
+   * is called — the route table can derive "Website bearbeiten / Projekte" and
+   * stops there. `undefined` while loading, so the trail shows the route's own
+   * label rather than flashing an empty crumb.
+   *
+   * Declared here, above the early returns, because it is a hook.
+   */
+  usePageTitle(entry ? title(entry) : isNew ? "Neuer Eintrag" : undefined);
 
   // Seed the form once the entry arrives. Keyed on the entry's own version so
   // a reload after saving refreshes the form, but an in-progress edit is never
@@ -135,13 +146,16 @@ export function ContentEditorPage({
   return (
     <>
       <div className="flex flex-col gap-2">
-        <Breadcrumb
-          items={[
-            { label: "Inhalte", to: "/inhalte" },
-            { label: type.name, to: `/inhalte/${typeKey}` },
-            { label: isNew ? "Neu" : label },
-          ]}
-        />
+        {/*
+          The hand-written `<Breadcrumb>` that was here is gone.
+
+          It listed the trail for this one screen — "Inhalte / {type} / {entry}"
+          — which is the parallel structure F4 removes: the route moves and the
+          crumb keeps pointing at the old path, with nothing to notice. The
+          shell now derives it from `parent` in the route table and takes the
+          last label from `usePageTitle` above, so it is written once and it is
+          in the sticky bar, where it stays reachable down a long form.
+        */}
         <PageHeader
           title={label}
           description={type.description ?? undefined}

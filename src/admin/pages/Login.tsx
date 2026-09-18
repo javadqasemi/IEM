@@ -5,7 +5,7 @@ import { Wordmark } from "@/components/Wordmark";
 import { ApiError } from "@/core/api";
 import { authRepository } from "@/core/auth";
 import { useAuth } from "@/core/auth";
-import { navigate, useRoute } from "../lib/router";
+import { navigate, useRoute } from "@/core/router";
 
 /**
  * Sign-in, password reset and invitation acceptance.

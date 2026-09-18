@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/shared/utils/cn";
-import { Link } from "../lib/router";
+import { Link } from "@/core/router";
 import {
   ICONS,
   ZONES,

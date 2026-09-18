@@ -1,11 +1,10 @@
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { cn } from "@/shared/utils/cn";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import {
   Badge,
   Button,
   Card,
-  DownloadButton,
   EmptyState,
   ErrorState,
   PageHeader,
@@ -16,6 +15,7 @@ import { Modal } from "@/shared/ui/overlays";
 import { type Column, DataView, Pair } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
 import { useDebounced, useMutation } from "@/shared/hooks";
+import { usePageActions } from "@/core/router";
 import { actionLabel } from "@/entities/audit";
 import { ActivityFeed } from "@/widgets/activity";
 import { api, type SettingRow } from "../lib/api";
@@ -230,12 +230,49 @@ function SettingField({
 /* ================================================================== */
 
 export function AuditPage() {
+  const toast = useToast();
   const [search, setSearch] = useState("");
   const [action, setAction] = useState("");
   const [outcome, setOutcome] = useState("");
   const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
   const [detail, setDetail] = useState<import("../lib/api").AuditRow | null>(null);
   const debounced = useDebounced(search);
+
+  /**
+   * The export, declared to the shell rather than drawn on the page.
+   *
+   * The first real user of `usePageActions` (foundation stage F4), and it is
+   * the right one: the button used to sit at the top of the page, which on a
+   * 200-row log means out of reach exactly when somebody wants it. The top bar
+   * is sticky, so up there it stays.
+   *
+   * `useMemo` is not an optimisation here — the hook writes its argument into
+   * context, so a fresh array every render is an infinite loop. The
+   * dependencies are the filters, which is also what makes the export follow
+   * what is on screen.
+   */
+  const pageActions = useMemo(
+    () => [
+      {
+        id: "audit-export",
+        label: "Als CSV exportieren",
+        permission: "audit.export",
+        busy: exporting,
+        run: () => {
+          setExporting(true);
+          api
+            .downloadAuditExport({ search: debounced, action, outcome })
+            .catch((err: unknown) =>
+              toast.error(err instanceof Error ? err.message : "Der Download ist fehlgeschlagen."),
+            )
+            .finally(() => setExporting(false));
+        },
+      },
+    ],
+    [debounced, action, outcome, exporting, toast],
+  );
+  usePageActions(pageActions);
 
   const actions = useAsync(() => api.auditActions(), []);
   const list = useAsync(
@@ -318,13 +355,6 @@ export function AuditPage() {
         eyebrow="System"
         title="Audit-Log"
         description="Jede Anmeldung, Änderung, Freigabe und Löschung. Der Eintrag wird beim Ausführen geschrieben und kann nicht nachträglich verändert werden."
-        actions={
-          <DownloadButton
-            variant="secondary"
-            label="Als CSV exportieren"
-            onDownload={() => api.downloadAuditExport({ search: debounced, action, outcome })}
-          />
-        }
       />
 
       <Card bodyClassName="p-5">

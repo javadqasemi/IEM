@@ -6,7 +6,7 @@ import { ActivityFeed } from "@/widgets/activity";
 import { api } from "../lib/api";
 import { useAuth } from "@/core/auth";
 import { useAsync } from "../lib/useAsync";
-import { Link } from "../lib/router";
+import { Link } from "@/core/router";
 
 /**
  * The executive dashboard.

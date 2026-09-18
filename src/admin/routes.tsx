@@ -1,6 +1,6 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { ApplicationsRoute } from "@/features/applications";
-import { match } from "./lib/router";
+import { match } from "@/core/router";
 
 /**
  * The dashboard's routes, as data.
@@ -53,6 +53,18 @@ export type Route = {
   props?: (params: Record<string, string>) => Record<string, string>;
   /** Shown in the "no access" screen so the message can name the place. */
   label: string;
+  /**
+   * The route one step up, as a pattern in this table.
+   *
+   * Foundation stage F4. It is what makes the breadcrumb trail derived rather
+   * than written per screen — a parallel structure listing the trail for each
+   * page is a structure that goes out of date the first time a route moves,
+   * with nothing to notice. Absent on a top-level screen, where a one-crumb
+   * trail would be noise.
+   */
+  parent?: string;
+  /** Names the screen from the URL. See `CrumbRoute` in `core/router`. */
+  crumb?: (params: Record<string, string>, labels: Record<string, string>) => string;
 };
 
 /**
@@ -89,6 +101,10 @@ export const ROUTES: Route[] = [
     component: page(() => import("./pages/ContentEditor"), "ContentEditorPage"),
     props: ({ type, id }) => ({ typeKey: type, entryId: id }),
     label: "Inhalt bearbeiten",
+    // The one real three-level chain in the dashboard, and the reason F4's
+    // breadcrumbs are worth having: the editor had no way back to its list
+    // except the rail, which is off-canvas on a phone.
+    parent: "/inhalte/:type",
   },
   {
     pattern: "/inhalte/:type",
@@ -96,6 +112,11 @@ export const ROUTES: Route[] = [
     component: page(() => import("./pages/Content"), "ContentListPage"),
     props: ({ type }) => ({ typeKey: type }),
     label: "Inhalte",
+    parent: "/inhalte",
+    // `projects` → "Projekte". The shell has already fetched the content types
+    // to build the menu; without the lookup the middle of the trail would show
+    // a URL slug, which is the one crumb a screen cannot publish for itself.
+    crumb: ({ type }, labels) => labels[type] ?? type,
   },
   {
     pattern: "/inhalte",
