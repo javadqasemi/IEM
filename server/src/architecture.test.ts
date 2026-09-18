@@ -41,7 +41,7 @@ const code = (file: string) =>
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 /** Folders that are infrastructure rather than features. */
-const INFRASTRUCTURE = ["common", "core", "auth", "rbac", "mail", "media", "tasks"];
+const INFRASTRUCTURE = ["common", "core", "auth", "rbac", "mail", "media", "scheduler"];
 
 const featureDirs = readdirSync(SRC)
   .filter((name) => statSync(join(SRC, name)).isDirectory())
@@ -128,8 +128,9 @@ describe("a feature does not reach into another feature's service", () => {
    *
    * A cross-feature reaction goes through `core/events`; a cross-feature
    * *command* — a timer telling content to publish — is legitimate and lives in
-   * `tasks/`, which is why that folder is infrastructure here rather than a
-   * feature.
+   * `scheduler/`, which is why that folder is infrastructure here rather than a
+   * feature. It was called `tasks/` until Wave 2 gave that name to a real
+   * module; see the note on `SchedulerModule`.
    */
   it.each(featureDirs)("%s imports no sibling's service", (dir) => {
     const offenders: string[] = [];
