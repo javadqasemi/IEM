@@ -26,7 +26,8 @@ what may go in them, and `src/architecture.test.ts` enforces the four that matte
 | `docs/roadmap.md` | Build order, complexity, dependencies, database and API impact, and the definition of done per module |
 
 **None of the business modules is implemented, and the architecture says not to start one until the
-Foundation stages are done.** As of 18 September 2026, **F1–F10 are done and F11–F12 are not**:
+Foundation stages are done.** As of 18 September 2026, **the twelve Foundation stages are done** and
+Wave 1 — the Project module as the reference standard — is what comes next:
 
 | Done | |
 | --- | --- |
@@ -39,11 +40,8 @@ Foundation stages are done.** As of 18 September 2026, **F1–F10 are done and F
 | F8 | Audit derived from those events, with a `correlationId` per request |
 | F9 | `Combobox`, `EntityPicker`, `DatePicker`, `DateRangePicker`, `Drawer`, `FilterBar` |
 | F10 | `core/jobs` — a `Job` table, a poller, retries with capped backoff |
-
-| Still owed | |
-| --- | --- |
-| F11 | Server `core/list`: one filter/sort/paginate contract for every collection |
-| F12 | Feature modules on the server; `app.module.ts` still lists controllers |
+| F11 | `core/list` — one paginate/filter/sort/search contract, plus saved views, columns, export, bulk |
+| F12 | A Nest module per feature; `app.module.ts` lists modules and nothing else |
 
 **The rule the firm set, and it holds for every layer:** one fully tested reference
 implementation before the pattern is copied. `features/applications/` is that reference on the
@@ -344,6 +342,18 @@ sends `application/octet-stream` + `nosniff` + `Content-Length` and **no** `Cont
 **A DTO type may be named in `repository.ts` and `mapper.ts` and nowhere else.** That rule is what
 makes the mapper a seam rather than a decoration, and `src/architecture.test.ts` enforces it along
 with feature isolation, the `index.ts` boundary and the direction of every layer arrow.
+
+**A folder under `server/src/` is either infrastructure or a feature, never both.** `audit/` and
+`settings/` were both, and it was invisible from either half: each held a controller belonging to
+one feature *and* a service every other feature injects. So `ApplicationsService` imported
+`../settings/settings.service`, which reads as a feature reaching into a sibling and is exactly
+what `server/src/architecture.test.ts` forbids — but the import was legitimate, because that
+service is infrastructure wearing a feature's folder name. The services moved to
+`core/audit/audit.service.ts` and `core/settings/settings.service.ts`; the controllers stayed.
+`settings/settings.controller.module.ts` is named for that split — it is the *routes*, and the
+global `SettingsModule` in `core/` is the provider. When a new service is going to be injected by
+more than the feature it sits in, it belongs in `core/` before the second caller appears, not
+after.
 
 **Generated files are overwritten.** `src/components/SchnittGuglera.tsx`, `src/components/SchnittAA.tsx`,
 `src/generated/scene_guglera.json` and `src/generated/scene.ts` come from the Python chain in `cad/`.

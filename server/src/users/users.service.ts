@@ -7,7 +7,7 @@ import {
 import { Prisma, type UserStatus } from "@prisma/client";
 import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
-import { AuditService } from "../audit/audit.service";
+import { AuditService } from "../core/audit/audit.service";
 import { AuthService } from "../auth/auth.service";
 import type { AuthUser } from "../common/decorators";
 

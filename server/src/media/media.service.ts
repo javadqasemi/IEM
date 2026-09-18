@@ -11,7 +11,7 @@ import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { PrismaService } from "../common/prisma.service";
-import { AuditService } from "../audit/audit.service";
+import { AuditService } from "../core/audit/audit.service";
 import { STORAGE, type StorageAdapter } from "./storage";
 import { slugify } from "../content/content.service";
 import type { AuthUser } from "../common/decorators";

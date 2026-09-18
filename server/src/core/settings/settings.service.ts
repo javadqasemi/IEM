@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { PrismaService } from "../common/prisma.service";
+import { PrismaService } from "../../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
-import type { AuthUser } from "../common/decorators";
+import type { AuthUser } from "../../common/decorators";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
 

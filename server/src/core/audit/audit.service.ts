@@ -1,8 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { AuditOutcome, Prisma } from "@prisma/client";
-import { PrismaService } from "../common/prisma.service";
-import { correlationId } from "../core/context/request-context";
-import type { AuthUser } from "../common/decorators";
+import { PrismaService } from "../../common/prisma.service";
+import { correlationId } from "../context/request-context";
+import type { AuthUser } from "../../common/decorators";
 
 export type AuditInput = {
   actor?: AuthUser | null;

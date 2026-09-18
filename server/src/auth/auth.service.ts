@@ -9,8 +9,8 @@ import { AuditOutcome, type User } from "@prisma/client";
 import * as argon2 from "argon2";
 import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
-import { AuditService } from "../audit/audit.service";
-import { SettingsService } from "../settings/settings.service";
+import { AuditService } from "../core/audit/audit.service";
+import { SettingsService } from "../core/settings/settings.service";
 import type { AuthUser } from "../common/decorators";
 
 export type TokenPair = {

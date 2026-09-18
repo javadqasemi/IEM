@@ -2,7 +2,7 @@ import { Global, Module } from "@nestjs/common";
 import { PrismaService } from "./prisma.service";
 import { RedisService } from "./redis";
 import { SharedThrottlerStorage } from "./throttler.storage";
-import { AuditService } from "../audit/audit.service";
+import { AuditService } from "../core/audit/audit.service";
 
 /**
  * Infrastructure every module needs: the database, the audit log and Redis.

@@ -44,10 +44,18 @@ business feature; every module depends on all of them.
 | F9 | `EntityPicker`, `DatePicker`, `DateRangePicker`, `Combobox`, `Drawer`, `FilterBar` | M | **Done.** `FilterBar` + `DateRangePicker` are in use on the audit log; `Combobox` and `EntityPicker` wait for the first entity list to point at |
 | F10 | **Background jobs** (`core/jobs`): durable, retried, attributable | M | **Done.** A `Job` table, an atomic claim, capped backoff, `DEAD` separate from a retry, and the two real cron jobs moved onto it |
 | F11 | The list contract, all nine capabilities (architecture §7.2) | M | **Done.** `core/list` on the server, `DataTable` sorting server-side, `ColumnPicker`, `BulkBar`, `ListPreference`, export. `applications` is the migrated reference; the other four lists follow |
-| F12 | Feature modules on the server, one shape per feature (§3.0.1) | M | W8. `app.module.ts` lists modules, never controllers |
+| F12 | Feature modules on the server, one shape per feature (§3.0.1) | M | **Done.** Eight feature modules; `app.module.ts` lists modules and nothing else; `architecture.test.ts` holds the line |
 
-**F1–F11 are done. F12 is the last one**, and it is the only thing between here
-and Wave 1.
+**All twelve Foundation stages are done**, and Wave 1 begins.
+
+F12 turned up the one thing a written rule could not: `audit/` and `settings/`
+each held a controller belonging to one feature *and* a service every other
+feature injects, so a legitimate import read as a feature reaching into a
+sibling. The services moved to `core/audit/` and `core/settings/`; the
+controllers stayed where their routes are. The test that found it now forbids
+the shape, which is the point of writing the rule as a test rather than as a
+paragraph — the paragraph had been there since §3.0.1 and the violation
+predated it by a year.
 
 Two of F9's six ship without a call site, and that is stated rather than
 glossed: `Combobox` and `EntityPicker` need a list of *entities* to point at,

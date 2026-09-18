@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Patch, Req } from "@nestjs/common";
 import { Allow, IsArray, IsString, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
-import { SettingsService } from "./settings.service";
+import { SettingsService } from "../core/settings/settings.service";
 import {
   ClientIp,
   CurrentUser,

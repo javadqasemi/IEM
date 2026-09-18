@@ -3,7 +3,7 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { RedisService } from "../common/redis";
-import { AuditService } from "../audit/audit.service";
+import { AuditService } from "../core/audit/audit.service";
 import { JobService } from "../core/jobs/job.service";
 import { ApplicationsService } from "../applications/applications.service";
 import { ContentService } from "../content/content.service";

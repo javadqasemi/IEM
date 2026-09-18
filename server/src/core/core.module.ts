@@ -1,6 +1,5 @@
 import { Global, Module } from "@nestjs/common";
 import { CommonModule } from "../common/common.module";
-import { AuditService } from "../audit/audit.service";
 import { EventBus } from "./events/event-bus";
 import { AuditListener } from "./events/audit.listener";
 import { JobRunner } from "./jobs/job.runner";
@@ -15,15 +14,18 @@ import { JobService } from "./jobs/job.service";
  * each need, and importing `CoreModule` into all of them would be twenty-six
  * lines of ceremony that can only ever be forgotten, never varied.
  *
- * `AuditService` is provided here rather than in a module of its own because
- * the listener needs it and the two are now one mechanism: events in, rows out
- * (`docs/enterprise-architecture.md` §7.5).
+ * **`AuditService` is deliberately not listed.** It is provided by the global
+ * `CommonModule`, and re-declaring it here would construct a *second*
+ * instance: `AuditListener` would hold one and every feature service another.
+ * Nothing would break — the service is stateless — which is precisely why it
+ * would have gone unnoticed. `app.module.ts` carries the same note about
+ * `SettingsService`, which is where this was learned the first time.
  */
 @Global()
 @Module({
   imports: [CommonModule],
   controllers: [ListPreferenceController],
-  providers: [EventBus, AuditService, AuditListener, JobService, JobRunner],
-  exports: [EventBus, AuditService, JobService],
+  providers: [EventBus, AuditListener, JobService, JobRunner],
+  exports: [EventBus, JobService],
 })
 export class CoreModule {}

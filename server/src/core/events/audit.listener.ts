@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
-import { AuditService } from "../../audit/audit.service";
+import { AuditService } from "../audit/audit.service";
 import { auditActionFor, type DomainEvent } from "./catalogue";
 import { EventBus } from "./event-bus";
 import { currentContext } from "../context/request-context";

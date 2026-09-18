@@ -7,8 +7,8 @@ import {
 } from "@nestjs/common";
 import { Prisma, WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
-import { AuditService } from "../audit/audit.service";
-import { SettingsService } from "../settings/settings.service";
+import { AuditService } from "../core/audit/audit.service";
+import { SettingsService } from "../core/settings/settings.service";
 import { contentTypeByKey } from "./content-types";
 import { validateEntry } from "./content.validator";
 import {

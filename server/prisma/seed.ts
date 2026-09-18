@@ -20,7 +20,7 @@ import { PrismaClient, type ContentKind } from "@prisma/client";
 import * as argon2 from "argon2";
 import { PERMISSIONS, SYSTEM_ROLES } from "../src/rbac/permissions.catalog";
 import { CONTENT_TYPES, type ContentTypeDef } from "../src/content/content-types";
-import { DEFAULT_SETTINGS } from "../src/settings/settings.service";
+import { DEFAULT_SETTINGS } from "../src/core/settings/settings.service";
 // The site package, two directories up. Its `defaultContent` is the single
 // source of the seed copy.
 import { defaultContent } from "../../src/content/defaults";

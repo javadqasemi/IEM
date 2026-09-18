@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as nodemailer from "nodemailer";
 import type { JobApplication } from "@prisma/client";
-import { SettingsService } from "../settings/settings.service";
+import { SettingsService } from "../core/settings/settings.service";
 
 /** The keys this service reads, in one place so the group read below is honest. */
 const MAIL_KEYS = [

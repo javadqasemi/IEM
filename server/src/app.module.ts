@@ -16,19 +16,15 @@ import { AuthModule } from "./auth/auth.module";
 import { MailModule } from "./mail/mail.module";
 import { MediaModule } from "./media/media.module";
 
-import { ContentController } from "./content/content.controller";
-import { ContentService } from "./content/content.service";
-import { UsersController } from "./users/users.controller";
-import { UsersService } from "./users/users.service";
-import { RbacController } from "./rbac/rbac.controller";
-import { RbacService } from "./rbac/rbac.service";
-import { SettingsController } from "./settings/settings.controller";
-import { SettingsModule } from "./settings/settings.module";
-import { AuditController } from "./audit/audit.controller";
-import { ApplicationsController } from "./applications/applications.controller";
-import { ApplicationsService } from "./applications/applications.service";
-import { DashboardController } from "./dashboard/dashboard.controller";
-import { ScheduledTasks } from "./tasks/scheduled.tasks";
+import { SettingsModule } from "./core/settings/settings.module";
+import { SettingsRoutesModule } from "./settings/settings.controller.module";
+import { ContentModule } from "./content/content.module";
+import { UsersModule } from "./users/users.module";
+import { RbacModule } from "./rbac/rbac.module";
+import { AuditModule } from "./audit/audit.module";
+import { ApplicationsModule } from "./applications/applications.module";
+import { DashboardModule } from "./dashboard/dashboard.module";
+import { TasksModule } from "./tasks/tasks.module";
 
 /**
  * The application root.
@@ -84,26 +80,36 @@ import { ScheduledTasks } from "./tasks/scheduled.tasks";
     MailModule,
     AuthModule,
     MediaModule,
-  ],
-  controllers: [
-    ContentController,
-    UsersController,
-    RbacController,
-    SettingsController,
-    AuditController,
-    ApplicationsController,
-    DashboardController,
+
+    /**
+     * The features (foundation stage F12, weakness W8).
+     *
+     * **This list is modules, and it will never be anything else.** Until now
+     * seven controllers and five services were declared directly here, which
+     * at twenty-six modules is a root module nobody can read and a boundary
+     * nowhere. A feature now owns its controller, its service and what it
+     * exports, and the only thing visible from here is that it exists.
+     *
+     * The order is alphabetical, deliberately: it carries no information, and
+     * a list that looks ordered by dependency invites somebody to maintain an
+     * order Nest resolves from the graph anyway.
+     */
+    ApplicationsModule,
+    AuditModule,
+    ContentModule,
+    DashboardModule,
+    RbacModule,
+    SettingsRoutesModule,
+    TasksModule,
+    UsersModule,
   ],
   providers: [
-    ContentService,
-    UsersService,
-    RbacService,
-    // `SettingsService` is no longer listed here — it moved to the global
-    // `SettingsModule` so that `MailService` and `AuthService` can inject it.
-    // Leaving it here as well would construct a second instance.
-    ApplicationsService,
-    ScheduledTasks,
-
+    /*
+      No feature providers here. `SettingsService` was the first to leave — it
+      moved to the global `SettingsModule` so `MailService` and `AuthService`
+      could inject it, and leaving a copy here would have constructed a second
+      instance. F12 finished the job for the other five.
+    */
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

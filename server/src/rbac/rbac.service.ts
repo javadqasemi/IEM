@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
-import { AuditService } from "../audit/audit.service";
+import { AuditService } from "../core/audit/audit.service";
 import { PERMISSIONS } from "./permissions.catalog";
 import type { AuthUser } from "../common/decorators";
 

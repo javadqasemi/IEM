@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ApplicationStatus, Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
-import { AuditService } from "../audit/audit.service";
+import { AuditService } from "../core/audit/audit.service";
 import { EventBus } from "../core/events/event-bus";
 import { APPLICATION_LIST } from "./applications.list";
 import type { RawListQuery } from "../core/list/list.decorator";
@@ -13,7 +13,7 @@ import {
   parseListQuery,
   skipTake,
 } from "../core/list/list";
-import { SettingsService } from "../settings/settings.service";
+import { SettingsService } from "../core/settings/settings.service";
 import { MailService } from "../mail/mail.service";
 import { STORAGE, type StorageAdapter } from "../media/storage";
 import type { AuthUser } from "../common/decorators";
