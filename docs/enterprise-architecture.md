@@ -256,15 +256,19 @@ src/
 
   features/                   one folder per module. Owns its whole stack.
     projects/
+      index.ts                the feature's public surface: routes + nav
       routes.tsx              this feature's routes + permissions
-      repository.ts           HTTP only — the one file that knows URLs  §3.1
       dto.ts                  the wire shapes. Imported by repository + mapper
+      repository.ts           HTTP only — the one file that knows URLs  §3.1
       mapper.ts               DTO ⇄ entity. The DTO boundary ends here
       service.ts              domain only — pure rules, no React, no fetch
+      validators.ts           form rules, shared by create and edit
+      events.ts               the server events this feature reacts to
+      types.ts                feature-internal types. The *entity* is in entities/
       hooks/                  useProjects, useProject, useProjectBudget
       screens/                ProjectList, ProjectDetail, ProjectCreate
       components/             ProjectStatusBadge, ProjectHealthBar
-      index.ts                the feature's public surface: routes + nav
+      __tests__/
     customers/ contacts/ buildings/ offers/ contracts/ planning/
     tasks/ calendar/ meetings/ documents/ bim/ employees/ time-tracking/
     resources/ finance/ reports/ company/ administration/ settings/
@@ -352,6 +356,34 @@ data; inventing an empty service for symmetry is ceremony. **`mapper.ts` is not
 optional**, even when it is nearly an identity function: it is the seam, and a
 seam that exists only when convenient is not a seam. An identity mapper is four
 lines and one test, and the day the API changes it is the only file that moves.
+
+### 3.0.1 One shape for every feature, and two names that did not survive
+
+The firm set the rule that every feature has the same folders, and it is right:
+at twenty modules, the value of a layout is that a reader who has seen one has
+seen them all. The list above is that shape, with two deliberate differences
+from the one proposed, and both are worth stating rather than quietly applying.
+
+**`api/` and `repositories/` are the same folder.** A feature has one thing
+that speaks HTTP and one file is enough for it; two names for it would have
+people guessing which half a call belongs in. It is `repository.ts`, because
+that is what the five layers call it.
+
+**`pages/` is `screens/`, and that is not a preference.** `pages/Operations.tsx`
+in the old structure was 1'009 lines and held *four* unrelated screens —
+Applications, Settings, Audit and Profile. The word "page" is what made that
+seem reasonable; a page is a place you put things. A **screen is one route**,
+and calling it that is the rule rather than a label for it. Renaming the folder
+back would reintroduce the word that carried the anti-pattern.
+
+**A file until it needs to be a folder.** `repository.ts` becomes
+`repository/` the day a feature genuinely has two — Projects will, for the
+project and its members. A folder with one file in it is ceremony; the split is
+allowed and it is not mandatory, and `architecture.test.ts` accepts either.
+
+**A feature omits what it has nothing to put in.** `service.ts` when there are
+no domain rules, `events.ts` when it listens for nothing. The one exception
+stays `mapper.ts`: a seam that exists only when convenient is not a seam.
 
 ### 3.1.1 The reference-implementation gate
 
@@ -481,6 +513,50 @@ describes *one record* rather than duplicating the menu.
 Projekte  ›  4723 Guglera  ›  Budget
 [Übersicht] [Team] [Aufgaben] [Termine] [Meilensteine] [Budget] [Zeit] …
 ```
+
+### 4.4.1 The project is the container, not the owner
+
+Set by the firm, and it resolves a tension the tab strip above would otherwise
+hide. A project's detail screen shows fourteen things, and seven of them belong
+to *other modules*:
+
+```
+/projekte/:id/…
+  übersicht  team  kunde  gebaeude  gewerke  phasen  termine  verlauf
+  ─────────────── the project module owns these ───────────────
+  aufgaben  sitzungen  dokumente  plaene  bim  finanzen  berichte
+  ─────────── embedded from the module that owns them ──────────
+```
+
+**The distinction is ownership, not placement.** `features/projects` does not
+fetch tasks, does not know a task's statuses and does not import
+`features/tasks` — that would be the mesh `features/README.md` forbids. The tab
+renders a **widget** the owning feature exports, scoped by `projectId`:
+
+```
+widgets/project-tabs/TasksTab.tsx   →  imports features/tasks' public surface
+```
+
+`widgets/` is the folder for exactly this, and it is why it exists: a block that
+spans features, composed by neither of them. The alternative — Projects
+importing seven siblings — is the architecture failing in the first module.
+
+### 4.4.2 A tab for a module that does not exist yet
+
+**No empty tabs**, and no hidden ones either. A tab that vanishes teaches the
+reader the feature is not planned; a tab that is blank teaches them it is
+broken. Both are wrong, and the second is worse in a demonstration.
+
+Every not-yet-built tab renders the same `ModulePlaceholder`: the module's name,
+one sentence on what will be there, a status (`Geplant` / `In Entwicklung`), and
+**the card and column layout the real screen will use**. That last part is the
+one that is easy to skip and the reason this is specified rather than left to
+taste — a placeholder that looks nothing like the eventual screen makes the
+navigation feel provisional, and when the module lands the page appears to jump.
+
+It is the same principle `KpiUnavailable` already applies to a figure with no
+source: state the gap rather than showing a zero, and state it in the shape the
+answer will take.
 
 ### 4.5 Breadcrumbs, quick actions, favourites, search
 
@@ -619,6 +695,41 @@ GET /api/v1/<resource>?
 `core/list/` on the server turns that into a Prisma `where`/`orderBy` with an
 allowlist of filterable fields per resource — an allowlist, because a filter
 parameter that reaches Prisma unchecked is a query-injection surface.
+
+**The nine capabilities every list has**, set by the firm and worth listing in
+full, because the point of a contract is that no module gets to decide it has
+eight of them:
+
+| | Where it lives | Note |
+| --- | --- | --- |
+| Server-side pagination | `core/list` | |
+| Server-side filtering | `core/list` + a per-resource allowlist | |
+| Server-side sorting | `core/list` + a per-resource allowlist | |
+| Full-text search | the resource's `searchable` fields | Postgres `tsvector` where volume needs it, `contains` where it does not |
+| Multiple filters at once | `filter[a]=…&filter[b]=…` | ANDed; a repeated field is ORed |
+| Column selection | `shared/ui/data` | Client-side. The server always sends the row |
+| A saved view | `ListPreference`, per user and resource | Server-side, so it follows the account rather than the browser |
+| Export | `GET /<resource>/export` | **Honours the same filters**, or the export and the screen disagree |
+| Bulk actions | `shared/ui/data` + `POST /<resource>/bulk` | |
+
+Three of those carry a decision rather than an implementation.
+
+**Column selection is client-side and the server still sends every field.**
+Letting the client ask for a subset would make the response shape depend on the
+query, which breaks the mapper's contract — `toProject(dto)` has to know what
+it is receiving. The saving would be bytes on a row that is already small; the
+cost would be a DTO that is sometimes partial, which is the kind of type nobody
+can rely on.
+
+**A saved view is server-side.** A column arrangement that lives in
+`localStorage` is lost when the person opens the dashboard on the other machine
+in the meeting room, which is exactly when they need it. It is a row keyed by
+user and resource, and deleting it restores the default.
+
+**Export honours the filters that are on screen.** It is written here rather
+than left to each module because the failure is silent and serious: an audit
+CSV that quietly contains more than the filtered view is a document somebody
+will act on. `/audit/export` already does this and its e2e test asserts it.
 
 ### 7.3 Permissions (W7)
 

@@ -7,7 +7,6 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   Req,
   Res,
   UploadedFiles,
@@ -16,10 +15,17 @@ import {
 import { FilesInterceptor } from "@nestjs/platform-express";
 import { Throttle } from "@nestjs/throttler";
 import { ApplicationStatus } from "@prisma/client";
-import { Type } from "class-transformer";
-import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from "class-validator";
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from "class-validator";
 import type { Response } from "express";
 import { ApplicationsService } from "./applications.service";
+import { ListQuery, type RawListQuery } from "../core/list/list.decorator";
 import {
   ClientIp,
   CurrentUser,
@@ -34,11 +40,21 @@ export class UpdateApplicationDto {
   @IsOptional() @IsString() @MaxLength(4000) note?: string;
 }
 
-export class ListApplicationsQuery {
-  @IsOptional() @IsIn(Object.values(ApplicationStatus)) status?: ApplicationStatus;
-  @IsOptional() @IsString() search?: string;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) perPage?: number;
+/**
+ * `ListApplicationsQuery` is gone (foundation stage F11).
+ *
+ * It declared `status`, `search`, `page` and `perPage` — four parameters, one
+ * resource, and the fifth hand-rolled copy of the same idea. The shared
+ * contract replaces it: `q` for the search, `filter[status]` for the status,
+ * plus sorting and five more filterable fields that this resource never had.
+ *
+ * There is no DTO because there cannot be one: `filter[…]` keys are chosen by
+ * the caller, and a DTO under `whitelist: true` would strip them. `ListQuery`
+ * and `parseListQuery` are the validator — see the note on the decorator.
+ */
+export class BulkStatusDto {
+  @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) ids!: string[];
+  @IsIn(Object.values(ApplicationStatus)) status!: ApplicationStatus;
 }
 
 @Controller("applications")
@@ -86,8 +102,64 @@ export class ApplicationsController {
 
   @Get()
   @RequirePermissions("application.read")
-  list(@Query() query: ListApplicationsQuery) {
+  list(@ListQuery() query: RawListQuery) {
     return this.applications.list(query);
+  }
+
+  /**
+   * The same query, every matching row, as CSV.
+   *
+   * `@Res()` without `passthrough`, which bypasses `EnvelopeInterceptor`
+   * entirely — the same arrangement `/audit/export` uses and the reason
+   * `common/http.ts` says to keep it that way.
+   *
+   * It removes `application.export` from the twelve permissions that guarded
+   * nothing.
+   */
+  @Get("export")
+  @RequirePermissions("application.export")
+  async export(@ListQuery() query: RawListQuery, @Res() res: Response) {
+    const rows = await this.applications.exportRows(query);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="bewerbungen-${new Date().toISOString().slice(0, 10)}.csv"`,
+    );
+    // BOM, so Excel on Windows reads the umlauts as UTF-8 rather than as
+    // mojibake — the same reason `/audit/export` writes one.
+    res.write("﻿");
+    res.write("Eingegangen;Position;Vorname;Nachname;E-Mail;Telefon;Status;Loeschung;Dateien\n");
+    for (const row of rows) {
+      res.write(
+        [
+          row.createdAt.toISOString(),
+          row.position,
+          row.firstName,
+          row.lastName,
+          row.email,
+          row.phone ?? "",
+          row.status,
+          row.retainUntil?.toISOString() ?? "",
+          String((row.files as unknown[] | null)?.length ?? 0),
+        ]
+          .map(csv)
+          .join(";") + "\n",
+      );
+    }
+    res.end();
+  }
+
+  /**
+   * Sets the status on several at once.
+   *
+   * Capped at 200 ids by the DTO: a bulk action is a convenience, and an
+   * unbounded one is a way to write the whole table in one request.
+   */
+  @Post("bulk/status")
+  @RequirePermissions("application.update")
+  bulkStatus(@Body() dto: BulkStatusDto) {
+    return this.applications.bulkStatus(dto.ids, dto.status);
   }
 
   @Get("stats")
@@ -188,4 +260,20 @@ export class ApplicationsController {
   remove(@Param("id") id: string) {
     return this.applications.remove(id);
   }
+}
+
+/**
+ * Quotes a CSV cell.
+ *
+ * Doubling the quote is the RFC 4180 escape, and the leading apostrophe on a
+ * cell starting with `=`, `+`, `-` or `@` is the formula-injection guard: a
+ * name typed into the public form as `=HYPERLINK(...)` would otherwise execute
+ * when somebody opens the export in Excel. The applicant controls every field
+ * in this file, which is what makes that a real path rather than a theoretical
+ * one.
+ */
+function csv(value: string): string {
+  const escaped = value.replace(/"/g, '""');
+  const guarded = /^[=+\-@\t\r]/.test(escaped) ? `'${escaped}` : escaped;
+  return `"${guarded}"`;
 }

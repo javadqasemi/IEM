@@ -38,16 +38,16 @@ business feature; every module depends on all of them.
 | F3 | `core/api`: client, **query cache**, and the repository/**mapper**/service/hooks split per feature (architecture §3.1), with **one feature taken through all five layers** as the validated reference (§3.1.1) | M | **Done.** `features/applications` is the reference; `architecture.test.ts` enforces the DTO boundary and the layering in both directions. The other eight endpoint groups deliberately stay on the shared `api` object until the reference has been driven |
 | F4 | Nested router + breadcrumbs + route-declared actions | M | **Done.** A route names its `parent`; the trail and the screen's actions are derived and rendered in the sticky bar |
 | F5 | Form layer: `useForm`, `EntityForm`, unsaved-changes guard | M | **Done.** `dirty` is computed rather than flagged, server field errors map back, and the guard covers a hash change — which `beforeunload` never could |
-| F6 | Generated permission catalogue + agreement test | S | W7. Cheap now, unmanageable at 180 entries — and 12 of today's 51 are already enforced nowhere |
-| F7 | **Domain events**: a named catalogue, not just a bus | M | W10. The seam Finance needs to hear Time Tracking, and the one Notifications, Audit, Reporting and Workflow are all built on |
-| F8 | **Audit as infrastructure**: derived from events, with `correlationId` | M | Every module would otherwise write its own audit calls, and forget some |
+| F6 | Generated permission catalogue + agreement test | S | **Done.** `rbac/resources.ts` is the source; the agreement test walks every guard in both directions and holds the 11 unenforced keys as a list that must shrink |
+| F7 | **Domain events**: a named catalogue, not just a bus | M | **Done.** 45 typed events, queued until the request succeeds, discarded when it fails, and a listener can never fail its publisher |
+| F8 | **Audit as infrastructure**: derived from events, with `correlationId` | M | **Done.** `AuditListener` writes the row; `applications` is the migrated reference and lost two threaded parameters for it |
 | F9 | `EntityPicker`, `DatePicker`, `DateRangePicker`, `Combobox`, `Drawer`, `FilterBar` | M | **Done.** `FilterBar` + `DateRangePicker` are in use on the audit log; `Combobox` and `EntityPicker` wait for the first entity list to point at |
-| F10 | **Background jobs** (`core/jobs`): durable, retried, attributable | M | W12. Exports, PDFs, IFC analysis, backups, reminders, reports and the notification digest are all already known to be coming |
-| F11 | Server `core/list`: filter/sort/paginate contract | M | W5. Every list endpoint, one implementation |
-| F12 | Feature modules on the server | M | W8. `app.module.ts` lists modules, never controllers |
+| F10 | **Background jobs** (`core/jobs`): durable, retried, attributable | M | **Done.** A `Job` table, an atomic claim, capped backoff, `DEAD` separate from a retry, and the two real cron jobs moved onto it |
+| F11 | The list contract, all nine capabilities (architecture §7.2) | M | **Done.** `core/list` on the server, `DataTable` sorting server-side, `ColumnPicker`, `BulkBar`, `ListPreference`, export. `applications` is the migrated reference; the other four lists follow |
+| F12 | Feature modules on the server, one shape per feature (§3.0.1) | M | W8. `app.module.ts` lists modules, never controllers |
 
-**F2–F5 and F9 are done — the client half.** F6–F12 are the server half, and
-every one of them blocks the first business module.
+**F1–F11 are done. F12 is the last one**, and it is the only thing between here
+and Wave 1.
 
 Two of F9's six ship without a call site, and that is stated rather than
 glossed: `Combobox` and `EntityPicker` need a list of *entities* to point at,
@@ -67,11 +67,10 @@ schedule:
 | Argon2id, rotating refresh tokens with replay detection, per-account lockout, per-IP throttle | MFA flow (columns and toggle exist, the flow does not) |
 | Deny-by-default `JwtAuthGuard`, permissions resolved per request, Super Admin by role key | F6's generated catalogue — 12 of 51 permissions are enforced nowhere |
 | 11 seeded roles, a working role editor | The engineering roles, seeded when the modules they grant exist |
-| — | **Route-level enforcement on the client**: `renderRoute` renders any page to any signed-in user and the server's 403 is what stops the data |
+| Every route declares its permissions and the shell refuses one it cannot fill | Nothing. Hiding remains a courtesy; the server's 403 is the control |
 
-That last row is the one that matters before the first business module: a screen
-the user may not have should not render and then fail, and F4 is where the route
-table gains the guard.
+The last row was the one that mattered before the first business module, and F4
+closed it: a screen the user may not have no longer renders and then fails.
 
 ### 2.2 The reference-implementation gate
 
@@ -171,6 +170,33 @@ on write, a nightly reconciliation and a test that the two agree.
 project tool. Phases with fees, deliverables and client sign-off are how a Swiss
 engineering office plans, delivers and bills; a project without them is a to-do
 list with a customer attached.
+
+#### Projects is the reference standard, and that is a gate
+
+Set by the firm. No second business module starts until Projects satisfies all
+ten, and the list is the definition of done in §5 made specific to it:
+
+| | |
+| --- | --- |
+| Entities, migration, seed | `Project`, `ProjectMember`, `ProjectDiscipline`, `Milestone` |
+| Permissions | declared in `resources.ts`, guarded, row-level rules tested |
+| Audit | derived from events, never a hand-written `audit.record` |
+| Events | every transition in the catalogue, raised after commit |
+| API | the full list contract, export, bulk |
+| Repository / mapper / service | all three, with the DTO boundary enforced |
+| UI | list, detail with tabs, create, edit — only shared components |
+| Tests | domain rules, mapper both ways, DTO whitelist, the list contract |
+| E2E | both themes, three widths, axe clean, the primary workflow |
+| Documentation | the non-obvious decisions, in the code |
+
+**It is a container, not an owner** — architecture §4.4.1. Seven of its fourteen
+tabs are other modules' screens, embedded through `widgets/` and scoped by
+`projectId`. `features/projects` imports none of them, and the tabs whose module
+does not exist yet render `ModulePlaceholder` rather than nothing (§4.4.2).
+
+The honest consequence: **Projects is not one module's worth of work.** It is
+the shell, the eight tabs it owns, and a widget seam for the seven it does not.
+Sizing it `L` was right for the module and wrong for the milestone.
 
 ### Wave 2 — the building, and the working day
 

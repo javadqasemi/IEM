@@ -4,6 +4,7 @@ import { AuditService } from "../audit/audit.service";
 import { EventBus } from "./events/event-bus";
 import { AuditListener } from "./events/audit.listener";
 import { JobRunner } from "./jobs/job.runner";
+import { ListPreferenceController } from "./list/list-preference.controller";
 import { JobService } from "./jobs/job.service";
 
 /**
@@ -21,6 +22,7 @@ import { JobService } from "./jobs/job.service";
 @Global()
 @Module({
   imports: [CommonModule],
+  controllers: [ListPreferenceController],
   providers: [EventBus, AuditService, AuditListener, JobService, JobRunner],
   exports: [EventBus, AuditService, JobService],
 })

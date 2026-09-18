@@ -75,6 +75,7 @@ model User {
   uploads           MediaAsset[]
   settingsChanged   Setting[]
   notifications     Notification[]
+  listPreferences   ListPreference[]
 
   @@index([status])
   @@index([deletedAt])
@@ -563,6 +564,37 @@ model JobApplication {
   @@index([status, createdAt])
   @@index([openingId])
   @@index([retainUntil])
+}
+
+/// How one person wants to see one list (foundation stage F11).
+///
+/// Server-side rather than `localStorage`, and that is the decision worth
+/// recording: a column arrangement that lives in the browser is lost when the
+/// person opens the dashboard on the machine in the meeting room, which is
+/// exactly when they need the view they built. It follows the account.
+///
+/// One row per user per resource. Deleting it restores the default, which is
+/// why "Standard wiederherstellen" is a DELETE and not a write of the defaults
+/// — storing the defaults would freeze them at whatever they were that day.
+model ListPreference {
+  id       String @id @default(cuid())
+  userId   String
+  /// `application`, `project` — the resource key from `rbac/resources.ts`.
+  resource String
+
+  /// `{ hidden: string[], sort: { field, dir }, perPage: number }`.
+  ///
+  /// Json rather than columns because it is a *preference*: it has no
+  /// invariants, nothing joins to it, and every list will want one more thing
+  /// in it. A migration per column would be a migration per whim.
+  view Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, resource])
 }
 
 model Redirect {

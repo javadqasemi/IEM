@@ -105,7 +105,6 @@ const KNOWN_UNENFORCED: Record<string, string> = {
   "system.api": "no API-key management",
   "system.backup": "no backup endpoint",
   "user.impersonate": "no impersonation flow",
-  "application.export": "no export endpoint yet",
   // Added by F6 for the job runner, ahead of its controller (F10).
   "job.read": "the job runner ships before its screen",
   "job.retry": "the job runner ships before its screen",

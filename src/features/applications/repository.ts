@@ -1,4 +1,12 @@
-import { download, request, type Paginated, type QueryValue } from "@/core/api";
+import {
+  download,
+  listQuery,
+  request,
+  type Filter,
+  type Paginated,
+  type QueryValue,
+  type SortDirection,
+} from "@/core/api";
 import type { ApplicationDto, ApplicationPatchDto, ApplicationStatsDto } from "./dto";
 
 /**
@@ -12,26 +20,42 @@ import type { ApplicationDto, ApplicationPatchDto, ApplicationStatsDto } from ".
  */
 
 /**
- * The list parameters the **server** accepts today.
+ * The list parameters, now the shared contract.
  *
- * Not `ListParams` from `core/api/list`. The server still hand-rolls
- * page/perPage/search per resource (weakness W5); the shared filter/sort
- * contract lands in foundation stage F6. When it does, this is the one file
- * that changes — which is the whole reason it exists.
+ * **This is what the layering was for.** The server moved from a hand-rolled
+ * `?search=&status=` to `?q=&filter[status]=eq:…&sort=…` in foundation stage
+ * F11, and the change reaches exactly two functions in one file. No screen, no
+ * hook and no component knows that `status` became `filter[status]` — they
+ * pass a `status` and always did.
+ *
+ * `listQuery` from `core/api/list` does the serialising, so the spelling of a
+ * filter is decided once rather than per resource.
  */
 export type ApplicationQuery = {
   search?: string;
   status?: string;
+  /** ISO `yyyy-mm-dd`. Everything deleted on or before this date. */
+  retainUntilBefore?: string;
+  sort?: { field: string; dir: SortDirection };
   page?: number;
   perPage?: number;
 };
 
 function toQuery(query: ApplicationQuery): Record<string, QueryValue> {
+  const filters: Filter[] = [];
+  if (query.status) filters.push({ field: "status", op: "eq", value: query.status });
+  if (query.retainUntilBefore) {
+    filters.push({ field: "retainUntil", op: "lte", value: query.retainUntilBefore });
+  }
+
   return {
-    search: query.search || undefined,
-    status: query.status || undefined,
-    page: query.page,
-    perPage: query.perPage,
+    ...listQuery({
+      page: query.page,
+      perPage: query.perPage,
+      q: query.search,
+      sort: query.sort,
+      filters,
+    }),
   };
 }
 
@@ -58,6 +82,22 @@ export const applicationRepository = {
    */
   downloadFile: (id: string, index: number, fallbackName: string) =>
     download(`/applications/${id}/files/${index}`, { fallbackName }),
+
+  /**
+   * The CSV, for **the same query** the list is showing.
+   *
+   * Passing the query rather than nothing is the contract, not a convenience:
+   * an export that quietly contains more than the filtered view is a document
+   * somebody will act on (architecture §7.2).
+   */
+  exportCsv: (query: ApplicationQuery) =>
+    download("/applications/export", {
+      query: toQuery(query),
+      fallbackName: `bewerbungen-${new Date().toISOString().slice(0, 10)}.csv`,
+    }),
+
+  bulkStatus: (ids: string[], status: string) =>
+    request<{ changed: number }>("/applications/bulk/status", { body: { ids, status } }),
 };
 
 export type ApplicationRepository = typeof applicationRepository;

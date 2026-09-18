@@ -107,3 +107,86 @@ test.describe("request context and audit", () => {
     });
   });
 });
+
+
+/**
+ * The list contract, end to end (foundation stage F11).
+ *
+ * The unit tests cover the parsing and the allowlists. What only a live
+ * request shows is that the *client* speaks it: the repository serialises
+ * `status` into `filter[status]` and `sort` into `sort=field:dir`, and neither
+ * the screen nor the hook knows either spelling exists.
+ */
+test.describe("the list contract", () => {
+  test.beforeEach(async ({ signIn }) => {
+    await signIn();
+  });
+
+  const auth = async (request: import("@playwright/test").APIRequestContext) => {
+    const login = await request.post("http://localhost:3100/api/v1/auth/login", {
+      data: { email: "admin@iem.ch", password: "Admin#2026IEMAG" },
+    });
+    return { authorization: `Bearer ${(await login.json()).data.accessToken}` };
+  };
+
+  test("sorts on the server and refuses a field that is not allowed", async ({ request }) => {
+    const headers = await auth(request);
+
+    const asc = await request.get(
+      "http://localhost:3100/api/v1/applications?sort=lastName:asc&perPage=25",
+      { headers },
+    );
+    const names = (await asc.json()).data.items.map((r: { lastName: string }) => r.lastName);
+    expect(names.length).toBeGreaterThan(1);
+    expect([...names]).toEqual([...names].sort((a, b) => a.localeCompare(b, "de-CH")));
+
+    // Refused, not ignored: an ignored sort looks exactly like a column that
+    // will not sort, and the reader blames the data.
+    const refused = await request.get(
+      "http://localhost:3100/api/v1/applications?sort=salary:asc",
+      { headers },
+    );
+    expect(refused.status()).toBe(400);
+    expect((await refused.json()).message).toContain("createdAt");
+  });
+
+  test("the export contains exactly what the same filter returns", async ({ request }) => {
+    const headers = await auth(request);
+    const filter = "filter%5Bstatus%5D=eq:NEW";
+
+    const list = await request.get(
+      `http://localhost:3100/api/v1/applications?${filter}&perPage=50`,
+      { headers },
+    );
+    const total = (await list.json()).data.total as number;
+
+    const csv = await request.get(
+      `http://localhost:3100/api/v1/applications/export?${filter}`,
+      { headers },
+    );
+    expect(csv.ok()).toBe(true);
+    const body = await csv.text();
+
+    // One header row plus one per record. An export that quietly contained
+    // more than the filtered view is a document somebody would act on.
+    const rows = body.trim().split("\n").length - 1;
+    expect(rows).toBe(total);
+    expect(body.charCodeAt(0)).toBe(0xfeff);
+  });
+
+  test("a saved view survives a reload and is restored by deleting it", async ({ request }) => {
+    const headers = await auth(request);
+    const url = "http://localhost:3100/api/v1/list-preferences/application";
+
+    await request.put(url, { headers, data: { hidden: ["files"] } });
+    const saved = await request.get(url, { headers });
+    expect((await saved.json()).data.hidden).toEqual(["files"]);
+
+    // Restoring deletes the row rather than writing the defaults into it —
+    // storing them would freeze them at whatever they were that day.
+    const deleted = await request.delete(url, { headers });
+    expect(deleted.status()).toBe(204);
+    const after = await request.get(url, { headers });
+    expect((await after.json()).data).toEqual({});
+  });
+});

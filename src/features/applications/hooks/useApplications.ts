@@ -23,7 +23,16 @@ const KEY = "applications";
 
 export function useApplicationList(query: ApplicationQuery) {
   return useQuery<Paginated<Application>>(
-    [KEY, "list", query.search ?? "", query.status ?? "", query.page ?? 1, query.perPage ?? 50],
+    [
+      KEY,
+      "list",
+      query.search ?? "",
+      query.status ?? "",
+      query.retainUntilBefore ?? "",
+      `${query.sort?.field ?? ""}:${query.sort?.dir ?? ""}`,
+      query.page ?? 1,
+      query.perPage ?? 50,
+    ],
     () => applicationRepository.list(query).then(toApplicationPage),
   );
 }
@@ -65,6 +74,10 @@ export type ApplicationMutations = {
   update: (id: string, patch: { status?: ApplicationStatus; note?: string }) => Promise<Application>;
   remove: (id: string) => Promise<void>;
   downloadFile: (id: string, index: number, fallbackName: string) => Promise<void>;
+  /** Returns how many actually changed — a row already in that status does not. */
+  bulkStatus: (ids: string[], status: ApplicationStatus) => Promise<number>;
+  /** The CSV for the query currently on screen. */
+  exportCsv: (query: ApplicationQuery) => Promise<void>;
 };
 
 /**
@@ -101,5 +114,16 @@ export function useApplicationMutations(): ApplicationMutations {
     [],
   );
 
-  return { update, remove, downloadFile };
+  const bulkStatus = useCallback(async (ids: string[], status: ApplicationStatus) => {
+    const result = await applicationRepository.bulkStatus(ids, status);
+    invalidate(KEY);
+    return result.changed;
+  }, []);
+
+  const exportCsv = useCallback(
+    (query: ApplicationQuery) => applicationRepository.exportCsv(query),
+    [],
+  );
+
+  return { update, remove, downloadFile, bulkStatus, exportCsv };
 }

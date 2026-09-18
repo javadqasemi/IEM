@@ -4,6 +4,15 @@ import { createHash } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { EventBus } from "../core/events/event-bus";
+import { APPLICATION_LIST } from "./applications.list";
+import type { RawListQuery } from "../core/list/list.decorator";
+import {
+  buildOrderBy,
+  buildWhere,
+  paginated,
+  parseListQuery,
+  skipTake,
+} from "../core/list/list";
 import { SettingsService } from "../settings/settings.service";
 import { MailService } from "../mail/mail.service";
 import { STORAGE, type StorageAdapter } from "../media/storage";
@@ -204,35 +213,88 @@ export class ApplicationsService {
 
   /* ---- Administration -------------------------------------------- */
 
-  async list(params: { status?: ApplicationStatus; search?: string; page?: number; perPage?: number }) {
-    const page = Math.max(1, params.page ?? 1);
-    const perPage = Math.min(200, Math.max(1, params.perPage ?? 50));
-
-    const where: Prisma.JobApplicationWhereInput = {
-      ...(params.status ? { status: params.status } : {}),
-      ...(params.search
-        ? {
-            OR: [
-              { firstName: { contains: params.search, mode: "insensitive" } },
-              { lastName: { contains: params.search, mode: "insensitive" } },
-              { email: { contains: params.search, mode: "insensitive" } },
-              { position: { contains: params.search, mode: "insensitive" } },
-            ],
-          }
-        : {}),
-    };
+  /**
+   * The list, through the shared contract (foundation stage F11).
+   *
+   * What it replaces: a hand-rolled page/perPage/search/where, the fifth of
+   * five slightly different copies (weakness W5). What it gains beyond
+   * deduplication — and every one of these was missing here — is server-side
+   * sorting, filtering by any of six fields with ten operators, a refusal that
+   * names what *is* allowed instead of silently ignoring a parameter, and a
+   * `pages: 0` for an empty result rather than the `Math.max(1, …)` that told
+   * the client there was one page of nothing.
+   *
+   * `APPLICATION_LIST` is the allowlist. A field that is not in it cannot be
+   * filtered or sorted by, which is what keeps a query parameter away from
+   * Prisma unchecked.
+   */
+  async list(query: RawListQuery) {
+    const params = parseListQuery(query, APPLICATION_LIST);
+    const where = buildWhere(params, APPLICATION_LIST) as Prisma.JobApplicationWhereInput;
 
     const [items, total] = await this.prisma.$transaction([
       this.prisma.jobApplication.findMany({
         where,
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * perPage,
-        take: perPage,
+        orderBy: buildOrderBy(params, APPLICATION_LIST) as Prisma.JobApplicationOrderByWithRelationInput,
+        ...skipTake(params),
       }),
       this.prisma.jobApplication.count({ where }),
     ]);
 
-    return { items, total, page, perPage, pages: Math.max(1, Math.ceil(total / perPage)) };
+    return paginated(items, total, params);
+  }
+
+  /**
+   * The same query, every matching row, as CSV.
+   *
+   * **It takes the same parameters as `list`**, and that is the whole point:
+   * an export that quietly contains more than the filtered view on screen is a
+   * document somebody will act on. Architecture §7.2 makes it a rule rather
+   * than a per-module decision.
+   *
+   * No `skip`/`take`: the export *is* how a caller legitimately gets
+   * everything, which is why `perPage` is capped on the list route.
+   */
+  async exportRows(query: RawListQuery) {
+    const params = parseListQuery(query, APPLICATION_LIST);
+    const where = buildWhere(params, APPLICATION_LIST) as Prisma.JobApplicationWhereInput;
+    return this.prisma.jobApplication.findMany({
+      where,
+      orderBy: buildOrderBy(params, APPLICATION_LIST) as Prisma.JobApplicationOrderByWithRelationInput,
+    });
+  }
+
+  /**
+   * Sets the status on several at once.
+   *
+   * One `updateMany` and one event per row, not one event for the batch: the
+   * audit log records what happened to *records*, and a single row saying
+   * "twelve applications changed" cannot answer "what happened to this one".
+   * Twelve rows sharing a correlation id can answer both.
+   */
+  async bulkStatus(ids: string[], status: ApplicationStatus) {
+    const before = await this.prisma.jobApplication.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, status: true },
+    });
+
+    await this.prisma.jobApplication.updateMany({
+      where: { id: { in: ids } },
+      data: { status },
+    });
+
+    for (const row of before) {
+      if (row.status === status) continue;
+      this.events.publish("ApplicationStatusChanged", {
+        entity: "job_application",
+        entityId: row.id,
+        before: { status: row.status },
+        after: { status },
+        payload: { from: row.status, to: status },
+      });
+    }
+
+    return { changed: before.filter((r) => r.status !== status).length };
   }
 
   async get(id: string, actor: AuthUser, ctx: Ctx) {

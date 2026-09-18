@@ -3,6 +3,8 @@ import { cn } from "@/shared/utils/cn";
 import { EmptyState, SkeletonTable } from "@/shared/ui/primitives";
 import { Pagination } from "@/shared/ui/navigation";
 
+export type SortState = { field: string; dir: "asc" | "desc" };
+
 export type Column<T> = {
   key: string;
   header: string;
@@ -16,17 +18,33 @@ export type Column<T> = {
   secondary?: boolean;
   /** Returns a sortable value. Omit to make the column unsortable. */
   sortValue?: (row: T) => string | number;
+  /**
+   * The field name the *server* sorts by, when it differs from `key`.
+   *
+   * Given `sort`/`onSortChange`, this is what the table sends. Absent, `key`
+   * is used — which is the common case and why this is optional.
+   */
+  sortField?: string;
+  /** Never hidden by the column picker. The row's identity. */
+  required?: boolean;
 };
 
 /**
  * The dashboard's one table.
  *
  * Every list screen uses it, which is what stops six slightly different tables
- * existing. Sorting is client-side and deliberately so: these lists are
- * paginated to at most 200 rows, and a round trip to reorder 40 projects
- * would be slower and more code than sorting the page in hand. A list that
- * outgrows that should sort on the server, and the `sortValue` hook is where
- * that change would land.
+ * existing.
+ *
+ * **Sorting happens on whichever side the caller wires up** (weakness W6).
+ * Pass `sort` and `onSortChange` and the header buttons report the field to
+ * the caller, which puts it in the query — that is the only correct answer
+ * once a list is paginated, because sorting the *page* reorders twenty rows
+ * out of four hundred and shows the wrong twenty at the top. Pass neither and
+ * it sorts the rows it has, which is still right for a list that is never
+ * paginated.
+ *
+ * The comment that used to stand here said the `sortValue` hook was where
+ * server sorting would land. It is `sortField`, beside it.
  */
 export function DataTable<T>({
   rows,
@@ -38,6 +56,9 @@ export function DataTable<T>({
   selection,
   onSelectionChange,
   caption,
+  sort: serverSort,
+  onSortChange,
+  hiddenColumns,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -49,14 +70,28 @@ export function DataTable<T>({
   selection?: Set<string>;
   onSelectionChange?: (next: Set<string>) => void;
   caption: string;
+  /** Given with `onSortChange`, sorting is the server's. */
+  sort?: SortState;
+  onSortChange?: (next: SortState) => void;
+  /** Column keys the reader has hidden. `required` columns are never hidden. */
+  hiddenColumns?: Set<string>;
 }) {
-  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [localSort, setLocalSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const serverSorted = Boolean(onSortChange);
+
+  const visibleColumns = useMemo(
+    () => columns.filter((c) => c.required || !hiddenColumns?.has(c.key)),
+    [columns, hiddenColumns],
+  );
 
   const sorted = useMemo(() => {
-    if (!sort) return rows;
-    const column = columns.find((c) => c.key === sort.key);
+    // The server already ordered them. Re-sorting here would reorder the page
+    // by a different rule and make the result look random across pages.
+    if (serverSorted) return rows;
+    if (!localSort) return rows;
+    const column = columns.find((c) => c.key === localSort.key);
     if (!column?.sortValue) return rows;
-    const factor = sort.dir === "asc" ? 1 : -1;
+    const factor = localSort.dir === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
       const av = column.sortValue!(a);
       const bv = column.sortValue!(b);
@@ -65,9 +100,21 @@ export function DataTable<T>({
       // rule the site's team roster uses.
       return String(av).localeCompare(String(bv), "de-CH") * factor;
     });
-  }, [rows, columns, sort]);
+  }, [rows, columns, localSort, serverSorted]);
 
-  if (loading) return <SkeletonTable rows={6} cols={columns.length} />;
+  /** Which column the arrow is on, from whichever side owns the sort. */
+  const activeKey = serverSorted
+    ? visibleColumns.find((c) => (c.sortField ?? c.key) === serverSort?.field)?.key
+    : localSort?.key;
+  const activeDir = serverSorted ? serverSort?.dir : localSort?.dir;
+
+  const toggleSort = (column: Column<T>) => {
+    const next: "asc" | "desc" = activeKey === column.key && activeDir === "asc" ? "desc" : "asc";
+    if (onSortChange) onSortChange({ field: column.sortField ?? column.key, dir: next });
+    else setLocalSort({ key: column.key, dir: next });
+  };
+
+  if (loading) return <SkeletonTable rows={6} cols={visibleColumns.length} />;
 
   if (!rows.length) {
     return <>{empty ?? <EmptyState title="Keine Einträge" />}</>;
@@ -109,13 +156,16 @@ export function DataTable<T>({
                 />
               </th>
             ) : null}
-            {columns.map((c) => {
-              const active = sort?.key === c.key;
+            {visibleColumns.map((c) => {
+              const active = activeKey === c.key;
+              // Sortable when the caller gave it a client comparator, or when
+              // the server owns the sort and the column names a field.
+              const sortable = serverSorted ? Boolean(c.sortField ?? c.key) : Boolean(c.sortValue);
               return (
                 <th
                   key={c.key}
                   scope="col"
-                  aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}
+                  aria-sort={active ? (activeDir === "asc" ? "ascending" : "descending") : undefined}
                   className={cn(
                     "eyebrow px-4 py-2.5 text-left font-medium text-muted",
                     c.numeric && "text-right",
@@ -123,21 +173,15 @@ export function DataTable<T>({
                     c.className,
                   )}
                 >
-                  {c.sortValue ? (
+                  {sortable ? (
                     <button
                       type="button"
-                      onClick={() =>
-                        setSort(
-                          active && sort!.dir === "asc"
-                            ? { key: c.key, dir: "desc" }
-                            : { key: c.key, dir: "asc" },
-                        )
-                      }
+                      onClick={() => toggleSort(c)}
                       className="inline-flex items-center gap-1 transition-colors hover:text-ink"
                     >
                       {c.header}
                       <span aria-hidden className={cn("text-[9px]", active ? "text-brand-blue" : "text-line-strong")}>
-                        {active && sort!.dir === "desc" ? "▼" : "▲"}
+                        {active && activeDir === "desc" ? "▼" : "▲"}
                       </span>
                     </button>
                   ) : (
@@ -172,7 +216,7 @@ export function DataTable<T>({
                     />
                   </td>
                 ) : null}
-                {columns.map((c) => (
+                {visibleColumns.map((c) => (
                   <td
                     key={c.key}
                     className={cn(
@@ -211,6 +255,9 @@ export function DataView<T>({
   perPage,
   onPageChange,
   toolbar,
+  sort,
+  onSortChange,
+  hiddenColumns,
 }: Parameters<typeof DataTable<T>>[0] & {
   page: number;
   pages: number;
@@ -232,6 +279,9 @@ export function DataView<T>({
         selection={selection}
         onSelectionChange={onSelectionChange}
         caption={caption}
+        sort={sort}
+        onSortChange={onSortChange}
+        hiddenColumns={hiddenColumns}
       />
       {!loading && rows.length ? (
         <Pagination page={page} pages={pages} total={total} perPage={perPage} onChange={onPageChange} />
