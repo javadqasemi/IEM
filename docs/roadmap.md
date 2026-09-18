@@ -264,20 +264,23 @@ because each was a real finding rather than a confirmation:
 **Reordered by dependency at review**, and the new order is what gets built:
 
 ```
-Project → Tasks → Meetings → Documents → Drawings → SIA Phases → BIM
+Project → Tasks → Meetings → Drawings → Documents → SIA Phases → BIM
 ```
 
 The argument is that the *fachlich* connection tightens with each step rather
 than the modules merely accumulating: Tasks need only a project; Meetings
-reference tasks and projects; Documents hang off meetings and projects;
-Drawings hang off documents and Gewerke; SIA Phases reference project progress;
-BIM references drawings, rooms and systems.
+reference tasks and projects; Drawings hang off projects, Gewerke and the
+building; Documents reference all of them; SIA Phases reference project
+progress; BIM references drawings, rooms and systems.
 
-Two consequences worth stating, because they contradict the table below:
+Three consequences worth stating, because they contradict the table below:
 
 - **Tasks moves ahead of Meetings.** The table had Meetings at 7 and Tasks at 8,
   which is backwards: a meeting's Pendenz *becomes* a task, so building meetings
   first means building the seam twice.
+- **Drawings moves ahead of Documents**, corrected at the review of 18 September
+  2026 — see the paragraph below, which the rest of this document already agreed
+  with while this block did not.
 - **Buildings (full) is no longer the entry point.** It is a large module that
   nothing else in this wave blocks on — Drawings need Gewerke and a building
   *reference*, both of which the Wave 1 slice already provides. It keeps its
@@ -393,11 +396,44 @@ assign work and then adding notifications afterwards means three modules'
 assignment paths get revisited. It is M, not L, because `core/events` (F8) and
 `core/jobs` (F10) already exist by then and it is a consumer of both.
 
-**Drawings before Documents**, as the review has it. It is the more expensive of
-the two and it pulls the storage-and-version seam forward with it — which is the
-real cost, and which Documents then inherits rather than establishes. L rather
-than M almost entirely because of Planversand: the artefact is easy and the
-evidence trail is not.
+**Drawings before Documents**, as the review has it — and this paragraph was
+right while the dependency block at the top of this section was wrong, for five
+months, on the same page.
+
+The block said `Documents → Drawings` and justified it with *"Drawings hang off
+documents and Gewerke"*, which is the error underneath the ordering: **a drawing
+does not hang off a document.** It is a first-class artefact with its own
+identity, its own revision scheme — `ALPHA`, where a document is `NUMERIC`
+(`core/versioning/revision.ts`) — and its own issue trail. Treating it as a
+document with extra fields is how a Planversand becomes an attachment on a
+folder, which is precisely what this firm is trying to stop doing.
+
+The order the work actually takes, which is what settled it at the review of
+18 September 2026:
+
+```
+Projekt → Meeting → Decision → Task → Drawing-Revision → Review
+        → Issue / Transmittal → Document-Archiv
+```
+
+Drawings are the **Arbeitsgegenstand**; the archive is where things go once they
+have stopped moving. A Bausitzung now produces *"Plan Revision C erstellen"* as
+a Pendenz, and that task has nothing to point at until Drawings exists — the
+same argument that put Tasks ahead of Meetings, one module further along. The
+document module, by contrast, manages contracts, reports and minutes, all of
+which are downstream of the work rather than the work itself.
+
+Two further reasons, unchanged from when this paragraph was first written:
+Drawings is the more expensive of the two and it pulls the storage-and-version
+seam forward with it — which is the real cost, and which Documents then inherits
+rather than establishes. And it is L rather than M almost entirely because of
+Planversand: the artefact is easy and the evidence trail is not.
+
+**The numbered table already had this right** — Drawings at 10, Documents at 11 —
+which is what makes the contradiction worth recording rather than quietly
+fixing. A document that states an order twice will eventually state it two ways,
+and the half that gets read is whichever one the reader found first. The
+dependency block is the one that gets read.
 
 **Issues is new to this roadmap** and absorbs two tables the first draft had
 separately: `Defect` from Quality and `ModelIssue` from BIM (`data-model.md`

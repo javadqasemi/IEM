@@ -33,9 +33,17 @@ ship as **read-only slices**: the subset `docs/data-model.md` documents that a r
 requires, no more, each in the folder its own module will grow into.
 
 **Wave 2 is ordered by dependency, not by the roadmap table:**
-`Project → Tasks → Meetings → Documents → Drawings → SIA Phases → BIM`. The prose in
-`docs/roadmap.md` §Wave 2 that argues Meetings ahead of Tasks predates the reorder and is wrong;
-the code block above it is right.
+`Project → Tasks → Meetings → Drawings → Documents → SIA Phases → BIM`.
+
+Two corrections have been made to that line and both were the same failure — an order stated in
+more than one place drifts, and the copy a reader happens to meet first is the one that decides
+what gets built. The note that used to stand here said the roadmap's *prose* was wrong about
+Tasks and Meetings; that prose has since been corrected, so the note outlived the problem it
+described. **Drawings and Documents were swapped on 18 September 2026**, and there the prose and
+the numbered table had been right all along while the dependency block was wrong: a drawing does
+not hang off a document, it is the Arbeitsgegenstand with its own `ALPHA` revision scheme, and
+the archive is where things go once they have stopped moving. `docs/roadmap.md` §Wave 2 carries
+the full argument and the workflow chain it rests on.
 
 **The rule the firm set is that no second business module starts until Projects meets all ten rows
 of the gate in `docs/roadmap.md` → Wave 1.** It does. The next module derives from this shape
