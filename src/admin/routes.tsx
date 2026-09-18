@@ -2,6 +2,12 @@ import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { ApplicationsRoute } from "@/features/applications";
 import { ProjectsRoute } from "@/features/projects";
 import { TasksRoute } from "@/features/tasks";
+import {
+  DecisionDetailRoute,
+  DecisionsRoute,
+  MeetingDetailRoute,
+  MeetingsRoute,
+} from "@/features/meetings";
 import { match } from "@/core/router";
 
 /**
@@ -233,6 +239,68 @@ export const ROUTES: Route[] = [
     // hoist the screen into the entry chunk.
     component: TasksRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
     label: "Aufgaben",
+  },
+
+  /**
+   * Sitzungen, and it **does** have a detail route — the opposite of Aufgaben
+   * one entry above, decided on the same grounds and coming out the other way.
+   *
+   * A task is opened, ticked and closed, so a drawer keeps the board underneath.
+   * A protocol is read, quoted and sent to people who were not in the room:
+   * *"siehe Bausitzung 14, Punkt 3"* has to be a link somebody can paste into an
+   * e-mail, and a drawer has no URL to paste. The cost is the mirror image —
+   * opening two protocols means going back.
+   *
+   * Two patterns for the same reason `/projekte` has two: the tab is in the URL,
+   * so `/sitzungen/:id/protokoll` is where a reload returns to, and the
+   * three-segment form has to be read before the two.
+   */
+  {
+    pattern: "/sitzungen/:id/:tab",
+    permissions: ["meeting.read"],
+    component: MeetingDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    props: ({ id }) => ({ meetingId: id }),
+    label: "Sitzung",
+    parent: "/sitzungen",
+  },
+  {
+    pattern: "/sitzungen/:id",
+    permissions: ["meeting.read"],
+    component: MeetingDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    props: ({ id }) => ({ meetingId: id }),
+    label: "Sitzung",
+    parent: "/sitzungen",
+  },
+  {
+    pattern: "/sitzungen",
+    permissions: ["meeting.read"],
+    // From the feature's own `lazy()` boundary: the shell statically imports the
+    // same `index.ts` for the rail's pending-minutes badge.
+    component: MeetingsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "Sitzungen",
+  },
+
+  /**
+   * Entscheide — its own top-level destination, not a tab under Sitzungen.
+   *
+   * A decision outlives the meeting it was taken in, and some are taken in no
+   * meeting at all. Filing the register under Sitzungen would make the answer to
+   * *"was wurde auf diesem Projekt entschieden"* reachable only through the
+   * chronology it is independent of.
+   */
+  {
+    pattern: "/entscheide/:id",
+    permissions: ["decision.read"],
+    component: DecisionDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    props: ({ id }) => ({ decisionId: id }),
+    label: "Entscheid",
+    parent: "/entscheide",
+  },
+  {
+    pattern: "/entscheide",
+    permissions: ["decision.read"],
+    component: DecisionsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "Entscheide",
   },
 
   {

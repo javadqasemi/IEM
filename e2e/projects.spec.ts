@@ -58,13 +58,13 @@ const card = (page: Page, name: string) => page.getByRole("heading", { name, exa
  * A module's tab that does **not** exist yet. Every one must carry the
  * placeholder.
  *
- * `aufgaben` left this list in Wave 2 and moved to `EMBEDDED_BUILT` below — a
- * placeholder is removed by building the thing, and the test follows. The
- * distinction is not cosmetic: both kinds are `owned: false`, because a task is
- * not the project's data either way, and what separates them is only whether
- * the shell composed a screen in for the slug.
+ * `aufgaben` left this list in Wave 2 module 1 and `sitzungen` in module 2, both
+ * moving to `EMBEDDED_BUILT` below — a placeholder is removed by building the
+ * thing, and the test follows. The distinction is not cosmetic: both kinds are
+ * `owned: false`, because a task is not the project's data either way, and what
+ * separates them is only whether the shell composed a screen in for the slug.
  */
-const EMBEDDED_PLANNED = ["phasen", "sitzungen", "dokumente", "plaene", "bim", "finanzen"];
+const EMBEDDED_PLANNED = ["phasen", "dokumente", "plaene", "bim", "finanzen"];
 
 /**
  * The embedded tabs that are built, with what proves each one rendered.
@@ -76,7 +76,14 @@ const EMBEDDED_PLANNED = ["phasen", "sitzungen", "dokumente", "plaene", "bim", "
  * that composition is ever dropped the tab falls back to a placeholder rather
  * than breaking — which is exactly the silent regression this catches.
  */
-const EMBEDDED_BUILT = [{ slug: "aufgaben", column: "Offen" }];
+const EMBEDDED_BUILT = [
+  { slug: "aufgaben", column: "Offen" },
+  // "Entscheide" rather than "Sitzungen": the tab leads with the decision
+  // register, because a project's meetings are chronology and its decisions are
+  // the state. A heading named after the tab would pass even if the panels were
+  // swapped, which is the ordering this asserts.
+  { slug: "sitzungen", column: "Entscheide" },
+];
 
 /**
  * Opens the first project from the list, and returns its id.

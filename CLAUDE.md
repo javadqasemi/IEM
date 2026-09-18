@@ -26,8 +26,9 @@ what may go in them, and `src/architecture.test.ts` enforces the four that matte
 | `docs/roadmap.md` | Build order, complexity, dependencies, database and API impact, and the definition of done per module |
 
 As of 18 September 2026 the **fourteen Foundation stages are done**, so is
-**Wave 1 module 4 — Projects, the reference standard**, and so is the first module of Wave 2,
-**Aufgaben**. The four modules Projects needs as data (Customer, Building, Employee, Discipline)
+**Wave 1 module 4 — Projects, the reference standard**, and so are the first two modules of
+Wave 2, **Aufgaben** and **Sitzungen und Entscheide**. The four modules Projects needs as data
+(Customer, Building, Employee, Discipline)
 ship as **read-only slices**: the subset `docs/data-model.md` documents that a real project
 requires, no more, each in the folder its own module will grow into.
 
@@ -58,6 +59,7 @@ permissions and the tests, not a folder with the same names in it.
 | F13 | **Versionierung** — `EntityVersion`, the optimistic lock, and both revision schemes |
 | F14 | `core/metrics` — six operational figures per module, and a module that declares itself |
 | W2·1 | **Aufgaben** — four tables, ten events, a board, row-level *write* scope, and the first embedded project tab |
+| W2·2 | **Sitzungen und Entscheide** — six tables, twelve events, a protocol that closes on approval, and a decision register that outlives it |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -100,6 +102,16 @@ argued rather than inherited, and each is written up where it lives:
 | A job anyway — `tasks.flagOverdue` | Knowing a task is late needs no column; **telling somebody** is an event, and time is the trigger, so a clock has to raise it. Once per due date, guarded by `overdueNotifiedAt`, announced *before* it is marked |
 | Row-level **write** scope | `task.updateOwn` is the first of its kind. It cannot be a route decorator — `@RequirePermissions` is AND, and ownership depends on a row the guard has not read — so `requireWritable` is the single gate and the agreement test counts the `permissions.has` inside it |
 | A drawer, not a route | A task is opened, ticked and closed, often four in a row. The cost is stated rather than discovered: **a task has no shareable URL** |
+
+**What Meetings changed about the pattern, and the first row is Aufgaben's decided the other
+way.** Four more arguments, each written up where it lives:
+
+| | |
+| --- | --- |
+| A route, not a drawer | The opposite of the row above, on the same grounds. A protocol is read, quoted and sent to people who were not in the room — *"siehe Bausitzung 14, Punkt 3"* has to be a link somebody can paste into an e-mail, and a drawer has no URL to paste. The cost is the mirror image: opening two protocols means going back |
+| An approved protocol is closed | `refuseProtocolEdit` consults no permission, which is the point: it is not about authority. A protocol that can still be edited after approval is a document whose contents *at the time of approval* are unknowable, which is precisely the property a dispute needs it to have. The way to change one is to approve an **amendment** at the next meeting, and the screen says so rather than only refusing |
+| `AUFGEHOBEN` is not a settable status | It is reachable only through `supersede`, which always attaches the replacement in one transaction — so a reversal can never read as withdrawn with nothing to point at. `refuseDecisionStatus` refuses it as a direct transition and says what to do instead. The arrow points **from the new decision to the old one**, which is the one call in the module where the wrong direction still typechecks, because both arguments are ids |
+| Two resources, one feature | `/meetings` and `/decisions` are one module and share one cache prefix. A decision is created from a protocol line and a line shows its decision's status, so a write to either changes what the other renders — two prefixes would make every mutation guess which to invalidate, and the guess would be wrong exactly when a decision was superseded from a meeting screen |
 
 ## Commands
 
@@ -173,6 +185,15 @@ Three things about the Playwright suite that cost time to learn:
   `storageState` trick is worse here: replaying one refresh cookie into fresh
   contexts looks exactly like token theft to `AuthService`, which revokes every
   session in response.
+- **The budget is sign-ins, not requests, and it is spent per *width*.** A spec
+  that calls `apiAs()` in a `beforeAll` costs one `/auth/login` per project, so
+  running it at three widths costs three. Adding one such spec was enough to
+  starve the tablet project's own sign-in, and the failure surfaced two screens
+  away: the first tests of `projects.spec.ts` reported *"Hauptnavigation not
+  found"* over a screenshot of the **login page**. That reads as a broken shell.
+  `RUN_ONCE` in `playwright.config.ts` is the list of suites the narrower
+  projects skip — `API_ONLY` plus anything that authenticates in a fixture — and
+  the repair is always to run the suite once, never to raise the limit.
 - **`channel: "chromium"`, not the headless shell.** The shell omits composited
   regions from `fullPage` screenshots at small viewports — an image renders
   correctly and photographs as a blank rectangle.
@@ -192,8 +213,12 @@ saying none existed. Three things about them are deliberate:
   reformat would silently strip the sentinel.
 - **Lint is narrow on purpose.** ~28'000 lines were written without one, so it enforces the rules
   that catch bugs and leaves style to Prettier. The React Compiler rules
-  (`set-state-in-effect`, `refs`, `use-memo`) fire 21 times on patterns this codebase chose and
-  commented, so they are warnings: a countable backlog, not a wall. 0 errors is the bar.
+  (`set-state-in-effect`, `refs`, `use-memo`) fire on patterns this codebase chose and commented,
+  so they are warnings: a countable backlog, not a wall. **0 errors is the bar**, and that is the
+  number to watch — as of Wave 2 module 2 the warnings stand at 35 (28 compiler, 8
+  `exhaustive-deps`), up from the 21 this note recorded when it was written, because the count
+  grows with the dashboard rather than with any decision. Treat a rise in *errors* as a
+  regression and a rise in warnings as arithmetic.
 - **Tests exist where a bug already got through**, not for coverage. `settings.dto.test.ts` runs the
   real `ValidationPipe` with the real options because the bug it guards was a missing decorator
   being silently stripped — asserting the decorator is present would not have caught it.
@@ -717,6 +742,31 @@ Opened by Wave 2 module 1, and each is a deliberate stop rather than an oversigh
 - **Eleven feature folders report no metrics.** `WITHOUT_METRICS` in
   `server/src/architecture.test.ts`, one line each with what it is waiting for, and the list may
   only shrink.
+
+Opened by Wave 2 module 2, and each is a deliberate stop rather than an oversight:
+
+- **Nothing is actually sent.** `POST /meetings/:id/minutes/sent` stamps `minutesSentAt` and
+  raises `MinutesSent`; the e-mail needs the Documents module and a PDF renderer, both later in
+  the wave. The fact it records — which protocols have gone out — is useful on its own, which is
+  why it ships rather than waiting, and the confirm dialog says plainly that the send itself still
+  runs through somebody's own mailbox. **It is once only**: the route refuses a second send, so
+  the button is gated on `minutesSentAt` as well as on the status. A button that could only ever
+  produce that 400 reads as an offer.
+- **`Attachment` is not built.** It was in the firm's entity list, and it is the one entity from
+  that list deliberately not here: file storage, versions and preview are Wave 2 module 3, and a
+  meeting-only uploader would be a second answer to a question Documents is about to answer
+  properly. `MeetingItem` carries no file column, so nothing has to be migrated away later.
+- **`Minutes` is not a table.** Also from the firm's list, and folded rather than dropped: the
+  minutes *are* the meeting's `MeetingItem` rows plus `minutesSentAt` plus the `MeetingApproval`.
+  A separate record would be a second place the protocol lives, and the first one to go stale.
+- **The agenda cannot be reordered.** There is no `PUT /meetings/:id/agenda/order` — items take
+  the order they were added in. `PUT /meetings/:id/items/order` exists for the protocol lines and
+  renumbers their keys, but **no screen calls it yet**: reordering a line changes what `14.3`
+  refers to, and a drag that silently renumbers citations wants an interaction designed for it
+  rather than one inherited from the task board.
+- **Editing a protocol line is not versioned.** `EntityVersion` covers the meeting record and the
+  decision, not the lines. A protocol's integrity is defended by closing it on approval instead,
+  which is the stronger guarantee and the one the firm actually relies on.
 
 `README.md` → *Known limitations* carries the product-level list (no MFA flow, local-disk media,
 placeholder legal pages, `CodeGate` is a display barrier and not security).

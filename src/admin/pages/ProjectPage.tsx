@@ -1,5 +1,6 @@
 import { ProjectDetailRoute } from "@/features/projects";
 import { ProjectTasksTab } from "@/features/tasks";
+import { ProjectMeetingsTab } from "@/features/meetings";
 
 /**
  * The project view, with the other modules' tabs composed into it.
@@ -18,11 +19,14 @@ import { ProjectTasksTab } from "@/features/tasks";
  *
  * **This map is the roadmap, in code.** Each of the eight embedded tabs gets a
  * line here as its module is built; until then the slug is absent and
- * `ProjectDetail` renders `ModulePlaceholder`. Adding Sitzungen is one import
- * and one line — and nothing in `features/projects` changes at all.
+ * `ProjectDetail` renders `ModulePlaceholder`. Adding Sitzungen was one import
+ * and one line, exactly as the note here predicted — and nothing in
+ * `features/projects` changed at all, which is the claim this arrangement was
+ * making and had not yet been asked to keep.
  */
 const EMBEDDED = {
   aufgaben: ProjectTasksTab,
+  sitzungen: ProjectMeetingsTab,
 };
 
 export function ProjectPage({ projectId }: { projectId: string }) {

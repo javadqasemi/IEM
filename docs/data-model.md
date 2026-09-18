@@ -583,12 +583,30 @@ milestone raises `MilestoneReached`, and Finance may create an invoice draft.
 
 ### 3.11 Meeting, Decision
 
+**Built — Wave 2, module 2.** Four differences between this section and what
+shipped, each decided during the build and recorded here rather than quietly
+left to diverge:
+
+| This section says | What shipped | Why |
+| --- | --- | --- |
+| `minutesDocumentId?` | `minutesSentAt DateTime?` | The document needs the Documents module. What a person needs on a Friday is *which protocols have gone out*, and a timestamp answers that on its own. It is stamped by `POST /meetings/:id/minutes/sent` and typed nowhere — a date somebody can edit is a date that gets set to make a queue look empty. The route refuses a second send |
+| `MeetingAttendee.contactId` | `externalName` / `externalOrg` | There is no `Contact` entity yet (§3.4 is unbuilt). The Bauherrschaft and the architect are not users of this system and largely never will be, so an attendee is either an `employeeId` or a typed name and firm. `name` and `organisation` are computed by the server so a protocol prints one way whichever kind it is |
+| — | `Meeting.version`, `Decision.version` | Both are under `EntityVersion` with the optimistic lock (F13). **The protocol lines are not** — their integrity is defended by closing the protocol on approval instead, which is the stronger guarantee and the one the firm relies on |
+| — | `Decision.status` reaches `AUFGEHOBEN` only via `supersede` | See the `#### Decision` note below. It is refused as a direct transition, so a reversal always has a successor attached |
+
 `title` `type` (`KICKOFF` `BAUSITZUNG` `ABNAHME` `INTERN` `KUNDE`) `startsAt`
 `endsAt` `location` `status` (`PLANNED` `HELD` `CANCELLED`) `projectId?`
-`organiserId` `minutesDocumentId?`
+`organiserId` `seriesNumber?` `minutesSentAt?` `version`
 
-**MeetingAttendee** — `meetingId`, exactly one of `employeeId` / `contactId`,
-`required Boolean`, `invitedAt`, `attended Boolean?`, `apologised Boolean`.
+**MeetingAttendee** — `meetingId`, exactly one of `employeeId` / `externalName`,
+`externalOrg?`, `required Boolean`, `invitedAt`, `attended Boolean?`,
+`apologised Boolean`.
+
+`attended` is **nullable on purpose and it is the field most likely to be
+"simplified"**: `null` is "not recorded", `false` is "invited and absent", and a
+protocol that printed the first as the second would make a claim nobody checked.
+`PLANNED → HELD` is refused while *nobody's* presence is recorded, because who
+was in the room is not reconstructable afterwards.
 **MeetingAgendaItem** — `meetingId` `order` `title` `presenterId?`
 `durationMinutes?` `note`. Set before the meeting; the protocol is written
 against it.
@@ -622,29 +640,46 @@ line inside a protocol row cannot be cited, linked to, filtered or reversed.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `number` | String | `E-4723-017`, unique per project |
-| `title`, `rationale` | String | *what* was decided and *why* — both required |
+| `number` | String | `E-2026-017` — **per project and per year**, never reused |
+| `title`, `rationale` | String | *what* was decided and *why* — both required, and `rationale` has a minimum length |
 | `projectId` | → Project | a decision is always about a project |
-| `meetingId`, `meetingItemId` | → | where it was taken, when it was taken in one |
+| `meetingId?` | → Meeting | where it was taken. Null is ordinary: a decision on site has no meeting |
 | `decidedAt` | DateTime | may predate the minutes; a decision on site is still a decision |
-| `decidedById` | → Employee | |
-| `customerContactId?` | → Contact | when the Bauherrschaft decided it |
+| `decidedById?` | → Employee | |
+| `decidedByExternal?` | String | when the Bauherrschaft or the architect decided it — they decide the expensive questions and are not in `Employee` |
 | `type` | enum | `TECHNISCH` `KOMMERZIELL` `TERMIN` `GESTALTUNG` `ORGANISATORISCH` |
-| `disciplineId?`, `buildingSystemId?` | → | what it is about |
+| `disciplineId?` | → Discipline | what it is about |
 | `status` | enum | `OFFEN` `ENTSCHIEDEN` `UMGESETZT` `AUFGEHOBEN` |
-| `impact` | enum? | `KOSTEN` `TERMIN` `QUALITAET` `KEINE` — and `costImpact`, `scheduleImpactDays` when known |
-| `supersedesId` | → Decision? | the one it reverses or replaces |
-| `documentId?` | → Document | the signed sheet, where there is one |
+| `impact` | enum | `KOSTEN` `TERMIN` `QUALITAET` `KEINE` — with `costImpact Decimal?` and `scheduleImpactDays Int?`, refused when the impact is `KEINE` |
+| `supersedesId?` | → Decision | the one it reverses or replaces |
+| `version` | Int | under `EntityVersion`, with the optimistic lock |
+
+Two fields from the draft did not ship: `meetingItemId` — the arrow runs the
+other way, `MeetingItem.decisionId`, so one decision can be cited by lines in
+several meetings — and `customerContactId`, which waits on `Contact` (§3.4) and
+is `decidedByExternal` until then. `buildingSystemId` and `documentId` wait on
+their own modules.
 
 **Lifecycle** — `OFFEN` is a decision that has been *asked for* and not yet
 taken, which is a state a Bausitzung produces constantly and which nothing in
-the first draft could represent. `AUFGEHOBEN` requires a `supersedesId` on the
-decision that replaces it: a reversal names its successor or it is not a
-reversal.
-**Validation** — `rationale` is required, on the same principle as
-`DrawingRevision.changeNote` and `RoomLoad.method`: the record exists to answer
-*why*, and a decision without a reason is the row nobody can act on two years
-later. `supersedesId` must not cycle and must stay inside the project.
+the first draft could represent.
+
+**`AUFGEHOBEN` is not a status anybody can set**, and this is the rule the whole
+entity turns on. It is refused as a direct transition and is reachable only
+through `POST /decisions/:id/supersedes`, which is called on the **replacing**
+decision and names the one it reverses. Both writes happen in one transaction —
+a reversal that set `supersedesId` and failed before `AUFGEHOBEN` would leave two
+decisions both reading as current, which is the one state this mechanism exists
+to prevent. The consequence worth stating: a decision can never read as withdrawn
+with nothing to point at, so "aufgehoben — wodurch?" is always answerable.
+
+**Validation** — `rationale` is required and must be substantial, on the same
+principle as `DrawingRevision.changeNote` and `RoomLoad.method`: the record
+exists to answer *why*, and a decision without a reason is the row nobody can act
+on two years later. `supersedesId` must not cycle and must stay inside the
+project — the number encodes the project, so a decision on one site cannot
+overrule one on another. A decision that itself reverses another cannot be
+deleted: that would leave the reversed one without a successor.
 
 Decisions and `Task`s are different things and both are produced by a meeting: a
 decision is a *fact about what was agreed*, a task is *work someone owes*. A

@@ -4,6 +4,7 @@ import { ErrorBoundary } from "@/shared/ui/feedback";
 import { useNewApplicationCount } from "@/features/applications";
 import { useActiveProjectCount } from "@/features/projects";
 import { useOverdueTaskCount } from "@/features/tasks";
+import { usePendingMinutesCount } from "@/features/meetings";
 import { api } from "./lib/api";
 import { useAuth } from "@/core/auth";
 import { RouteMetaProvider, buildTrail, useRoute, useScrollReset, type Crumb } from "@/core/router";
@@ -45,6 +46,11 @@ export function App() {
   // tens and is a number nobody acts on. It shares a cache entry with the task
   // list's KPI tiles, so opening that page costs no extra request.
   const overdueTasks = useOverdueTaskCount(can("task.read"));
+  // Protocols that have not gone out, not meetings. Same argument as the line
+  // above, and the same arrangement: gated on the permission rather than on
+  // being signed in, so a badge nobody can see costs no request — that is the
+  // other half of the fix for the retry loop in `core/api/query.ts`.
+  const pendingMinutes = usePendingMinutesCount(can("meeting.read"));
 
   /**
    * The content types the menu's Website groups are made of.
@@ -71,9 +77,18 @@ export function App() {
           applications: newApplications,
           projects: liveProjects,
           tasks: overdueTasks,
+          meetings: pendingMinutes,
         },
       }),
-    [types.data, reviews.data, newApplications, liveProjects, overdueTasks, canAny],
+    [
+      types.data,
+      reviews.data,
+      newApplications,
+      liveProjects,
+      overdueTasks,
+      pendingMinutes,
+      canAny,
+    ],
   );
 
   /**

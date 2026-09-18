@@ -88,13 +88,20 @@ export const EMBEDDED_TABS: ProjectTab[] = [
     owned: false,
   },
   {
+    /**
+     * **Built** — Wave 2, module 2. Same arrangement as Aufgaben above, and the
+     * `description`, `status` and `wave` are gone for the same reason: they only
+     * ever fed `ModulePlaceholder`.
+     *
+     * The tab shows **decisions above meetings**, which is not what the removed
+     * description implied. "Protokolle mit Traktanden und Entscheiden" describes
+     * the chronology; what somebody opens this tab to ask is *"was wurde auf
+     * diesem Projekt entschieden"*, and a list of meeting dates answers that
+     * only after four protocols have been opened.
+     */
     slug: "sitzungen",
     label: "Sitzungen",
     owned: false,
-    description:
-      "Protokolle mit Traktanden, Teilnehmenden und Entscheiden. Entscheide sind eigene Objekte, damit später beantwortbar ist, wann etwas beschlossen wurde.",
-    status: "planned",
-    wave: "Wave 2",
   },
   {
     slug: "dokumente",

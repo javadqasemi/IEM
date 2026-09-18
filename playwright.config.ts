@@ -48,6 +48,32 @@ const API_ONLY = [
   /meetings\.spec\.ts/,
 ];
 
+/**
+ * Browser suites that still run **once**, for the second of those two reasons.
+ *
+ * `meetings-ui.spec.ts` drives real pages, so it does not belong in `API_ONLY` —
+ * but it signs an API context in at `beforeAll` to build its fixtures, and that
+ * is one `/auth/login` per project. Running it at three widths spent three of
+ * the ten attempts a minute, and the suite's own per-worker sign-in then failed
+ * on the tablet project: the first tests of `projects.spec.ts` reported
+ * "Hauptnavigation not found" against a screenshot of the **login page**.
+ *
+ * That reads as a broken shell and is a rate limit — exactly the misdiagnosis
+ * the note above describes, arriving by a slightly different route. Worth
+ * recording, because the lesson is narrower than "API suites run once": **it is
+ * the sign-ins that are budgeted, not the requests**, so any spec that
+ * authenticates in a fixture costs a width.
+ *
+ * Nothing is lost by running it once. Every assertion in it is about a URL, a
+ * grouping, a read-only state or the presence of a control — none is
+ * width-dependent, and `screens.spec.ts` already photographs `/sitzungen` and
+ * `/entscheide` at all three widths in both themes and runs axe over them.
+ */
+const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/];
+
+/** What the two narrower projects skip. */
+const RUN_ONCE = [...API_ONLY, ...SIGNS_IN_TWICE];
+
 export default defineConfig({
   testDir: "./e2e",
   /**
@@ -122,12 +148,12 @@ export default defineConfig({
     {
       name: "tablet",
       use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } },
-      testIgnore: API_ONLY,
+      testIgnore: RUN_ONCE,
     },
     {
       name: "mobile",
       use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 }, isMobile: false },
-      testIgnore: API_ONLY,
+      testIgnore: RUN_ONCE,
     },
   ],
 });

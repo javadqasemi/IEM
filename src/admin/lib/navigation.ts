@@ -78,6 +78,26 @@ export const ICONS = {
    * as the rest.
    */
   tasks: "M3.5 5.2l1.4 1.4 2.4-2.6M3.5 9.5l1.4 1.4M3.5 13.8l1.4 1.4M9.5 5h5M9.5 9.8h5M9.5 14.6h5",
+  /**
+   * Sitzungen: a table seen from above, with people round it.
+   *
+   * Deliberately **not** a speech bubble and not a calendar. A bubble reads as
+   * messaging — this dashboard will have notifications, and two chat-shaped
+   * icons in one rail is the mismatch nobody can unsee. A calendar reads as
+   * scheduling, which is the one thing this module does not do: a meeting here
+   * is a protocol, and the date is metadata on it.
+   *
+   * Same 18×18 grid and 1.4 stroke as the rest.
+   */
+  meetings: "M5.4 7.2h7.2v3.6H5.4zM7.2 4.8v1.6M10.8 4.8v1.6M7.2 11.6v1.6M10.8 11.6v1.6M3 8.4h1.6M13.4 8.4h1.6",
+  /**
+   * Entscheide: a fork with a tick on the branch that was taken.
+   *
+   * A gavel would be wrong — this firm is not a court, and the decisions are
+   * engineering ones. A fork says the thing a decision record is *for*: there
+   * was more than one way, and this is the one that was chosen and why.
+   */
+  decisions: "M9 15.4V9M9 9 5 5M9 9l3.4-3.4M11.2 6.6l1.3 1.3 2.5-2.7",
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -255,6 +275,7 @@ function operationalSections(badges: {
   applications?: number;
   projects?: number;
   tasks?: number;
+  meetings?: number;
 }): NavSection[] {
   return [
     {
@@ -313,6 +334,47 @@ function operationalSections(badges: {
       to: "/aufgaben",
       permissions: ["task.read"],
       badge: badges.tasks,
+      items: [],
+    },
+    {
+      /**
+       * Sitzungen, under Aufgaben.
+       *
+       * The badge counts **protocols that have not gone out** — held meetings
+       * with no `minutesSentAt` — and not meetings, not upcoming ones. "Wie
+       * viele Sitzungen gibt es" is a number nobody acts on; "welches Protokoll
+       * muss ich noch versenden" is the one thing this module asks of a person,
+       * and it is answerable on a Friday afternoon. Same argument as the overdue
+       * count above, and it shares a cache entry with the list's KPI tiles.
+       */
+      id: "meetings",
+      label: "Sitzungen",
+      icon: "meetings",
+      zone: "work",
+      to: "/sitzungen",
+      permissions: ["meeting.read"],
+      badge: badges.meetings,
+      items: [],
+    },
+    {
+      /**
+       * Entscheide, a rail row of its own rather than a tab under Sitzungen.
+       *
+       * A decision outlives the meeting it was taken in, and some are taken in
+       * no meeting at all — on the Bauplatz, on the phone. Filing the register
+       * under Sitzungen would make "was wurde hier entschieden" reachable only
+       * through the chronology it is independent of.
+       *
+       * **No badge.** There is no number here anybody acts on: open decisions
+       * are somebody's to carry, not something this rail can chase, and a count
+       * of everything the firm has ever decided is a figure that only grows.
+       */
+      id: "decisions",
+      label: "Entscheide",
+      icon: "decisions",
+      zone: "work",
+      to: "/entscheide",
+      permissions: ["decision.read"],
       items: [],
     },
     {
@@ -438,7 +500,13 @@ export function buildNavigation({
   /** From `api.contentTypes()`. Pass an empty array before it resolves. */
   types: ContentTypeRow[];
   canAny: (permissions: string[]) => boolean;
-  badges?: { reviews?: number; applications?: number; projects?: number; tasks?: number };
+  badges?: {
+    reviews?: number;
+    applications?: number;
+    projects?: number;
+    tasks?: number;
+    meetings?: number;
+  };
 }): NavSection[] {
   // Sorted into rail order here rather than in the rail, so that everything
   // reading this list agrees: `flattenNavigation` feeds search in the same

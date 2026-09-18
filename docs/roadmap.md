@@ -349,6 +349,43 @@ recording rather than quietly correcting:
   said `widgets/`; the architecture test forbids it, because `widgets` may not
   import a feature. The shell is the only layer above both.
 
+**Meetings is done** — Wave 2, module 2, and the second of the eight embedded
+tabs to stop being a placeholder. The same ten rows:
+
+| | Met by |
+| --- | --- |
+| Entities, migration, seed | `Meeting`, `MeetingAgendaItem`, `MeetingAttendee`, `MeetingItem`, `MeetingApproval`, `Decision` — six tables, and `Decision` is the one that outlives the rest |
+| Permissions | `meeting.*` with `readAll`, `hold`, `approve` and `sendMinutes` as separate keys; `decision.*` with `supersede` separate from `update`. No `decision.readAll` — `project.readAll` already answers that question |
+| Audit | derived from events. The module calls `AuditService` nowhere |
+| Events | twelve in the catalogue, taking it to 67 |
+| API | the full list contract on both resources, two CSV exports, plus the acts: `/status`, `/attendance`, `/approval`, `/minutes/sent`, `/items/order`, `/supersedes` |
+| Repository / mapper / service | all five layers on both sides; `meetings.rules.ts` is pure and therefore exhaustively tested |
+| UI | a list with the Friday queue as a chip, a detail **route** with five tabs, the protocol editor, the decision register, four dialogs, and the project's Sitzungen tab |
+| Tests | 174 on the server, 81 on the client |
+| E2E | `meetings.spec.ts` against the API and `meetings-ui.spec.ts` in the browser, plus `/sitzungen` and `/entscheide` in `SCREENS`; both themes, three widths, axe clean |
+| Metrics | `meetings.metrics.ts`, declaring both resources |
+
+Four things this module decided that Tasks did not, each argued rather than
+inherited:
+
+- **A meeting has a detail route; a task has a drawer.** The opposite choice, on
+  the same grounds. A protocol is read, quoted and sent to people who were not in
+  the room — *"siehe Bausitzung 14, Punkt 3"* has to be a link somebody can paste
+  into an e-mail. The cost is the mirror image: opening two protocols means going
+  back.
+- **An approved protocol is closed to editing**, and the way to change one is to
+  approve an amendment at the next meeting. This is the rule that makes minutes
+  worth keeping: a protocol that can still be edited afterwards is a document
+  whose contents at the time of approval are unknowable, which is precisely the
+  property a dispute needs it to have.
+- **`AUFGEHOBEN` is not a status anybody can set.** It is reachable only through
+  `supersede`, which always attaches the replacement — so a reversal can never
+  read as withdrawn with nothing to point at. It cost a rule, a cycle check and a
+  transaction, and it is what makes the register citable.
+- **Decisions sit above meetings on the project tab**, and have their own rail
+  row. A project's meetings are chronology; its decisions are the state, and the
+  question the tab gets opened for is the second one.
+
 **Deviation 2 — Notifications is inserted at 9**, which the review places last
 under Automation. The bell is what makes Tasks, Meetings and Issues visible to
 the people who are not looking at them; shipping three modules that silently

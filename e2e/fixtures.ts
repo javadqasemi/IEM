@@ -482,6 +482,18 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
    * has no URL. See the note on `TaskDrawer`.
    */
   { path: "/aufgaben", name: "tasks", heading: /Der Status wird verschoben, nicht erfasst/i },
+  /**
+   * The description again, and for the third time for the same reason:
+   * "Sitzungen" and "Entscheide" are both rail rows on every screen.
+   *
+   * Two entries rather than one, because they are two destinations — a decision
+   * outlives the meeting it was taken in, and the register is reached without
+   * going through the chronology. There is **no** `/sitzungen/:id` entry here:
+   * the detail path needs a seeded meeting, so `meetings.spec.ts` creates one
+   * and walks its five tabs rather than this sweep guessing an id.
+   */
+  { path: "/sitzungen", name: "meetings", heading: /Ein genehmigtes Protokoll ist der Stand/i },
+  { path: "/entscheide", name: "decisions", heading: /er gilt nur nicht mehr/i },
   { path: "/inhalte", name: "content-index", heading: /Website|Inhalte/i },
   { path: "/inhalte/projects", name: "content-list-projects", heading: /Referenz/i },
   { path: "/inhalte/team", name: "content-list-team", heading: /Team/i },
