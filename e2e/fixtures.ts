@@ -45,6 +45,54 @@ export const ADMIN_EMAIL =
 export const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || fromServerEnv("SEED_ADMIN_PASSWORD");
 
 /**
+ * The shared password of the seeded role accounts, or `""`.
+ *
+ * `""` means `SEED_TEST_USERS` was never set, so the accounts do not exist —
+ * `security.spec.ts` then **skips with a message** rather than failing. A
+ * suite that goes red on a machine that has not opted into six test accounts
+ * is a suite people learn to ignore; one that says why it skipped is a
+ * prompt.
+ */
+export const TEST_PASSWORD =
+  process.env.SEED_TEST_PASSWORD || fromServerEnv("SEED_TEST_PASSWORD");
+
+/**
+ * The API's own origin, which is **not** the dashboard's.
+ *
+ * `vite.config.ts` proxies `/media` and nothing else; the dashboard reaches the
+ * API through `VITE_CMS_API`, an absolute URL, because in development the two
+ * are separate origins. A request fixture pointed at `baseURL` would therefore
+ * ask the *dev server* for `/api/v1/projects` and get Vite's SPA fallback —
+ * `index.html`, status **200**, `text/html`. Every assertion expecting a 403
+ * would fail as a 200, which reads as a missing guard rather than as a wrong
+ * host. That is the same trap the media proxy note in `vite.config.ts`
+ * describes, from the other side.
+ */
+function fromAnyEnvFile(key: string, files: string[]): string {
+  for (const name of files) {
+    try {
+      const file = readFileSync(resolve(process.cwd(), name), "utf8");
+      const found = new RegExp(`^${key}\\s*=\\s*"?([^"\\r\\n]*)"?`, "m").exec(file)?.[1];
+      if (found) return found;
+    } catch {
+      // A missing file is the normal case: Vite reads `.env`, `.env.local` and
+      // `.env.<mode>` in a fixed order and a repository has whichever of them
+      // its developers chose. Throwing on the first absent one — which is what
+      // the first version did — takes the whole suite down at collection time
+      // with an `ENOENT` that says nothing about the tests.
+    }
+  }
+  return "";
+}
+
+export const API_ORIGIN =
+  process.env.E2E_API_ORIGIN ||
+  fromAnyEnvFile("VITE_CMS_API", [".env.local", ".env", ".env.development"]) ||
+  "http://localhost:3100";
+
+export const API = `${API_ORIGIN}/api/v1`;
+
+/**
  * Fails here rather than at the sign-in.
  *
  * Without it a missing credential surfaces as "the navigation never appeared"

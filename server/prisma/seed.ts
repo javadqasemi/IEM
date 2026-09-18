@@ -661,6 +661,138 @@ async function seedDomain() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Test accounts — opt-in, and never on by default                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One account per operational role, for the security matrix.
+ *
+ * **Gated on `SEED_TEST_USERS=true` and a password in `SEED_TEST_PASSWORD`,
+ * and it will not run without both.** Seeding six known accounts with a shared
+ * password is exactly how an installation ends up reachable months later with
+ * a credential somebody found in a repository — so the default is off, the
+ * password is never defaulted, and the function says so out loud when it
+ * declines.
+ *
+ * They are not decoration. `e2e/security.spec.ts` asserts a full
+ * role × verb × resource matrix against the live API, and a matrix that can
+ * only test Super Admin proves the one thing nobody doubts. The row-level rules
+ * in particular — "a Projektleiter sees the projects they manage" — cannot be
+ * observed at all without an account that is a Projektleiter.
+ *
+ * Each is linked to a **real `Employee`**, because `projects.scope.ts` resolves
+ * a caller's visibility through `Employee.userId`. A test user without that
+ * link would see nothing and the test would pass for the wrong reason.
+ */
+const TEST_USERS = [
+  {
+    email: "pl@iem.test",
+    name: "Petra Leiter (Test)",
+    role: "project_manager",
+    /**
+     * Anna Meier manages P-2026-001 and is on no other project.
+     *
+     * The narrowest useful case: her scope resolves to exactly one of the two
+     * seeded projects, so a test can assert both what she sees *and* what she
+     * does not — which is the half that catches a scope that silently returns
+     * everything.
+     */
+    personnelNumber: "MA-001",
+  },
+  {
+    email: "ing@iem.test",
+    name: "Chiara Ingenieur (Test)",
+    role: "engineer",
+    // A member of P-2026-001 and manager of nothing: the `members.some` branch
+    // of the scope, which the manager case never exercises.
+    personnelNumber: "MA-003",
+  },
+  {
+    email: "gl@iem.test",
+    name: "Gabriela Leitung (Test)",
+    role: "management",
+    personnelNumber: "MA-002",
+  },
+  {
+    email: "fin@iem.test",
+    name: "Fabio Finanzen (Test)",
+    role: "finance",
+    /**
+     * Deliberately **no** employee record.
+     *
+     * Finance holds `project.readAll`, so the scope is empty for them and the
+     * missing link must not matter. It is the one combination that proves the
+     * widening grant is what is doing the work, rather than an accident of the
+     * lookup.
+     */
+    personnelNumber: null,
+  },
+  {
+    email: "hr@iem.test",
+    name: "Heidi Personal (Test)",
+    role: "hr",
+    personnelNumber: "MA-004",
+  },
+  {
+    email: "gast@iem.test",
+    name: "Gast (Test)",
+    role: "guest",
+    // No employee, no project permission at all. The floor of the matrix.
+    personnelNumber: null,
+  },
+] as const;
+
+async function seedTestUsers() {
+  if (process.env.SEED_TEST_USERS !== "true") {
+    console.log("  → Testkonten übersprungen (SEED_TEST_USERS ist nicht 'true')");
+    return;
+  }
+
+  const password = process.env.SEED_TEST_PASSWORD;
+  if (!password) {
+    // Refused rather than defaulted. A fallback password here would be in
+    // every install that ever set the flag once.
+    console.log("  ! SEED_TEST_USERS=true, aber SEED_TEST_PASSWORD fehlt — keine Konten angelegt");
+    return;
+  }
+
+  const hash = await argon2.hash(password, { type: argon2.argon2id });
+  let created = 0;
+
+  for (const spec of TEST_USERS) {
+    const role = await prisma.role.findUnique({ where: { key: spec.role } });
+    if (!role) {
+      console.log(`  ! Rolle ${spec.role} fehlt — ${spec.email} übersprungen`);
+      continue;
+    }
+
+    const user = await prisma.user.upsert({
+      where: { email: spec.email },
+      create: { email: spec.email, name: spec.name, passwordHash: hash, status: "ACTIVE" },
+      // The hash is rewritten on every run: the point of these accounts is that
+      // the suite can sign in, and a stale password from an earlier value of
+      // the variable would fail six tests with an authentication error that
+      // looks like a permissions bug.
+      update: { name: spec.name, passwordHash: hash, status: "ACTIVE", deletedAt: null },
+    });
+
+    await prisma.userRole.deleteMany({ where: { userId: user.id } });
+    await prisma.userRole.create({ data: { userId: user.id, roleId: role.id } });
+
+    if (spec.personnelNumber) {
+      await prisma.employee.update({
+        where: { personnelNumber: spec.personnelNumber },
+        data: { userId: user.id },
+      });
+    }
+
+    created += 1;
+  }
+
+  console.log(`  ✓ ${created} Testkonten (${TEST_USERS.map((u) => u.role).join(", ")})`);
+}
+
+/* ------------------------------------------------------------------ */
 
 async function main() {
   console.log("IEM CMS — Seed\n");
@@ -672,6 +804,7 @@ async function main() {
   await seedContent(adminId);
   await seedFirstSnapshot(adminId);
   await seedDomain();
+  await seedTestUsers();
   console.log("\nFertig.");
 }
 
