@@ -383,6 +383,19 @@ sends `application/octet-stream` + `nosniff` + `Content-Length` and **no** `Cont
 makes the mapper a seam rather than a decoration, and `src/architecture.test.ts` enforces it along
 with feature isolation, the `index.ts` boundary and the direction of every layer arrow.
 
+**`Field` clones its child to wire `aria-describedby`, and that was a claim before it was a
+behaviour.** The component's own comment said it owned the label/hint/error relationship;
+`FieldRenderer` wired the attribute itself, so every *content* form was correct, while every
+hand-written `<Field><Input/></Field>` — the project dialogs and every module that copies them —
+rendered an error with an `id` nothing referenced. The message was announced (`role="alert"`) and a
+reader who tabbed back to the field heard nothing about why it was invalid. Found by writing a test
+that tried to assert it. A call site that sets `aria-describedby` or `aria-invalid` itself still
+wins, and a child that is not a single element is rendered untouched.
+
+**`useId` contains colons, so `#id` is not a selector.** React produces `:r1:`, a colon is a
+pseudo-class, and `#:r1:-error` matches nothing — Playwright reports it as an element that is not
+visible, which reads as a missing error message. Use `[id="…"]`.
+
 **A failed query used to retry itself forever.** `load` settles → `notify` → every subscriber's
 `sync` → `load` again, and a failed entry was never *fresh*. One rail badge that answered 403 made
 **a thousand requests** and exhausted the rate limit for everything else on the page — including the

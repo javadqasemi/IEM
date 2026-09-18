@@ -261,6 +261,31 @@ because each was a real finding rather than a confirmation:
 
 ### Wave 2 — the building, and the working day
 
+**Reordered by dependency at review**, and the new order is what gets built:
+
+```
+Project → Tasks → Meetings → Documents → Drawings → SIA Phases → BIM
+```
+
+The argument is that the *fachlich* connection tightens with each step rather
+than the modules merely accumulating: Tasks need only a project; Meetings
+reference tasks and projects; Documents hang off meetings and projects;
+Drawings hang off documents and Gewerke; SIA Phases reference project progress;
+BIM references drawings, rooms and systems.
+
+Two consequences worth stating, because they contradict the table below:
+
+- **Tasks moves ahead of Meetings.** The table had Meetings at 7 and Tasks at 8,
+  which is backwards: a meeting's Pendenz *becomes* a task, so building meetings
+  first means building the seam twice.
+- **Buildings (full) is no longer the entry point.** It is a large module that
+  nothing else in this wave blocks on — Drawings need Gewerke and a building
+  *reference*, both of which the Wave 1 slice already provides. It keeps its
+  place in the table and loses its place in the order.
+
+Notifications, Issues, Time Tracking and Calendar keep their dependencies and
+follow; they are not on the critical path the review drew.
+
 | # | Module | Size | Depends on | Reuses | DB impact | API impact |
 | --- | --- | :-: | --- | --- | --- | --- |
 | 6 | **Buildings (full): floors, systems, rooms, loads** | L | Wave 1 slice | + TreeView, spreadsheet import | `Floor`, `BuildingSystem`, `RoomSystem`, `Room`, `RoomLoad` | `/buildings/:id/*`, import |
