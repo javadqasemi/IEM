@@ -848,6 +848,12 @@ model Employee {
   projectDisciplines  ProjectDiscipline[]  @relation("ProjectDisciplineLead")
   customersOwned      Customer[]           @relation("CustomerOwner")
   tasksAssigned       Task[]               @relation("TaskAssignee")
+  meetingsOrganised   Meeting[]            @relation("MeetingOrganiser")
+  meetingAttendance   MeetingAttendee[]    @relation("MeetingAttendee")
+  meetingsPresented   MeetingAgendaItem[]  @relation("MeetingPresenter")
+  meetingItemsOwned   MeetingItem[]        @relation("MeetingResponsible")
+  meetingsApproved    MeetingApproval[]    @relation("MeetingApprover")
+  decisionsTaken      Decision[]           @relation("DecisionDecidedBy")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -899,6 +905,8 @@ model Discipline {
 
   projectDisciplines ProjectDiscipline[]
   tasks              Task[]
+  meetingItems       MeetingItem[]
+  decisions          Decision[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1143,6 +1151,8 @@ model Project {
   disciplines ProjectDiscipline[]
   milestones  Milestone[]
   tasks       Task[]
+  meetings    Meeting[]
+  decisions   Decision[]
 
   /// The record's own revision — `P-2026-014 v12`.
   ///
@@ -1493,6 +1503,9 @@ model Task {
   dependsOn TaskDependency[] @relation("TaskSuccessor")
   blocks    TaskDependency[] @relation("TaskPredecessor")
   checklist ChecklistItem[]
+  /// The protocol lines that created this task. Usually none or one; a task
+  /// re-raised at a later Bausitzung legitimately has two.
+  meetingItems MeetingItem[]
 
   /// The record's own revision — the same optimistic lock `Project` documents.
   version Int @default(1)
@@ -1614,4 +1627,375 @@ model Comment {
 
   @@index([entity, entityId, createdAt])
   @@index([authorId])
+}
+
+// =====================================================================
+// Sitzungen und Entscheide — Wave 2, module 2
+//
+// `docs/data-model.md` §3.11. **Not a calendar entry with a text field.** A
+// Bausitzung is where this firm's decisions are taken, and the module exists to
+// answer two questions a meeting list cannot:
+//
+//   > Wann wurde beschlossen, die Lüftung umzubauen — und von wem?
+//   > Welche Pendenzen aus Bausitzung 12 sind heute noch offen?
+//
+// The first is why `Decision` is its own table rather than a `kind` on a
+// protocol line; the second is why a `PENDENZ` line carries a `taskId` into the
+// module built before this one.
+// =====================================================================
+
+enum MeetingType {
+  KICKOFF
+  BAUSITZUNG
+  ABNAHME
+  INTERN
+  KUNDE
+}
+
+/// `PLANNED → HELD → (approved at the next one)`, plus `CANCELLED`.
+///
+/// There is no `MINUTED` state, and that is deliberate: minutes are not a
+/// status of the meeting, they are its `MeetingItem` rows. A meeting with no
+/// items is `HELD` and empty, which is a true and visible thing — a separate
+/// status would let a meeting be "minuted" while the protocol was blank.
+enum MeetingStatus {
+  PLANNED
+  HELD
+  CANCELLED
+}
+
+/// The three kinds of line a protocol has, and they are not interchangeable.
+///
+/// `INFORMATION` is a note. `ENTSCHEID` points at a `Decision`, which outlives
+/// the meeting. `PENDENZ` points at a `Task`, which is work somebody owes.
+/// Collapsing them into a text column is what makes minutes a document nobody
+/// reads: none of the three can then be searched, assigned or closed.
+enum MeetingItemKind {
+  INFORMATION
+  ENTSCHEID
+  PENDENZ
+}
+
+/// Minutes of a Bausitzung are approved at the *next* one, and an amendment is
+/// a fact about the record rather than an edit to it.
+enum MeetingApprovalDecision {
+  APPROVED
+  AMENDED
+}
+
+enum DecisionType {
+  TECHNISCH
+  KOMMERZIELL
+  TERMIN
+  GESTALTUNG
+  ORGANISATORISCH
+}
+
+/// **`OFFEN` is a decision that has been asked for and not yet taken**, which
+/// is a state a Bausitzung produces constantly and which a `decided` boolean
+/// cannot represent. `AUFGEHOBEN` requires the decision that replaces it to
+/// name this one: a reversal names its successor or it is not a reversal.
+enum DecisionStatus {
+  OFFEN
+  ENTSCHIEDEN
+  UMGESETZT
+  AUFGEHOBEN
+}
+
+enum DecisionImpact {
+  KOSTEN
+  TERMIN
+  QUALITAET
+  KEINE
+}
+
+/// One meeting.
+///
+/// `projectId` is nullable for the same reason `Task.projectId` is — an
+/// internal Geschäftsleitungssitzung is a meeting with minutes and no project —
+/// and `meetings.scope.ts` therefore inherits the three-way reachability rule
+/// rather than the project one.
+model Meeting {
+  id String @id @default(cuid())
+
+  title    String
+  type     MeetingType   @default(BAUSITZUNG)
+  status   MeetingStatus @default(PLANNED)
+  location String?
+
+  /// **The number said out loud on site.** "Bausitzung 14" is how a meeting is
+  /// referred to, and `14.3` is how one of its lines is — so the item's display
+  /// key is derived from this and its `order` rather than stored. Null for a
+  /// meeting that is not part of a series (a Kickoff, an Abnahme).
+  seriesNumber Int?
+
+  startsAt DateTime
+  endsAt   DateTime?
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Who called it and owns the protocol. Required as data — a meeting nobody
+  /// owns is a meeting whose minutes nobody writes — but `SetNull` at the
+  /// database, because a person leaving must not cascade away the record.
+  organiserId String?
+  organiser   Employee? @relation("MeetingOrganiser", fields: [organiserId], references: [id], onDelete: SetNull)
+
+  /// When the minutes went out. Stamped by the act, never typed — the same
+  /// rule as `Project.actualEndDate` and `Task.completedAt`.
+  minutesSentAt DateTime?
+
+  /// The record's own revision. Minutes are edited by several people in the
+  /// days after a meeting, which is precisely the case the optimistic lock
+  /// exists for.
+  version Int @default(1)
+
+  attendees  MeetingAttendee[]
+  agenda     MeetingAgendaItem[]
+  items      MeetingItem[]
+  approvals  MeetingApproval[]
+  decisions  Decision[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+
+  @@index([projectId, startsAt])
+  @@index([status, startsAt])
+  @@index([type, seriesNumber])
+}
+
+/// Who was in the room, and who should have been.
+///
+/// **`attended` is nullable on purpose**: `null` is "not recorded yet", `false`
+/// is "invited and did not come". Those are different facts, and a boolean that
+/// defaulted to `false` would put everybody in the second column the moment the
+/// meeting was created.
+model MeetingAttendee {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  employeeId String?
+  employee   Employee? @relation("MeetingAttendee", fields: [employeeId], references: [id], onDelete: SetNull)
+
+  /// The external attendee, as free text.
+  ///
+  /// `docs/data-model.md` §3.11 says "exactly one of `employeeId` /
+  /// `contactId`", and there is **no `Contact` table yet** — the CRM is Wave 3
+  /// and the Wave 1 customer slice has no contacts. A Bauherr and an architect
+  /// are in the room at every Bausitzung and have to be minutable today, so
+  /// they are recorded by name and organisation. When `Contact` lands these two
+  /// columns become a nullable FK and a migration reads them across; until then
+  /// a name in a protocol is better than an attendee who cannot be recorded.
+  externalName String?
+  externalOrg  String?
+
+  /// Whether their presence was expected. Drives "wer fehlte" on the protocol.
+  required   Boolean   @default(true)
+  invitedAt  DateTime?
+  attended   Boolean?
+  /// Sent apologies. Distinct from `attended: false`, which is simply absent.
+  apologised Boolean   @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([meetingId])
+  @@index([employeeId])
+}
+
+/// A traktandum, set *before* the meeting.
+///
+/// Separate from `MeetingItem`, which is written during or after it. The
+/// agenda is what was planned and the protocol is what happened, and the two
+/// disagree constantly — a traktandum that was not reached has no protocol
+/// line, and half the useful lines belong to no traktandum at all.
+model MeetingAgendaItem {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  /// 1-based, dense. The protocol's display key is the meeting's series number
+  /// and the *item's* order, so this one only sequences the agenda.
+  order Int
+
+  title           String
+  note            String?
+  durationMinutes Int?
+
+  presenterId String?
+  presenter   Employee? @relation("MeetingPresenter", fields: [presenterId], references: [id], onDelete: SetNull)
+
+  items MeetingItem[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([meetingId, order])
+  @@index([meetingId, order])
+}
+
+/// One line of the protocol — **the module's centre of gravity**.
+///
+/// `14.3` is how it is cited out loud, and the key is derived from the
+/// meeting's `seriesNumber` and this `order` rather than stored, because a
+/// stored key goes wrong the first time a line is inserted.
+///
+/// A `PENDENZ` carries a `taskId` and an `ENTSCHEID` a `decisionId`. Both links
+/// are what stop minutes being a document nobody reads: the Pendenz appears on
+/// somebody's board, and the Entscheid can be cited two years later.
+model MeetingItem {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  /// The traktandum it was discussed under, when there was one.
+  agendaItemId String?
+  agendaItem   MeetingAgendaItem? @relation(fields: [agendaItemId], references: [id], onDelete: SetNull)
+
+  order Int
+  text  String
+  kind  MeetingItemKind @default(INFORMATION)
+
+  /// The work this line created. `SetNull`, because deleting a task must not
+  /// remove the line that says it was agreed — the protocol is the record.
+  taskId String?
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  /// The decision this line records. One decision per line; a line that
+  /// records two is two lines.
+  decisionId String?   @unique
+  decision   Decision? @relation("DecisionItem", fields: [decisionId], references: [id], onDelete: SetNull)
+
+  /// Who owes it, and by when — copied onto the `Task` when one is created and
+  /// kept here because the protocol has to be readable without following the
+  /// link.
+  responsibleId String?
+  responsible   Employee? @relation("MeetingResponsible", fields: [responsibleId], references: [id], onDelete: SetNull)
+  dueDate       DateTime?
+
+  /// What Gewerk it concerns. This is what makes "alle offenen Pendenzen für
+  /// Lüftung über alle Bausitzungen" a query rather than a re-read of twelve
+  /// protocols.
+  disciplineId String?
+  discipline   Discipline? @relation(fields: [disciplineId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([meetingId, order])
+  @@index([meetingId, order])
+  @@index([kind, disciplineId])
+  @@index([taskId])
+}
+
+/// The approval of a protocol, recorded at the *next* meeting.
+///
+/// A row rather than a pair of columns on `Meeting`, because minutes can be
+/// approved with an amendment and then approved again — and because who
+/// approved them is the question a dispute turns on.
+model MeetingApproval {
+  id        String  @id @default(cuid())
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  decision MeetingApprovalDecision
+  /// Required for `AMENDED`, refused as empty by the service: an amendment
+  /// nobody described is an amendment nobody can act on.
+  note     String?
+
+  decidedById String?
+  decidedBy   Employee? @relation("MeetingApprover", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt   DateTime  @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@index([meetingId, decidedAt])
+}
+
+/// An Entscheid — **a fact about what was agreed, and it outlives its meeting**.
+///
+/// `docs/data-model.md` §3.11 argues the case: a decision is referenced by
+/// later minutes, it is the reason a drawing changed, it gets superseded two
+/// months on, and in a dispute it is the thing that gets looked up. A line
+/// inside a protocol row cannot be cited, linked to, filtered or reversed.
+///
+/// Decisions and Tasks are different things and a meeting produces both: a
+/// decision is what was agreed, a task is work somebody owes. A decision may
+/// spawn tasks; it is not one.
+model Decision {
+  id String @id @default(cuid())
+
+  /// `E-2026-017`, unique per project. Allocated like a project number: from
+  /// the maximum already issued, never from a count, because a deleted
+  /// decision still consumed its number and it is quoted in e-mails.
+  number String
+
+  title String
+  /// **Required.** The record exists to answer *why*, and a decision without a
+  /// reason is the row nobody can act on two years later. Same principle as
+  /// `DrawingRevision.changeNote`.
+  rationale String
+
+  /// Required: a decision is always about a project. No `onDelete`, so the
+  /// database refuses to remove a project that still has one.
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  /// Where it was taken. Nullable because a decision taken on site is still a
+  /// decision — `decidedAt` may predate any minutes.
+  meetingId String?
+  meeting   Meeting? @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  /// The protocol line that records it, from the other side of the `@unique`.
+  item      MeetingItem? @relation("DecisionItem")
+
+  type   DecisionType   @default(TECHNISCH)
+  status DecisionStatus @default(ENTSCHIEDEN)
+
+  decidedAt   DateTime
+  decidedById String?
+  decidedBy   Employee? @relation("DecisionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  /// When the Bauherrschaft decided it, as free text — see the note on
+  /// `MeetingAttendee.externalName`. Becomes a `Contact` FK in Wave 3.
+  decidedByExternal String?
+
+  disciplineId String?
+  discipline   Discipline? @relation(fields: [disciplineId], references: [id], onDelete: SetNull)
+
+  impact             DecisionImpact @default(KEINE)
+  /// Filled when known. A decision with `impact: KOSTEN` and no figure is a
+  /// decision somebody still has to price, which is itself worth seeing.
+  costImpact         Decimal?       @db.Decimal(12, 2)
+  scheduleImpactDays Int?
+
+  /// The decision this one reverses or replaces.
+  ///
+  /// The arrow points **from the new one to the old one**, so a reversal names
+  /// its successor rather than the other way round — which is what lets
+  /// `AUFGEHOBEN` be verifiable: a decision may only be set `AUFGEHOBEN` by the
+  /// one superseding it. Must not cycle and must stay inside the project; both
+  /// are rules the database cannot express and `meetings.rules.ts` can.
+  supersedesId String?   @unique
+  supersedes   Decision? @relation("DecisionSupersedes", fields: [supersedesId], references: [id], onDelete: SetNull)
+  supersededBy Decision? @relation("DecisionSupersedes")
+
+  version Int @default(1)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+
+  @@unique([projectId, number])
+  @@index([projectId, decidedAt])
+  @@index([status, decidedAt])
+  @@index([disciplineId])
+  @@index([meetingId])
 }

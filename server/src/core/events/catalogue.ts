@@ -118,10 +118,39 @@ export type DomainEvents = {
   DrawingIssued: { projectId: string; number: string; revision: string; transmittalId: string };
   DrawingWithdrawn: { projectId: string; number: string; reason: string };
 
-  /* ---- Meetings and decisions -------------------------------------- */
-  MeetingHeld: { projectId: string; type: string; seriesNumber?: number };
-  MeetingApproved: { meetingId: string; decision: string };
-  DecisionTaken: { projectId: string; number: string; type: string };
+  /* ---- Meetings and decisions (Wave 2) ------------------------------ */
+  MeetingScheduled: { projectId: string | null; title: string; type: string; startsAt: string };
+  MeetingUpdated: { title: string; fields: string[] };
+  /**
+   * The transition, and the one a Pendenz hangs off.
+   *
+   * `pendenzen` is on the payload because the number of tasks a Bausitzung
+   * produced is the figure somebody reads the morning after — and a listener
+   * that had to count them would have to load the protocol.
+   */
+  MeetingHeld: {
+    projectId: string | null;
+    type: string;
+    seriesNumber: number | null;
+    pendenzen: number;
+  };
+  MeetingCancelled: { projectId: string | null; title: string; reason?: string };
+  MeetingDeleted: { projectId: string | null; title: string };
+  /** `decision` is `APPROVED` or `AMENDED`; an amendment is a fact, not an edit. */
+  MeetingApproved: { meetingId: string; decision: string; note: string | null };
+  MinutesSent: { meetingId: string; projectId: string | null; recipients: number };
+  /**
+   * A protocol line became work.
+   *
+   * Separate from `TaskCreated`, which the tasks module raises for the task
+   * itself: this one says *where the work came from*, which is what a
+   * notification needs to say "aus Bausitzung 14" rather than "eine neue
+   * Aufgabe".
+   */
+  MeetingItemToTask: { meetingId: string; itemKey: string; taskId: string };
+  DecisionTaken: { projectId: string; number: string; type: string; impact: string };
+  DecisionUpdated: { projectId: string; number: string; fields: string[] };
+  DecisionStatusChanged: { projectId: string; number: string; from: string; to: string };
   DecisionSuperseded: { projectId: string; number: string; bySupersedingId: string };
 
   /* ---- Issues ------------------------------------------------------ */
@@ -239,9 +268,17 @@ export const DOMAIN_EVENT_NAMES = [
   "DrawingReleased",
   "DrawingIssued",
   "DrawingWithdrawn",
+  "MeetingScheduled",
+  "MeetingUpdated",
   "MeetingHeld",
+  "MeetingCancelled",
+  "MeetingDeleted",
   "MeetingApproved",
+  "MinutesSent",
+  "MeetingItemToTask",
   "DecisionTaken",
+  "DecisionUpdated",
+  "DecisionStatusChanged",
   "DecisionSuperseded",
   "IssueRaised",
   "IssueAssigned",

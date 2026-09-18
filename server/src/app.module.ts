@@ -25,6 +25,7 @@ import { RbacModule } from "./rbac/rbac.module";
 import { AuditModule } from "./audit/audit.module";
 import { ApplicationsModule } from "./applications/applications.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
+import { MeetingsModule } from "./meetings/meetings.module";
 import { SchedulerModule } from "./scheduler/scheduler.module";
 import { TasksModule } from "./tasks/tasks.module";
 
@@ -110,6 +111,7 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     DashboardModule,
     DisciplinesModule,
     EmployeesModule,
+    MeetingsModule,
     ProjectsModule,
     RbacModule,
     SchedulerModule,

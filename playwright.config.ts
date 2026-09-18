@@ -45,6 +45,7 @@ const API_ONLY = [
   /budgets\.spec\.ts/,
   /metrics\.spec\.ts/,
   /tasks\.spec\.ts/,
+  /meetings\.spec\.ts/,
 ];
 
 export default defineConfig({

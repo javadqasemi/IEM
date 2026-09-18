@@ -107,6 +107,8 @@ export const SYSTEM_ROLES: RoleDef[] = [
       */
       "project.read", "project.readAll", "project.export",
       "task.read", "task.readAll", "task.export",
+      "meeting.read", "meeting.readAll", "meeting.export",
+      "decision.read", "decision.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
     ],
   },
@@ -296,6 +298,18 @@ export const SYSTEM_ROLES: RoleDef[] = [
       */
       "task.read", "task.readAll", "task.create", "task.update", "task.assign",
       "task.comment", "task.export",
+      /*
+        The full set on both, `supersede` included.
+
+        Reversing a decision the firm has already taken is the authority
+        `docs/permissions.md` §3.11 puts at this level and at the Projektleitung
+        `◐` below — it is the one action in the module that says the firm no
+        longer stands by what it agreed.
+      */
+      "meeting.read", "meeting.readAll", "meeting.create", "meeting.update",
+      "meeting.hold", "meeting.approve", "meeting.sendMinutes", "meeting.export",
+      "decision.read", "decision.create", "decision.update", "decision.supersede",
+      "decision.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview", "content.history",
       "contentType.read", "media.read",
@@ -337,6 +351,18 @@ export const SYSTEM_ROLES: RoleDef[] = [
       */
       "task.read", "task.create", "task.update", "task.assign", "task.delete",
       "task.comment", "task.export",
+      /*
+        Without `readAll`: a Projektleiter's meetings are their projects'
+        meetings and the ones they sat in — `meetings.scope.ts` narrows to
+        exactly that. They hold `hold`, `approve` and `sendMinutes` because
+        running the Bausitzung, closing its protocol and sending it out is the
+        job; `decision.supersede` is the §3.11 `◐`, and the scope is what makes
+        it their own projects only.
+      */
+      "meeting.read", "meeting.create", "meeting.update", "meeting.hold",
+      "meeting.approve", "meeting.sendMinutes", "meeting.delete", "meeting.export",
+      "decision.read", "decision.create", "decision.update", "decision.supersede",
+      "decision.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",
@@ -372,6 +398,15 @@ export const SYSTEM_ROLES: RoleDef[] = [
        * Projektleiter, which is how a board stops reflecting the site.
        */
       "task.read", "task.create", "task.updateOwn", "task.comment",
+      /*
+        An engineer reads the minutes of the meetings they sat in and writes
+        the protocol of none. `decision.create` is granted because a decision
+        taken on site is still a decision and the person who was there is the
+        one who can record it; `supersede` is not, because reversing one is a
+        different authority.
+      */
+      "meeting.read",
+      "decision.read", "decision.create",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",
@@ -405,6 +440,13 @@ export const SYSTEM_ROLES: RoleDef[] = [
         exports; it opens no cards and ticks nothing.
       */
       "task.read", "task.readAll", "task.export",
+      /*
+        Read and export, no writes — the same stance as on projects and tasks.
+        `decision.read` matters here more than elsewhere: a decision with a
+        cost impact is a number Finance has to be able to find.
+      */
+      "meeting.read", "meeting.readAll", "meeting.export",
+      "decision.read", "decision.export",
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview",
       "contentType.read", "media.read",

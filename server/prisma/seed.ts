@@ -654,13 +654,393 @@ async function seedDomain() {
   }
 
   const tasks = await seedTasks(byNumber);
+  const meetings = await seedMeetings(byNumber);
 
   console.log(
     `  ✓ ${offices.length} Standorte, ${departments.length} Abteilungen, ` +
       `${employees.length} Mitarbeitende, ${disciplines.length} Gewerke, ` +
       `${customers.length} Kunden, ${buildings.length} Gebäude, ${projectSeed.length} Projekte, ` +
-      `${tasks} Aufgaben`,
+      `${tasks} Aufgaben, ${meetings.meetings} Sitzungen, ${meetings.decisions} Entscheide`,
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Sitzungen und Entscheide — Wave 2, module 2                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Two Bausitzungen and three Entscheide, and none of them is a placeholder.
+ *
+ * Each exists to make one part of the module reachable from a screen that would
+ * otherwise only be reachable by hand:
+ *
+ * | | |
+ * | --- | --- |
+ * | **Bausitzung 12**, held and **approved** | the closed protocol — `refuseProtocolEdit` is invisible until a protocol has been approved, and this is the one that demonstrates it |
+ * | **Bausitzung 13**, held and *not* approved | the editable protocol, and the "minutes pending" queue the stats tile counts |
+ * | A line of each kind | `INFORMATION`, `ENTSCHEID` with a real decision, `PENDENZ` with a real task |
+ * | An external attendee | the Bauherr, who has no `Employee` row and must still be minutable |
+ * | A **superseded** decision | `AUFGEHOBEN` with a successor attached — the state that cannot be typed and can only be reached through `supersede` |
+ * | A decision with a cost impact | the figure Finance looks for |
+ *
+ * Matched on `(projectId, title)` and `(projectId, number)` by hand, like
+ * milestones and tasks: a `createMany` would duplicate everything on the second
+ * run, which is the specific way a seed stops being idempotent while the screen
+ * still looks plausible.
+ */
+async function seedMeetings(
+  byNumber: (n: string) => { id: string },
+): Promise<{ meetings: number; decisions: number }> {
+  const guglera = await prisma.project.findUnique({
+    where: { number: "P-2026-001" },
+    select: { id: true },
+  });
+  if (!guglera) return { meetings: 0, decisions: 0 };
+
+  const disciplines = await prisma.discipline.findMany({ select: { id: true, code: true } });
+  const byCode = (code: string) => disciplines.find((d) => d.code === code)?.id ?? null;
+
+  const day = 86_400_000;
+  const ago = (n: number) => new Date(Date.now() - n * day);
+
+  /* ---- The two meetings ------------------------------------------- */
+
+  const meetingSeed = [
+    {
+      title: "Bausitzung",
+      seriesNumber: 12,
+      startsAt: ago(35),
+      location: "Baubüro Giffers",
+      organiser: "MA-001",
+      approved: true,
+    },
+    {
+      title: "Bausitzung",
+      seriesNumber: 13,
+      startsAt: ago(7),
+      location: "Baubüro Giffers",
+      organiser: "MA-001",
+      approved: false,
+    },
+  ];
+
+  const meetings = new Map<number, string>();
+
+  for (const seed of meetingSeed) {
+    const values = {
+      title: seed.title,
+      type: "BAUSITZUNG" as const,
+      status: "HELD" as const,
+      seriesNumber: seed.seriesNumber,
+      startsAt: seed.startsAt,
+      endsAt: new Date(seed.startsAt.getTime() + 90 * 60_000),
+      location: seed.location,
+      projectId: guglera.id,
+      organiserId: byNumber(seed.organiser).id,
+    };
+
+    const existing = await prisma.meeting.findFirst({
+      where: { projectId: guglera.id, title: seed.title, seriesNumber: seed.seriesNumber },
+      select: { id: true },
+    });
+    const meeting = existing
+      ? await prisma.meeting.update({ where: { id: existing.id }, data: values })
+      : await prisma.meeting.create({ data: values });
+    meetings.set(seed.seriesNumber, meeting.id);
+
+    /* ---- Who was there, including one who is not an employee ------ */
+
+    const room = [
+      { p: "MA-001", attended: true },
+      { p: "MA-002", attended: true },
+      { p: "MA-003", attended: false, apologised: true },
+    ];
+    for (const person of room) {
+      const employeeId = byNumber(person.p).id;
+      const found = await prisma.meetingAttendee.findFirst({
+        where: { meetingId: meeting.id, employeeId },
+        select: { id: true },
+      });
+      const data = {
+        required: true,
+        invitedAt: new Date(seed.startsAt.getTime() - 7 * day),
+        attended: person.attended,
+        apologised: person.apologised ?? false,
+        deletedAt: null,
+      };
+      if (found) await prisma.meetingAttendee.update({ where: { id: found.id }, data });
+      else await prisma.meetingAttendee.create({ data: { meetingId: meeting.id, employeeId, ...data } });
+    }
+
+    /*
+      The Bauherr, as free text.
+
+      There is no `Contact` table — the CRM is Wave 3 — and a Bausitzung
+      without the Bauherrschaft in the attendance list is not a Bausitzung.
+      This row is what the migration reads across when `Contact` lands.
+    */
+    const external = await prisma.meetingAttendee.findFirst({
+      where: { meetingId: meeting.id, externalName: "R. Bürgi" },
+      select: { id: true },
+    });
+    const externalData = {
+      externalName: "R. Bürgi",
+      externalOrg: "Gemeinde Giffers",
+      required: true,
+      attended: true,
+      apologised: false,
+      deletedAt: null,
+    };
+    if (external) await prisma.meetingAttendee.update({ where: { id: external.id }, data: externalData });
+    else await prisma.meetingAttendee.create({ data: { meetingId: meeting.id, ...externalData } });
+
+    /* ---- The agenda ------------------------------------------------ */
+
+    const agenda = ["Protokoll der letzten Sitzung", "Stand Lüftung", "Termine und Kosten"];
+    for (const [index, title] of agenda.entries()) {
+      const found = await prisma.meetingAgendaItem.findFirst({
+        where: { meetingId: meeting.id, order: index + 1 },
+        select: { id: true },
+      });
+      const data = { title, presenterId: byNumber("MA-001").id, durationMinutes: 20, deletedAt: null };
+      if (found) await prisma.meetingAgendaItem.update({ where: { id: found.id }, data });
+      else
+        await prisma.meetingAgendaItem.create({
+          data: { meetingId: meeting.id, order: index + 1, ...data },
+        });
+    }
+  }
+
+  const twelve = meetings.get(12)!;
+  const thirteen = meetings.get(13)!;
+
+  /* ---- The decisions ---------------------------------------------- */
+
+  const decisionSeed = [
+    {
+      number: "E-2026-001",
+      title: "Lüftung OG2 wird auf Einzelraumregelung umgebaut",
+      rationale:
+        "Die Nutzung der Räume 2.10–2.14 wechselt zwischen Unterricht und Betreuung. " +
+        "Eine zentrale Regelung führt zu Zugerscheinungen; die Mehrkosten sind gegenüber " +
+        "den Beschwerden im Bestand vertretbar.",
+      meeting: twelve,
+      decidedAt: ago(35),
+      decidedBy: "MA-001",
+      type: "TECHNISCH" as const,
+      status: "ENTSCHIEDEN" as const,
+      discipline: "LFT",
+      impact: "KOSTEN" as const,
+      costImpact: "48000.00",
+      scheduleImpactDays: 10,
+    },
+    {
+      number: "E-2026-002",
+      title: "Heizzentrale bleibt am bestehenden Standort",
+      rationale:
+        "Die geprüfte Verlegung in das UG Nord hätte einen Durchbruch in der tragenden " +
+        "Wand bedingt. Der Statiker rät ab; der bestehende Standort erfüllt die " +
+        "Anforderungen nach der Sanierung.",
+      meeting: twelve,
+      decidedAt: ago(35),
+      decidedBy: "MA-001",
+      type: "TECHNISCH" as const,
+      // Reversed by E-2026-003 below — the seed's `supersede` pass sets this.
+      status: "ENTSCHIEDEN" as const,
+      discipline: "HZG",
+      impact: "KEINE" as const,
+      costImpact: null,
+      scheduleImpactDays: null,
+    },
+    {
+      number: "E-2026-003",
+      title: "Heizzentrale wird doch in das UG Nord verlegt",
+      rationale:
+        "Die Bauherrschaft hat den zusätzlichen Raumbedarf für die Betreuung bestätigt. " +
+        "Der Statiker hat den Durchbruch mit einer Auswechslung freigegeben. Der Entscheid " +
+        "aus Bausitzung 12 wird damit hinfällig.",
+      meeting: thirteen,
+      decidedAt: ago(7),
+      decidedBy: "MA-001",
+      type: "TECHNISCH" as const,
+      status: "ENTSCHIEDEN" as const,
+      discipline: "HZG",
+      impact: "TERMIN" as const,
+      costImpact: "26500.00",
+      scheduleImpactDays: 20,
+      supersedes: "E-2026-002",
+    },
+  ];
+
+  const decisions = new Map<string, string>();
+
+  for (const seed of decisionSeed) {
+    const values = {
+      title: seed.title,
+      rationale: seed.rationale,
+      projectId: guglera.id,
+      meetingId: seed.meeting,
+      type: seed.type,
+      status: seed.status,
+      decidedAt: seed.decidedAt,
+      decidedById: byNumber(seed.decidedBy).id,
+      disciplineId: byCode(seed.discipline),
+      impact: seed.impact,
+      costImpact: seed.costImpact === null ? null : new Prisma.Decimal(seed.costImpact),
+      scheduleImpactDays: seed.scheduleImpactDays,
+      deletedAt: null,
+    };
+
+    const existing = await prisma.decision.findFirst({
+      where: { projectId: guglera.id, number: seed.number },
+      select: { id: true },
+    });
+    const row = existing
+      ? await prisma.decision.update({ where: { id: existing.id }, data: values })
+      : await prisma.decision.create({ data: { number: seed.number, ...values } });
+    decisions.set(seed.number, row.id);
+  }
+
+  /*
+    The reversal, in a second pass.
+
+    `supersedesId` names a decision that may not have existed on the first
+    loop — and the pair of writes is what the service's `supersede` performs in
+    one transaction: the successor names its predecessor, and the predecessor
+    becomes `AUFGEHOBEN`. Seeding only the status would produce the one state
+    the whole mechanism exists to prevent: a decision reading as withdrawn with
+    nothing to point at.
+  */
+  for (const seed of decisionSeed) {
+    if (!seed.supersedes) continue;
+    const newer = decisions.get(seed.number);
+    const older = decisions.get(seed.supersedes);
+    if (!newer || !older) continue;
+    await prisma.decision.update({ where: { id: newer }, data: { supersedesId: older } });
+    await prisma.decision.update({ where: { id: older }, data: { status: "AUFGEHOBEN" } });
+  }
+
+  /* ---- The protocol ------------------------------------------------ */
+
+  const protocolSeed = [
+    {
+      meeting: twelve,
+      order: 1,
+      kind: "INFORMATION" as const,
+      text: "Das Protokoll der Bausitzung 11 wird ohne Änderungen genehmigt.",
+      discipline: null,
+    },
+    {
+      meeting: twelve,
+      order: 2,
+      kind: "ENTSCHEID" as const,
+      text: "Die Lüftung im OG2 wird auf Einzelraumregelung umgebaut.",
+      discipline: "LFT",
+      decision: "E-2026-001",
+    },
+    {
+      meeting: twelve,
+      order: 3,
+      kind: "PENDENZ" as const,
+      text: "Luftmengen für die Räume 2.10 bis 2.14 neu berechnen und im Modell nachführen.",
+      discipline: "LFT",
+      responsible: "MA-002",
+      dueIn: -14,
+      task: "Lüftungskonzept Obergeschoss überarbeiten",
+    },
+    {
+      meeting: thirteen,
+      order: 1,
+      kind: "INFORMATION" as const,
+      text: "Die Luftmengen aus Bausitzung 12 liegen vor und sind mit der Bauherrschaft besprochen.",
+      discipline: "LFT",
+    },
+    {
+      meeting: thirteen,
+      order: 2,
+      kind: "ENTSCHEID" as const,
+      text: "Die Heizzentrale wird entgegen dem Entscheid aus Bausitzung 12 in das UG Nord verlegt.",
+      discipline: "HZG",
+      decision: "E-2026-003",
+    },
+    {
+      meeting: thirteen,
+      order: 3,
+      kind: "PENDENZ" as const,
+      text: "Prinzipschema Elektro für den neuen Standort der Heizzentrale anpassen und freigeben lassen.",
+      discipline: "ELT",
+      responsible: "MA-004",
+      dueIn: 8,
+      task: "Prinzipschema Elektro freigeben lassen",
+    },
+  ];
+
+  for (const seed of protocolSeed) {
+    /*
+      The task is *linked*, not created.
+
+      The seeded Pendenzen point at tasks `seedTasks` already made, which is
+      what a real protocol looks like after a few weeks — and it keeps the two
+      seeds independent: neither has to run first.
+    */
+    const task = seed.task
+      ? await prisma.task.findFirst({
+          where: { projectId: guglera.id, title: seed.task, deletedAt: null },
+          select: { id: true },
+        })
+      : null;
+
+    const values = {
+      text: seed.text,
+      kind: seed.kind,
+      disciplineId: seed.discipline ? byCode(seed.discipline) : null,
+      responsibleId: seed.responsible ? byNumber(seed.responsible).id : null,
+      dueDate: seed.dueIn === undefined ? null : new Date(Date.now() + seed.dueIn * day),
+      decisionId: seed.decision ? (decisions.get(seed.decision) ?? null) : null,
+      taskId: task?.id ?? null,
+      deletedAt: null,
+    };
+
+    const existing = await prisma.meetingItem.findFirst({
+      where: { meetingId: seed.meeting, order: seed.order },
+      select: { id: true },
+    });
+    if (existing) await prisma.meetingItem.update({ where: { id: existing.id }, data: values });
+    else
+      await prisma.meetingItem.create({
+        data: { meetingId: seed.meeting, order: seed.order, ...values },
+      });
+  }
+
+  /* ---- The approval ------------------------------------------------ */
+
+  /*
+    Bausitzung 12's protocol is approved; 13's is not.
+
+    That pair is what makes `refuseProtocolEdit` visible on a screen: one
+    protocol is read-only and says why, the other is editable, and the
+    difference is a row in this table rather than a status somebody set.
+  */
+  const approved = await prisma.meetingApproval.findFirst({
+    where: { meetingId: twelve },
+    select: { id: true },
+  });
+  if (!approved) {
+    await prisma.meetingApproval.create({
+      data: {
+        meetingId: twelve,
+        decision: "APPROVED",
+        note: null,
+        decidedById: byNumber("MA-001").id,
+        decidedAt: ago(7),
+      },
+    });
+  }
+
+  // And 12's minutes went out; 13's are the "pending" queue on the stats tile.
+  await prisma.meeting.update({ where: { id: twelve }, data: { minutesSentAt: ago(33) } });
+
+  return { meetings: meetingSeed.length, decisions: decisionSeed.length };
 }
 
 /* ------------------------------------------------------------------ */

@@ -221,6 +221,59 @@ export const RESOURCES: ResourceDef[] = [
   }),
 
   /**
+   * Sitzungen, and the two keys that are not CRUD.
+   *
+   * **`hold` is separate from `update`.** Marking a Bausitzung as held is what
+   * turns a plan into a record: after it, the protocol is a document people
+   * cite. Somebody who may correct a typo in an agenda is not necessarily
+   * somebody who may declare that a meeting took place.
+   *
+   * **`approve` is the authority over the record itself.** Minutes are approved
+   * at the *next* meeting, and once approved the protocol is closed to editing
+   * — `refuseProtocolEdit` enforces that regardless of who holds `update`. The
+   * key is therefore not "may edit more"; it is "may decide that this is what
+   * was said", which is the Projektleitung's and the Geschäftsleitung's.
+   *
+   * `sendMinutes` is its own key because it is **outward-facing**: it puts a
+   * document in front of the Bauherrschaft, and that is a different act from
+   * writing it.
+   */
+  resource("meeting", "Sitzungen", "Projekte", {
+    read: "Sitzungen und Protokolle der eigenen Projekte ansehen",
+    readAll: "Alle Sitzungen der Firma ansehen",
+    create: "Sitzungen ansetzen",
+    update: "Traktanden und Protokoll bearbeiten",
+    hold: "Eine Sitzung als durchgeführt festhalten",
+    approve: "Protokolle genehmigen",
+    sendMinutes: "Protokolle versenden",
+    delete: "Sitzungen löschen",
+    export: "Sitzungslisten exportieren",
+  }),
+
+  /**
+   * Entscheide — `docs/permissions.md` §3.11.
+   *
+   * **`supersede` is separate from `update`**, and the document says why in one
+   * line: *"`update` is corrections; reversing a decision is its own
+   * authority."* Correcting a typo in a rationale and declaring that the firm
+   * no longer stands by what it agreed are not the same act, and the second is
+   * the one that gets looked up in a dispute.
+   *
+   * There is no `readAll`: a decision is always about a project, so "which
+   * decisions may I see" is already answered by `project.readAll`. A second
+   * widening key would be one more row in the role editor meaning the same
+   * thing — see `seesAllDecisions`.
+   */
+  resource("decision", "Entscheide", "Projekte", {
+    read: "Entscheide ansehen",
+    create: "Entscheide festhalten",
+    update: "Entscheide korrigieren",
+    supersede: "Entscheide aufheben und ersetzen",
+    delete: "Entscheide löschen",
+    export: "Entscheidlisten exportieren",
+  }),
+
+  /**
    * The Wave 1 master data, read-only for now — and that is the whole
    * declaration, deliberately.
    *
