@@ -3,6 +3,7 @@ import { Button, EmptyState, Skeleton, Spinner } from "@/shared/ui/primitives";
 import { ErrorBoundary } from "@/shared/ui/feedback";
 import { useNewApplicationCount } from "@/features/applications";
 import { useActiveProjectCount } from "@/features/projects";
+import { useOverdueTaskCount } from "@/features/tasks";
 import { api } from "./lib/api";
 import { useAuth } from "@/core/auth";
 import { RouteMetaProvider, buildTrail, useRoute, useScrollReset, type Crumb } from "@/core/router";
@@ -40,6 +41,10 @@ export function App() {
   // Live projects — `ACTIVE` plus `ON_HOLD`, not all of them. A badge that only
   // ever grows stops being read.
   const liveProjects = useActiveProjectCount(can("project.read"));
+  // Overdue tasks, not open ones — "wie viele Aufgaben habe ich" is always some
+  // tens and is a number nobody acts on. It shares a cache entry with the task
+  // list's KPI tiles, so opening that page costs no extra request.
+  const overdueTasks = useOverdueTaskCount(can("task.read"));
 
   /**
    * The content types the menu's Website groups are made of.
@@ -65,9 +70,10 @@ export function App() {
           reviews: reviews.data?.length,
           applications: newApplications,
           projects: liveProjects,
+          tasks: overdueTasks,
         },
       }),
-    [types.data, reviews.data, newApplications, liveProjects, canAny],
+    [types.data, reviews.data, newApplications, liveProjects, overdueTasks, canAny],
   );
 
   /**

@@ -7,6 +7,7 @@ import {
 import { TaskStatus } from "@prisma/client";
 import { EventBus } from "../core/events/event-bus";
 import { VersioningService } from "../core/versioning/versioning.service";
+import { VERSION_CONTROL_FIELDS, changedFields } from "../core/versioning/changed";
 import type { AuthUser } from "../common/decorators";
 import type { RawListQuery } from "../core/list/list.decorator";
 import { paginated } from "../core/list/list";
@@ -254,9 +255,16 @@ export class TasksService {
     if (reassigning) this.requireAssign(user);
 
     const before = toAuditSnapshot(current);
-    const fields = Object.keys(dto).filter(
-      (key) => key !== "expectedVersion" && key !== "versionNote",
-    );
+    /*
+      `changedFields`, not `Object.keys`.
+
+      A validated DTO carries every declared property, because the build targets
+      ES2022 and `ValidationPipe` transforms — so `Object.keys` reports eleven
+      fields for a request that sent one. See the note on `changedFields`; it
+      does not fail anywhere, it just makes the version history say that every
+      edit changed everything.
+    */
+    const fields = changedFields(dto, VERSION_CONTROL_FIELDS);
 
     /*
       One transaction: the guarded write and the version it produces.
@@ -513,10 +521,7 @@ export class TasksService {
       this.events.publish("TaskUpdated", {
         entity: "task",
         entityId: id,
-        payload: {
-          title: row.title,
-          fields: Object.keys(dto).filter((key) => key !== "ids"),
-        },
+        payload: { title: row.title, fields: changedFields(dto, ["ids"]) },
         before: toAuditSnapshot(row),
         after: { priority: dto.priority ?? row.priority, assigneeId: dto.assigneeId ?? previousAssigneeId },
       });

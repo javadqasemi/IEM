@@ -69,13 +69,23 @@ export const EMBEDDED_TABS: ProjectTab[] = [
     wave: "Wave 1",
   },
   {
+    /**
+     * **Built** — Wave 2, module 1, and the first of the eight to stop being a
+     * placeholder.
+     *
+     * It is still `owned: false`, and that is the whole point rather than an
+     * oversight: the tasks are not this project's data, they are the tasks
+     * module's data scoped by `projectId`. The screen is composed in from
+     * `admin/pages/ProjectPage.tsx` and this feature imports nothing from it —
+     * see the `embedded` prop on `ProjectDetail`.
+     *
+     * The `description`, `status` and `wave` are gone because they only ever
+     * fed `ModulePlaceholder`, and leaving them would leave a sentence
+     * describing something that now exists.
+     */
     slug: "aufgaben",
     label: "Aufgaben",
     owned: false,
-    description:
-      "Pendenzen zu diesem Projekt, mit Zuständigkeit, Frist und Abhängigkeiten — als Liste und als Board.",
-    status: "planned",
-    wave: "Wave 2",
   },
   {
     slug: "sitzungen",

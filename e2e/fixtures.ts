@@ -471,6 +471,17 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
    * database. `projects.spec.ts` covers it and walks its tabs.
    */
   { path: "/projekte", name: "projects", heading: /Zustand und Fortschritt werden berechnet/i },
+  /**
+   * The description again, and for the same reason: "Aufgaben" is a rail row on
+   * every screen, so `.first()` on it would pass whatever the page rendered.
+   *
+   * The board is what `/aufgaben` opens on, so this entry photographs five
+   * columns at three widths — which is the assertion that matters here, because
+   * a five-column grid is the one layout in the dashboard that has nowhere to go
+   * at 390px. There is no task *detail* path: a task opens in a drawer, so it
+   * has no URL. See the note on `TaskDrawer`.
+   */
+  { path: "/aufgaben", name: "tasks", heading: /Der Status wird verschoben, nicht erfasst/i },
   { path: "/inhalte", name: "content-index", heading: /Website|Inhalte/i },
   { path: "/inhalte/projects", name: "content-list-projects", heading: /Referenz/i },
   { path: "/inhalte/team", name: "content-list-team", heading: /Team/i },

@@ -54,16 +54,29 @@ const OWNED = [
 
 const card = (page: Page, name: string) => page.getByRole("heading", { name, exact: true });
 
-/** A module's tab. Every one of these must carry the placeholder. */
-const EMBEDDED = [
-  "phasen",
-  "aufgaben",
-  "sitzungen",
-  "dokumente",
-  "plaene",
-  "bim",
-  "finanzen",
-];
+/**
+ * A module's tab that does **not** exist yet. Every one must carry the
+ * placeholder.
+ *
+ * `aufgaben` left this list in Wave 2 and moved to `EMBEDDED_BUILT` below — a
+ * placeholder is removed by building the thing, and the test follows. The
+ * distinction is not cosmetic: both kinds are `owned: false`, because a task is
+ * not the project's data either way, and what separates them is only whether
+ * the shell composed a screen in for the slug.
+ */
+const EMBEDDED_PLANNED = ["phasen", "sitzungen", "dokumente", "plaene", "bim", "finanzen"];
+
+/**
+ * The embedded tabs that are built, with what proves each one rendered.
+ *
+ * It is a **different module's screen inside this one's route**, which is the
+ * whole container/owner arrangement (`docs/enterprise-architecture.md` §4.4.1)
+ * and the thing worth an assertion: `features/projects` imports nothing from
+ * `features/tasks`, `admin/pages/ProjectPage.tsx` puts them together, and if
+ * that composition is ever dropped the tab falls back to a placeholder rather
+ * than breaking — which is exactly the silent regression this catches.
+ */
+const EMBEDDED_BUILT = [{ slug: "aufgaben", column: "Offen" }];
 
 /**
  * Opens the first project from the list, and returns its id.
@@ -155,7 +168,7 @@ test.describe("the project view", () => {
   test("shows a placeholder in every tab whose module does not exist", async ({ page }) => {
     const id = await openFirstProject(page);
 
-    for (const slug of EMBEDDED) {
+    for (const slug of EMBEDDED_PLANNED) {
       await page.goto(`/admin.html#/projekte/${id}/${slug}`);
       await expect(page.getByText("Seite wird geladen …")).toHaveCount(0, { timeout: 20_000 });
 
@@ -174,6 +187,32 @@ test.describe("the project view", () => {
       expect((await description.innerText()).length, `${slug} has no description`).toBeGreaterThan(
         40,
       );
+    }
+  });
+
+  test("renders another module's screen in the tabs that are built", async ({ page }) => {
+    /**
+     * The other half of the test above, and the one that would otherwise be
+     * missing: a tab that is built must show the module, **not** the
+     * placeholder. Without this, dropping the `embedded` map from
+     * `ProjectPage.tsx` would turn a working board back into "Dieses Modul ist
+     * noch nicht implementiert." and every assertion in this file would still
+     * pass.
+     */
+    const id = await openFirstProject(page);
+
+    for (const { slug, column } of EMBEDDED_BUILT) {
+      await page.goto(`/admin.html#/projekte/${id}/${slug}`);
+      await expect(page.getByText("Seite wird geladen …")).toHaveCount(0, { timeout: 20_000 });
+
+      await expect(
+        page.getByRole("heading", { name: column, exact: true }),
+        `${slug} did not render the embedded module`,
+      ).toBeVisible({ timeout: 15_000 });
+      await expect(
+        page.getByText("Dieses Modul ist noch nicht implementiert."),
+        `${slug} is built but still shows a placeholder`,
+      ).toHaveCount(0);
     }
   });
 

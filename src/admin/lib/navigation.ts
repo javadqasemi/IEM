@@ -1,4 +1,4 @@
-﻿import type { ContentTypeRow } from "./api";
+import type { ContentTypeRow } from "./api";
 
 /**
  * The dashboard's navigation, as data.
@@ -68,6 +68,16 @@ export const ICONS = {
    * the rail is where every set mismatch is visible side by side.
    */
   projects: "M4 14.5V4.5h6v10M10 8h4v6.5M2.5 14.5h13M6 7h2M6 9.5h2M12 10.5h.8",
+  /**
+   * Aufgaben: a checklist — three lines, the first ticked.
+   *
+   * Deliberately **not** a board of columns, which is what a Kanban module
+   * usually gets. The board is one of two views; the rail row points at the
+   * work, and a reader scanning icons at 16px reads "a list of things to do"
+   * far faster than three vertical rectangles. Same 18×18 grid and 1.4 stroke
+   * as the rest.
+   */
+  tasks: "M3.5 5.2l1.4 1.4 2.4-2.6M3.5 9.5l1.4 1.4M3.5 13.8l1.4 1.4M9.5 5h5M9.5 9.8h5M9.5 14.6h5",
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -244,6 +254,7 @@ function operationalSections(badges: {
   reviews?: number;
   applications?: number;
   projects?: number;
+  tasks?: number;
 }): NavSection[] {
   return [
     {
@@ -279,6 +290,29 @@ function operationalSections(badges: {
       to: "/projekte",
       permissions: ["project.read"],
       badge: badges.projects,
+      items: [],
+    },
+    {
+      /**
+       * Aufgaben, directly under Projekte and above Freigaben.
+       *
+       * It sits with the project rather than in the administrative zone because
+       * it is *work*, not a store you visit: "was liegt bei mir" is the first
+       * question somebody has on signing in, and the second is "was ist auf
+       * meinen Projekten los".
+       *
+       * The badge counts **overdue** tasks, not open ones. "Wie viele Aufgaben
+       * habe ich" is always some tens and is a number nobody acts on; a badge
+       * that is always lit is one people stop seeing. It shares a cache entry
+       * with the list screen's KPI tiles, so it costs no extra request.
+       */
+      id: "tasks",
+      label: "Aufgaben",
+      icon: "tasks",
+      zone: "work",
+      to: "/aufgaben",
+      permissions: ["task.read"],
+      badge: badges.tasks,
       items: [],
     },
     {
@@ -404,7 +438,7 @@ export function buildNavigation({
   /** From `api.contentTypes()`. Pass an empty array before it resolves. */
   types: ContentTypeRow[];
   canAny: (permissions: string[]) => boolean;
-  badges?: { reviews?: number; applications?: number; projects?: number };
+  badges?: { reviews?: number; applications?: number; projects?: number; tasks?: number };
 }): NavSection[] {
   // Sorted into rail order here rather than in the rail, so that everything
   // reading this list agrees: `flattenNavigation` feeds search in the same

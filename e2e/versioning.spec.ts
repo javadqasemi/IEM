@@ -211,14 +211,48 @@ test.describe("the history", () => {
       // Who, recorded on the row rather than joined — the account may be
       // deleted, and a history that says "unknown" about a sign-off is not one.
       expect(row.changedByEmail).toBe(ADMIN_EMAIL);
-      expect(row.changed).toContain("notes");
+    }
+
+    /**
+     * **`changed` names the fields the request sent, and nothing else.**
+     *
+     * This assertion used to be `every row contains "notes"`, and it passed for
+     * the wrong reason: `Object.keys` on a transformed DTO returns every
+     * declared property, so every row contained every field and any `toContain`
+     * was true. The tests above this line exercise four `notes` writes and two
+     * `managerId` writes, so the history has to show exactly that split — which
+     * is only possible if the bug is fixed.
+     *
+     * See `core/versioning/changed.ts`. Vitest cannot reach this: esbuild does
+     * not define the absent class fields, so the unit test passes either way.
+     */
+    const byVersion = new Map(rows.map((row) => [row.version, row.changed]));
+    expect([...byVersion.values()].some((changed) => changed.join() === "managerId")).toBe(true);
+    expect([...byVersion.values()].some((changed) => changed.join() === "notes")).toBe(true);
+    for (const [version, changed] of byVersion) {
+      expect(changed, `v${version} claims fields no request sent`).toHaveLength(1);
+      expect(["notes", "managerId"]).toContain(changed[0]);
     }
   });
 
   test("keeps the record as the API returned it, not as Prisma had it", async () => {
     const current = await read();
     const response = await api.get(`${API}/projects/${projectId}/versions/${current.version}`);
-    expect(response.ok()).toBe(true);
+    /**
+     * The message carries the status and the body, and it earned its keep
+     * immediately.
+     *
+     * When the test above this one failed, Playwright started a **fresh worker**
+     * for the next test — which re-ran `beforeAll`, made a new project, and left
+     * this one asking for v1 of a record that had never been written. A bare
+     * `expect(ok).toBe(true)` reported "expected true, received false" and sent
+     * the reader looking for a bug in `versionAt`. The URL in the message is
+     * what showed it was a cascade.
+     */
+    expect(
+      response.ok(),
+      `GET /projects/${projectId}/versions/${current.version} -> ${response.status()} ${await response.text()}`,
+    ).toBe(true);
     const row = ((await response.json()) as { data: { data: Record<string, unknown> } }).data;
 
     // A payload read in five years must not contain `{"s":1,"e":6,"d":[…]}`

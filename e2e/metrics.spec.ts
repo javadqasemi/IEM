@@ -146,28 +146,24 @@ test.describe("the six figures", () => {
   });
 
   test("counts a raised event, and only after it has committed", async () => {
-    const list = await admin.get(`${API}/projects?pageSize=1`);
+    const list = await admin.get(`${API}/projects?perPage=1`);
     const item = ((await list.json()) as { data: { items: { id: string; name: string; version: number }[] } })
       .data.items[0];
     expect(item, "keine Projekte in der Datenbank").toBeTruthy();
 
     const before = projects(await report());
 
-    /*
-      A rejected write first. `expectedVersion` one behind is a 409, which is
-      the optimistic lock working — the request fails, the transaction rolls
-      back and `EventBus.discard()` throws the queued event away. If the count
-      moved here, the report would be announcing edits that did not happen and
-      would disagree with the audit log built from the same events.
-    */
-    const stale = await admin.patch(`${API}/projects/${item.id}`, {
-      data: { name: item.name, expectedVersion: item.version - 1 },
-    });
-    expect(stale.status(), "veraltete Version").toBe(409);
-
-    const afterConflict = projects(await report());
-    expect(afterConflict.events.byName.ProjectUpdated).toBe(before.events.byName.ProjectUpdated);
-
+    /**
+     * The successful write first, so the conflict that follows is a real one.
+     *
+     * The earlier version of this test sent `version - 1` and expected a 409.
+     * That works only while the first project of the list happens to be at v2
+     * or later — and the day Wave 2's seed put a freshly created project at the
+     * top, `expectedVersion: 0` failed the DTO's `@Min(1)` and the test
+     * reported a **400** for a case it was never exercising. A test whose
+     * subject depends on which row sorts first is a test that passes for a
+     * reason nobody chose.
+     */
     const ok = await admin.patch(`${API}/projects/${item.id}`, {
       data: { name: item.name, expectedVersion: item.version },
     });
@@ -177,6 +173,23 @@ test.describe("the six figures", () => {
     expect(afterEdit.events.byName.ProjectUpdated).toBe(before.events.byName.ProjectUpdated + 1);
     // The audit row is derived from the same event, so the two move together.
     expect(afterEdit.audit.total).toBeGreaterThan(before.audit.total);
+
+    /*
+      And now the version this test read is genuinely stale: the write above
+      moved the record on. The request fails, the transaction rolls back and
+      `EventBus.discard()` throws the queued event away. If the count moved
+      here, the report would be announcing edits that did not happen and would
+      disagree with the audit log built from the same events.
+    */
+    const stale = await admin.patch(`${API}/projects/${item.id}`, {
+      data: { name: item.name, expectedVersion: item.version },
+    });
+    expect(stale.status(), "veraltete Version").toBe(409);
+
+    const afterConflict = projects(await report());
+    expect(afterConflict.events.byName.ProjectUpdated).toBe(
+      afterEdit.events.byName.ProjectUpdated,
+    );
   });
 });
 

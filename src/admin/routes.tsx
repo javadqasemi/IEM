@@ -1,6 +1,7 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { ApplicationsRoute } from "@/features/applications";
-import { ProjectDetailRoute, ProjectsRoute } from "@/features/projects";
+import { ProjectsRoute } from "@/features/projects";
+import { TasksRoute } from "@/features/tasks";
 import { match } from "@/core/router";
 
 /**
@@ -177,7 +178,20 @@ export const ROUTES: Route[] = [
   {
     pattern: "/projekte/:id/:tab",
     permissions: ["project.read"],
-    component: ProjectDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    /**
+     * `ProjectPage`, not `ProjectDetailRoute` directly.
+     *
+     * The wrapper is where the other modules' tabs are composed in — Aufgaben
+     * is the first — because `features/projects` may not import
+     * `features/tasks` and `widgets/` may not import a feature at all. The
+     * shell is the only layer above both. See `pages/ProjectPage.tsx`.
+     *
+     * This is also the one route that goes back through `page()` rather than
+     * taking a feature's own `lazy()`: the wrapper *is* this chunk's boundary,
+     * and the feature's `index.ts` it imports holds only two `lazy()` calls and
+     * a hook, so the screens themselves still split.
+     */
+    component: page(() => import("./pages/ProjectPage"), "ProjectPage"),
     props: ({ id }) => ({ projectId: id }),
     label: "Projekt",
     parent: "/projekte",
@@ -185,7 +199,7 @@ export const ROUTES: Route[] = [
   {
     pattern: "/projekte/:id",
     permissions: ["project.read"],
-    component: ProjectDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    component: page(() => import("./pages/ProjectPage"), "ProjectPage"),
     props: ({ id }) => ({ projectId: id }),
     label: "Projekt",
     parent: "/projekte",
@@ -199,6 +213,26 @@ export const ROUTES: Route[] = [
     // `features/projects/index.ts`.
     component: ProjectsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
     label: "Projekte",
+  },
+
+  /**
+   * Aufgaben, and it has **no detail route**.
+   *
+   * The opposite of the choice `/projekte/:id` makes, and deliberate: a task is
+   * opened in a drawer beside the board rather than on a page of its own — see
+   * the note on `TaskDrawer`. The consequence, stated rather than discovered, is
+   * that a task has no shareable URL. The day that is wrong, this table gains a
+   * `/aufgaben/:id` and the drawer becomes a route without anything else moving.
+   */
+  {
+    pattern: "/aufgaben",
+    permissions: ["task.read"],
+    // From the feature's own `lazy()` boundary, like `/projekte`: the shell
+    // statically imports the same `index.ts` for the rail's overdue badge, and
+    // two references to one module — one static, one dynamic — make Rollup
+    // hoist the screen into the entry chunk.
+    component: TasksRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "Aufgaben",
   },
 
   {

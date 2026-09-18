@@ -7,6 +7,7 @@ import {
 import type { ProjectStatus } from "@prisma/client";
 import { EventBus } from "../core/events/event-bus";
 import { VersioningService } from "../core/versioning/versioning.service";
+import { VERSION_CONTROL_FIELDS, changedFields } from "../core/versioning/changed";
 import type { AuthUser } from "../common/decorators";
 import type { RawListQuery } from "../core/list/list.decorator";
 import { paginated } from "../core/list/list";
@@ -180,7 +181,22 @@ export class ProjectsService {
     if (missing.length) throw new BadRequestException(`Unbekannt: ${missing.join(", ")}.`);
 
     const before = toAuditSnapshot(current);
-    const fields = Object.keys(dto).filter((key) => key !== "expectedVersion");
+    /*
+      `changedFields`, not `Object.keys` — and this line was wrong from F13
+      until Wave 2 found it.
+
+      A validated DTO carries every declared property: the build targets ES2022,
+      so `useDefineForClassFields` defines every optional field as `undefined`,
+      and `ValidationPipe` transforms, so the service receives a class instance.
+      `Object.keys` therefore reported fourteen fields for a request that
+      changed one, and every row of every project's Verlauf said so. Nothing
+      failed; the history simply stopped being readable. See the note on
+      `changedFields`.
+
+      `versionNote` is excluded too, which the old line missed: the note *about*
+      a change is not one of the record's fields.
+    */
+    const fields = changedFields(dto, VERSION_CONTROL_FIELDS);
 
     /*
       One transaction: the guarded write and the version it produces.

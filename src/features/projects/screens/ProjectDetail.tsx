@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState, type ComponentType } from "react";
 import { Link, navigate, useRoute } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import {
@@ -42,7 +42,27 @@ import { ProjectEditDialog } from "./ProjectEditDialog";
  * a panel, and telling a screen reader otherwise would describe something that
  * does not happen.
  */
-export function ProjectDetail({ projectId }: { projectId: string }) {
+export function ProjectDetail({
+  projectId,
+  embedded,
+}: {
+  projectId: string;
+  /**
+   * The other modules' screens, by tab slug — **supplied from above**.
+   *
+   * This is the container/owner split made mechanical. `features/projects` must
+   * not import `features/tasks`, and `widgets/` may not import a feature at all
+   * (`architecture.test.ts` enforces both), so the only layer that can put the
+   * two together is the one above them: `admin/pages/ProjectPage.tsx` passes
+   * `{ aufgaben: ProjectTasksTab }`, and this screen renders whatever it was
+   * given. A slug with no entry falls through to `ModulePlaceholder`, which is
+   * why the eight unbuilt tabs need no change here as they arrive.
+   *
+   * The prop is optional so the screen can still be rendered on its own — which
+   * is what `ProjectDetail` does in every test that does not care about tabs.
+   */
+  embedded?: Record<string, ComponentType<{ projectId: string }>>;
+}) {
   const route = useRoute();
   const { can } = useAuth();
   const project = useProject(projectId);
@@ -138,7 +158,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 text because the strip is already fourteen items wide, and the
                 placeholder inside says the same thing in full.
               */}
-              {!tab.owned ? (
+              {/*
+                `!owned` is not enough any more.
+
+                A tab can belong to another module *and* be built — Aufgaben is
+                the first — so the dot asks whether anything was composed in for
+                this slug. Keying it on ownership alone would mark a working
+                board as unimplemented, which is the one thing worse than no
+                dot at all.
+              */}
+              {!tab.owned && !embedded?.[tab.slug] ? (
                 <span
                   className="h-1.5 w-1.5 rounded-full bg-line-strong"
                   title="Modul noch nicht implementiert"
@@ -149,17 +178,55 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         })}
       </nav>
 
-      {active.owned && active.component ? (
-        <active.component project={record} readOnly={readOnly} />
-      ) : (
-        <ModulePlaceholder
-          title={active.label}
-          description={active.description ?? ""}
-          status={active.status}
-          wave={active.wave}
-        />
-      )}
+      {renderTab(active, record, readOnly, embedded)}
     </>
+  );
+}
+
+/**
+ * What goes in the panel, in the order the three cases were decided.
+ *
+ * 1. **This feature's own data**, rendered by its own component.
+ * 2. **Another module's screen**, if the shell composed one in for this slug.
+ * 3. **`ModulePlaceholder`**, for a module that does not exist yet.
+ *
+ * The third is never nothing, and that is the rule `tabs.ts` states: an empty
+ * tab is indistinguishable from a broken one — somebody clicks *Pläne*, sees
+ * nothing, and concludes this project has no drawings, which is a statement
+ * about the data and a false one.
+ */
+function renderTab(
+  tab: ProjectTab,
+  project: Project,
+  readOnly: boolean,
+  embedded?: Record<string, ComponentType<{ projectId: string }>>,
+) {
+  if (tab.owned && tab.component) {
+    return <tab.component project={project} readOnly={readOnly} />;
+  }
+
+  const Embedded = embedded?.[tab.slug];
+  if (Embedded) {
+    /*
+      The other module's own `lazy()` boundary is what it arrives wrapped in, so
+      it needs a `Suspense` of its own: the shell's boundary has already
+      resolved by the time a tab is clicked, and without one here React throws
+      on the first render of a tab that has not been loaded yet.
+    */
+    return (
+      <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+        <Embedded projectId={project.id} />
+      </Suspense>
+    );
+  }
+
+  return (
+    <ModulePlaceholder
+      title={tab.label}
+      description={tab.description ?? ""}
+      status={tab.status}
+      wave={tab.wave}
+    />
   );
 }
 

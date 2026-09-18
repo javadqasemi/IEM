@@ -24,6 +24,18 @@ export type Paginated<T> = {
 
 export type SortDirection = "asc" | "desc";
 
+/**
+ * The ten operators the server's list contract accepts.
+ *
+ * **This list has to match `OPERATORS` in `server/src/core/list/list.ts`
+ * exactly**, and it is a hand-kept copy because the two halves are separate
+ * packages. The failure when it drifts is quiet in one direction and loud in
+ * the other: an operator the server has and this list does not is one a
+ * repository simply cannot express — `isnull` was missing until Tasks needed
+ * "the top level of the tree" and could not write it — while one this list has
+ * and the server does not is a 400 naming the operator, which is at least
+ * findable.
+ */
 export type FilterOperator =
   | "eq"
   | "ne"
@@ -33,7 +45,15 @@ export type FilterOperator =
   | "lt"
   | "lte"
   | "like"
-  | "between";
+  | "between"
+  /**
+   * `filter[parentTaskId]=isnull:true` — the column is null.
+   *
+   * The value is `"true"` or `"false"`, and `false` means *not* null, which is
+   * the half people forget: "tasks with a parent" and "all tasks" are different
+   * questions, and omitting the filter answers the second one.
+   */
+  | "isnull";
 
 export type Filter = {
   field: string;
