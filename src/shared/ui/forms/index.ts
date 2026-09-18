@@ -8,4 +8,7 @@
 export { Field } from "./Field";
 export { Input, Textarea, Select, Checkbox, Toggle, SearchInput } from "./inputs";
 export { FieldRenderer } from "./FieldRenderer";
+export { Form, FormSection, FormActions } from "./Form";
+export { EntityForm } from "./EntityForm";
+export { useForm, type FormState, type UseFormOptions } from "./useForm";
 export type { FieldDef, FieldErrors } from "./types";

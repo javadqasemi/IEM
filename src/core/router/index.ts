@@ -5,6 +5,7 @@ export {
   navigate,
   useMatch,
   useRoute,
+  setNavigationBlocker,
   useScrollReset,
   type RouteLocation,
 } from "./router";

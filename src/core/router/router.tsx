@@ -48,19 +48,91 @@ export function navigate(path: string, options: { replace?: boolean } = {}) {
   }
 }
 
+/**
+ * One listener for the whole application, not one per `useRoute()` call.
+ *
+ * It used to be per-hook, which was harmless while nothing needed to *refuse*
+ * a navigation. A guard cannot live in a hook: every `useRoute` subscriber
+ * gets the same `hashchange`, the shell's runs first and re-renders to the new
+ * screen, and a guard in a later one would be reverting a hash the application
+ * has already acted on. With a single store there is one place that decides,
+ * and it decides before anybody is told.
+ *
+ * Lazily read, because `src/admin/smoke.test.tsx` stubs `globalThis.window`
+ * before rendering and a module-level read would run at import time instead.
+ */
+let location: RouteLocation | null = null;
+const subscribers = new Set<() => void>();
+let blocker: ((to: RouteLocation) => boolean) | null = null;
+
+function current(): RouteLocation {
+  /*
+    The cache is only valid while the listener is attached.
+
+    With no subscribers there is no `hashchange` handler, so a remembered
+    location has no way of being right — a redirect, a test that sets the hash
+    directly, or a render before any effect has run would all read a stale
+    value. `src/admin/smoke.test.tsx` is the case that found this: it renders
+    with `renderToStaticMarkup`, where effects never run, and four assertions
+    about the rail silently measured the *first* test's route.
+  */
+  if (!subscribers.size) location = read();
+  location ??= read();
+  return location;
+}
+
+/**
+ * Refuses navigations while something is unsaved.
+ *
+ * The callback returns `true` to allow. One at a time: two screens with unsaved
+ * work cannot both be mounted, and a stack would make "who refused" unanswerable.
+ * `useUnsavedGuard` in `shared/hooks` is the only intended caller.
+ */
+export function setNavigationBlocker(fn: ((to: RouteLocation) => boolean) | null): void {
+  blocker = fn;
+}
+
+function handleHashChange() {
+  const next = read();
+  const previous = current();
+  if (next.path !== previous.path && blocker && !blocker(next)) {
+    /*
+      Put the hash back without firing another `hashchange`.
+
+      `replaceState` is silent, which is exactly what is wanted here: the
+      address bar returns to where the reader still is, and no subscriber is
+      told anything happened. `location` was never advanced, so nothing has
+      rendered the screen they were refused.
+    */
+    const search = previous.query.toString();
+    window.history.replaceState(null, "", `#${previous.path}${search ? `?${search}` : ""}`);
+    return;
+  }
+  location = next;
+  for (const fn of subscribers) fn();
+}
+
+function subscribe(fn: () => void): () => void {
+  if (!subscribers.size) window.addEventListener("hashchange", handleHashChange);
+  subscribers.add(fn);
+  return () => {
+    subscribers.delete(fn);
+    if (!subscribers.size) window.removeEventListener("hashchange", handleHashChange);
+  };
+}
+
 export function useRoute(): RouteLocation {
-  const [route, setRoute] = useState(read);
+  const [, rerender] = useState(0);
 
   useEffect(() => {
-    const onChange = () => setRoute(read());
-    window.addEventListener("hashchange", onChange);
+    const unsubscribe = subscribe(() => rerender((n) => n + 1));
     // The hash may already have changed between the first render and this
     // effect running — cheap to re-read rather than assume it has not.
-    onChange();
-    return () => window.removeEventListener("hashchange", onChange);
+    if (read().path !== current().path) handleHashChange();
+    return unsubscribe;
   }, []);
 
-  return route;
+  return current();
 }
 
 /**

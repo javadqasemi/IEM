@@ -262,3 +262,66 @@ test.describe("the trail and the bar", () => {
     await expect(header.getByRole("button", { name: /Als CSV exportieren/i })).toHaveCount(0);
   });
 });
+
+
+/**
+ * The unsaved-changes guard (foundation stage F5).
+ *
+ * The half worth testing in a browser: leaving a screen through the *rail*,
+ * which the old `beforeunload` plus back-button dialog could not cover at all.
+ * The browser does not treat a hash change as a navigation, so nothing fired
+ * and the work went.
+ */
+test.describe("unsaved changes", () => {
+  test.beforeEach(async ({ signIn }) => {
+    await signIn();
+  });
+
+  test("refuses a rail click while a form is dirty, and honours both answers", async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the rail is off-canvas below lg");
+
+    await page.goto("/admin.html#/inhalte/projects");
+    await page.locator("main a[href^='#/inhalte/projects/']").first().click();
+    await expect(page).toHaveURL(/#\/inhalte\/projects\/.+/);
+    const editing = page.url();
+
+    // Dirty the form through a real field.
+    const firstInput = page.locator("main input[type='text']").first();
+    await firstInput.click();
+    await firstInput.type("X");
+
+    // The rail is an ordinary link — no special handling on this screen.
+    await page.locator("#admin-rail a[href='#/medien']").click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText("Änderungen verwerfen?")).toBeVisible();
+
+    // Staying leaves the address bar where it was. That is the part a
+    // `beforeunload` cannot do: the hash had already changed.
+    await dialog.getByRole("button", { name: "Abbrechen" }).click();
+    await expect(page).toHaveURL(editing);
+    await expect(firstInput).toBeVisible();
+
+    // Leaving continues the navigation the reader actually asked for, rather
+    // than returning to the list — which is what the old back-button dialog did
+    // to anyone who had clicked something else.
+    await page.locator("#admin-rail a[href='#/medien']").click();
+    await expect(dialog.getByText("Änderungen verwerfen?")).toBeVisible();
+    await dialog.getByRole("button", { name: "Verwerfen" }).click();
+    await expect(page).toHaveURL(/#\/medien$/);
+  });
+
+  test("lets a clean form leave without asking", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "the rail is off-canvas below lg");
+
+    await page.goto("/admin.html#/inhalte/projects");
+    await page.locator("main a[href^='#/inhalte/projects/']").first().click();
+    await expect(page).toHaveURL(/#\/inhalte\/projects\/.+/);
+
+    await page.locator("#admin-rail a[href='#/medien']").click();
+    await expect(page).toHaveURL(/#\/medien$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+});

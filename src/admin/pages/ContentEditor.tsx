@@ -8,7 +8,7 @@ import { WorkflowBadge } from "@/entities/content";
 import { api, type EntryRow, type VersionRow } from "../lib/api";
 import { useAuth } from "@/core/auth";
 import { navigate, usePageTitle } from "@/core/router";
-import { useMutation } from "@/shared/hooks";
+import { useMutation, useUnsavedGuard } from "@/shared/hooks";
 import { useAsync } from "../lib/useAsync";
 import { MediaPickerDialog } from "./Media";
 import { title } from "./Content";
@@ -55,7 +55,21 @@ export function ContentEditorPage({
   const [picker, setPicker] = useState<((url: string) => void) | null>(null);
   const [showVersions, setShowVersions] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false);
-  const [discardOpen, setDiscardOpen] = useState(false);
+
+  /**
+   * The unsaved-changes guard (foundation stage F5).
+   *
+   * It replaces a `beforeunload` listener plus a "Verwerfen" dialog wired to
+   * this screen's own back button. That pair covered a reload and exactly one
+   * of the five ways out of here — the rail, the breadcrumb, the browser's
+   * back button and a typed hash all walked straight past it, because the
+   * browser does not treat a hash change as a navigation.
+   *
+   * `core/router` now holds one blocker, consulted before any subscriber is
+   * told a navigation happened, so a refused click leaves the address bar and
+   * the screen exactly where they were.
+   */
+  const guard = useUnsavedGuard(dirty);
 
   /**
    * The last breadcrumb, published to the shell (foundation stage F4).
@@ -93,20 +107,6 @@ export function ContentEditorPage({
   });
   const submit = useMutation(api.submit);
   const rollback = useMutation(api.rollback);
-
-  /**
-   * Warns before losing unsaved work.
-   *
-   * `beforeunload` covers a reload or a closed tab. It cannot cover a hash
-   * change — the browser does not treat that as a navigation — so the in-app
-   * guard is the "Verwerfen" dialog on the back link instead.
-   */
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
 
   const update = (next: Record<string, unknown>) => {
     setDraft(next);
@@ -163,7 +163,9 @@ export function ContentEditorPage({
             <>
               <Button
                 variant="ghost"
-                onClick={() => (dirty ? setDiscardOpen(true) : navigate(`/inhalte/${typeKey}`))}
+                // No `dirty` check here any more: the guard intercepts the
+                // navigation itself, so this link behaves like every other.
+                onClick={() => navigate(`/inhalte/${typeKey}`)}
               >
                 Zurück
               </Button>
@@ -327,18 +329,22 @@ export function ContentEditorPage({
         }}
       />
 
+      {/*
+        One dialog for every way out, rather than one for the back button.
+
+        `guard.blocked` carries where the reader was trying to go, so
+        "Verwerfen" continues that navigation instead of always returning to
+        the list — which is what the old version did, and it silently
+        redirected anyone who had clicked "Medien" in the rail.
+      */}
       <ConfirmDialog
-        open={discardOpen}
-        onClose={() => setDiscardOpen(false)}
+        open={guard.blocked !== null}
+        onClose={guard.stay}
         destructive
         title="Änderungen verwerfen?"
         confirmLabel="Verwerfen"
         message="Die nicht gespeicherten Änderungen gehen verloren."
-        onConfirm={() => {
-          setDiscardOpen(false);
-          setDirty(false);
-          navigate(`/inhalte/${typeKey}`);
-        }}
+        onConfirm={guard.leave}
       />
     </>
   );
