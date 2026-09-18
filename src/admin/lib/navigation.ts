@@ -1,4 +1,4 @@
-import type { ContentTypeRow } from "./api";
+﻿import type { ContentTypeRow } from "./api";
 
 /**
  * The dashboard's navigation, as data.
@@ -98,6 +98,23 @@ export const ICONS = {
    * was more than one way, and this is the one that was chosen and why.
    */
   decisions: "M9 15.4V9M9 9 5 5M9 9l3.4-3.4M11.2 6.6l1.3 1.3 2.5-2.7",
+  /**
+   * Pläne: a sheet with a folded corner and a title block.
+   *
+   * Deliberately **not** a generic document icon — Dokumente is the next module
+   * and will need one, and two identical page shapes in one rail is the
+   * mismatch nobody can unsee. The fold plus the ruled block in the corner is
+   * what distinguishes a drawing from a letter at 16px.
+   */
+  drawings: "M4 2.6h6.5L14 6.1v9.3H4zM10.5 2.6v3.5H14M6.2 11.4h5.6M6.2 13.4h3.2",
+  /**
+   * Planversand: a sheet leaving, as an arrow out of a stack.
+   *
+   * Not an envelope — the module records that plans went out, it does not send
+   * e-mail, and an envelope would promise the thing that is explicitly not
+   * built.
+   */
+  transmittals: "M3.2 5.4h6.4v7.2H3.2zM11 9h4.2M13.4 7l2 2-2 2",
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -276,6 +293,7 @@ function operationalSections(badges: {
   projects?: number;
   tasks?: number;
   meetings?: number;
+  drawings?: number;
 }): NavSection[] {
   return [
     {
@@ -375,6 +393,44 @@ function operationalSections(badges: {
       zone: "work",
       to: "/entscheide",
       permissions: ["decision.read"],
+      items: [],
+    },
+    {
+      /**
+       * Pläne, under Entscheide.
+       *
+       * The badge counts plans **in Prüfung** — not how many plans exist, and
+       * not how many are in progress. *"Was liegt bei mir zur Prüfung"* is the
+       * one thing this module asks of a person; a count of the whole register
+       * only grows and is a number nobody acts on. It shares a cache entry with
+       * the register's KPI tiles, so it costs no extra request.
+       */
+      id: "drawings",
+      label: "Pläne",
+      icon: "drawings",
+      zone: "work",
+      to: "/plaene",
+      permissions: ["drawing.read"],
+      badge: badges.drawings,
+      items: [],
+    },
+    {
+      /**
+       * Planversand, a row of its own rather than a tab under Pläne.
+       *
+       * It is found by its own number months later, and the question it answers
+       * is about the send rather than about any one plan.
+       *
+       * **No badge.** There is no number here anybody acts on: unacknowledged
+       * receipts are somebody's to chase by telephone, not something a rail can
+       * count usefully.
+       */
+      id: "transmittals",
+      label: "Planversand",
+      icon: "transmittals",
+      zone: "work",
+      to: "/planversand",
+      permissions: ["transmittal.read"],
       items: [],
     },
     {
@@ -506,6 +562,7 @@ export function buildNavigation({
     projects?: number;
     tasks?: number;
     meetings?: number;
+    drawings?: number;
   };
 }): NavSection[] {
   // Sorted into rail order here rather than in the rail, so that everything

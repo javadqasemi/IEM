@@ -389,6 +389,35 @@ inherited:
   row. A project's meetings are chronology; its decisions are the state, and the
   question the tab gets opened for is the second one.
 
+**Pläne is done** — Wave 2, module 3, and the third of the eight embedded tabs
+to stop being a placeholder. The same ten rows:
+
+| | Met by |
+| --- | --- |
+| Entities, migration, seed | `Drawing`, `DrawingRevision`, `Transmittal`, `TransmittalItem`, `TransmittalRecipient`. `DrawingRoom` is **absent** — it waits for module 6 with `Floor` and `BuildingSystem` |
+| Permissions | `drawing.*` with four keys beyond CRUD — `check`, `release`, `issue`, `withdraw` — because gezeichnet, geprüft, freigegeben and ausgegeben are four different people's authority. `transmittal.*` has **no update and no delete**, by design |
+| Audit | derived from events. The module calls `AuditService` nowhere |
+| Events | eleven, three of them adopted from the F7 catalogue rather than invented |
+| API | the full list contract on three resources, two CSV exports, plus the acts: `/status`, `/revisions`, `/transmittals`, `/acknowledge` |
+| Repository / mapper / service | all five layers on both sides; `drawings.rules.ts` is pure and exhaustively tested |
+| UI | a register grouped by Gewerk on the project tab and flat at `/plaene`, a detail **route** with three tabs, the revision dialog, the Planversand assembly with its warnings report, and the transmittal register |
+| Tests | 132 on the server, 98 on the client |
+| E2E | `/plaene` and `/planversand` in `SCREENS`; both themes, three widths, axe clean |
+| Metrics | `drawings.metrics.ts`, and **the first module where `archived` is not null** — a withdrawn plan is precisely "kept, finished with" |
+
+Three things this module decided that the two before it did not:
+
+- **A rule a permission cannot express.** The four-eyes rule asks whose name is
+  in the other column, not what the caller holds, so it is a rule rather than a
+  key — and `drawing.check` exists anyway, because *may you certify a check* and
+  *are you the right person to* are different questions.
+- **`ISSUED` and `SUPERSEDED` are consequences.** The `AUFGEHOBEN` arrangement
+  from Entscheide, applied a second time. A pattern used twice for the same
+  reason has stopped being a coincidence.
+- **A warning rather than a refusal.** Reissuing a revised plan is the normal
+  case; naming who still holds the old revision is the whole point of recording
+  a Planversand at all.
+
 **Deviation 2 — Notifications is inserted at 9**, which the review places last
 under Automation. The bell is what makes Tasks, Meetings and Issues visible to
 the people who are not looking at them; shipping three modules that silently

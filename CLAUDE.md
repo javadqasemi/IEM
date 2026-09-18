@@ -26,9 +26,9 @@ what may go in them, and `src/architecture.test.ts` enforces the four that matte
 | `docs/roadmap.md` | Build order, complexity, dependencies, database and API impact, and the definition of done per module |
 
 As of 18 September 2026 the **fourteen Foundation stages are done**, so is
-**Wave 1 module 4 — Projects, the reference standard**, and so are the first two modules of
-Wave 2, **Aufgaben** and **Sitzungen und Entscheide**. The four modules Projects needs as data
-(Customer, Building, Employee, Discipline)
+**Wave 1 module 4 — Projects, the reference standard**, and so are the first three modules of
+Wave 2: **Aufgaben**, **Sitzungen und Entscheide** and **Pläne und Planversand**. The four
+modules Projects needs as data (Customer, Building, Employee, Discipline)
 ship as **read-only slices**: the subset `docs/data-model.md` documents that a real project
 requires, no more, each in the folder its own module will grow into.
 
@@ -68,6 +68,7 @@ permissions and the tests, not a folder with the same names in it.
 | F14 | `core/metrics` — six operational figures per module, and a module that declares itself |
 | W2·1 | **Aufgaben** — four tables, ten events, a board, row-level *write* scope, and the first embedded project tab |
 | W2·2 | **Sitzungen und Entscheide** — six tables, twelve events, a protocol that closes on approval, and a decision register that outlives it |
+| W2·3 | **Pläne und Planversand** — five tables, eleven events, `I` and `O` skipped, and a reissue that names who holds the old revision |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -120,6 +121,16 @@ way.** Four more arguments, each written up where it lives:
 | An approved protocol is closed | `refuseProtocolEdit` consults no permission, which is the point: it is not about authority. A protocol that can still be edited after approval is a document whose contents *at the time of approval* are unknowable, which is precisely the property a dispute needs it to have. The way to change one is to approve an **amendment** at the next meeting, and the screen says so rather than only refusing |
 | `AUFGEHOBEN` is not a settable status | It is reachable only through `supersede`, which always attaches the replacement in one transaction — so a reversal can never read as withdrawn with nothing to point at. `refuseDecisionStatus` refuses it as a direct transition and says what to do instead. The arrow points **from the new decision to the old one**, which is the one call in the module where the wrong direction still typechecks, because both arguments are ids |
 | Two resources, one feature | `/meetings` and `/decisions` are one module and share one cache prefix. A decision is created from a protocol line and a line shows its decision's status, so a write to either changes what the other renders — two prefixes would make every mutation guess which to invalidate, and the guess would be wrong exactly when a decision was superseded from a meeting screen |
+
+**What Pläne changed about the pattern.** Four more, and the first is the second
+time a shape has been *adopted* rather than invented — which is what stops it being a coincidence:
+
+| | |
+| --- | --- |
+| `ISSUED`/`SUPERSEDED` are not settable | The same arrangement Entscheide used for `AUFGEHOBEN`, applied to two statuses instead of one. Both are consequences — of a Planversand and of a newer revision — so a plan can never read as being in a contractor's hands with no row saying whose. `refuseTransition` refuses each **by name** and says what to do instead, because the generic "Status X kann nur nach Y" would send somebody looking for a missing transition |
+| A rule a permission cannot express | **A draftsman may not check their own work.** The question is not what the caller holds but whose name is already in the other column, so `refuseFourEyes` is a rule and not a key. What is deliberately *not* enforced — releasing a plan you checked — is the other half: `docs/permissions.md` names only the first pair, and a rule stricter than the firm's practice is one the firm stops using the system over |
+| The catalogue settled a rule before the service asked it | `DrawingReleased`, `DrawingIssued` and `DrawingWithdrawn` were declared during **F7**, before the module existed, and the module was built to them. `DrawingWithdrawn.reason` is a non-nullable `string`, which turned out to mean a plan cannot be withdrawn without saying why — the payload decided it. A `RevisionReleased` invented here would have been a second name for one fact, and `drawings.metrics.test.ts` asserts against exactly that |
+| A warning that is not a refusal | Reissuing a revised plan is the **normal case**, so refusing it would make the correct action impossible. But whoever holds revision B while C goes out is the one who builds the wrong thing, so `priorIssueWarnings` names them, the warnings come back *beside* the created transmittal, and the dialog becomes a report rather than closing. A toast would put them where nobody reads them |
 
 ## Commands
 
@@ -775,6 +786,33 @@ Opened by Wave 2 module 2, and each is a deliberate stop rather than an oversigh
 - **Editing a protocol line is not versioned.** `EntityVersion` covers the meeting record and the
   decision, not the lines. A protocol's integrity is defended by closing it on approval instead,
   which is the stronger guarantee and the one the firm actually relies on.
+
+Opened by Wave 2 module 3, and each is a deliberate stop rather than an oversight:
+
+- **The plan file is not uploaded.** `DrawingRevision` carries `storageKey`, `size`, `checksum`
+  and `mimeType`, and `RevisionDialog` fills all four — the checksum is a **real SHA-256** computed
+  in the browser from the chosen file, because it is how somebody later verifies that a file they
+  were sent is the file that was issued. What is missing is the bytes: there is no upload route for
+  plans, and inventing one that wrote into `MEDIA_ROOT` would publish the firm's drawings to anyone
+  who can guess a URL — the allowlist in `main.ts` is a *positive* match for exactly that reason.
+  The dialog says so rather than looking like an upload and storing nothing. Documents (module 4)
+  brings the storage seam, and `storageKey` is already the shape it will use.
+- **Geschoss, Anlage und Raum are not anchors yet.** `Floor`, `Room` and `BuildingSystem` are Wave 2
+  module 6, so `docs/data-model.md` §3.13's four named queries are **two working and two waiting** —
+  *alle Lüftungspläne* and *alles zu diesem Gebäude* work; *jeder Plan, auf dem Raum 2.14 vorkommt*
+  and the expensive one, *was muss neu ausgegeben werden wenn OG2 sich ändert*, do not.
+  `drawings.list.test.ts` asserts those filter keys are **refused** rather than silently matching
+  nothing, because an empty list reads as "there are none".
+- **Nothing is sent, again.** A Planversand records that plans went out; no e-mail leaves the
+  building, the same stop `minutesSentAt` makes one module earlier. The rail icon is a sheet with an
+  arrow rather than an envelope for that reason.
+- **The Planversand dialog fetches a detail per selected plan.** A list row carries
+  `currentRevision` as a *letter*, not a revision id, so ticking a plan fetches its detail to find
+  the newest revision. One request per plan somebody actually selects, rather than a join on every
+  row of the register — and the reason the dialog asks for a page of 100 instead of paginating.
+- **There is no `Contact`, so a recipient is free text.** `TransmittalRecipient` takes an
+  `employeeId` *or* a typed name, firm and e-mail — the same compromise `MeetingAttendee` makes, and
+  it becomes a foreign key in Wave 3.
 
 `README.md` → *Known limitations* carries the product-level list (no MFA flow, local-disk media,
 placeholder legal pages, `CodeGate` is a display barrier and not security).

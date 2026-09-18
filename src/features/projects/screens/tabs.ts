@@ -113,13 +113,22 @@ export const EMBEDDED_TABS: ProjectTab[] = [
     wave: "Wave 2",
   },
   {
+    /**
+     * **Built** — Wave 2, module 3, and the third embedded tab to stop being a
+     * placeholder. Same arrangement as the two above.
+     *
+     * The removed description promised more than what shipped, and that is
+     * worth recording rather than quietly dropping: it said "verknüpft mit
+     * Gewerk, Gebäude, Geschoss und Raum — damit *alle Lüftungspläne für OG2*
+     * ein Filter ist". Gewerk and Gebäude are there; **Geschoss und Raum are
+     * not**, because `Floor` and `Room` are Wave 2 module 6. So half of that
+     * sentence is true today and the OG2 half waits with them —
+     * `drawings.list.test.ts` asserts the missing filters are *refused* rather
+     * than silently matching nothing.
+     */
     slug: "plaene",
     label: "Pläne",
     owned: false,
-    description:
-      "Pläne mit Revisionen und Planversand, verknüpft mit Gewerk, Gebäude, Geschoss und Raum — damit „alle Lüftungspläne für OG2“ ein Filter ist.",
-    status: "planned",
-    wave: "Wave 2",
   },
   {
     slug: "bim",

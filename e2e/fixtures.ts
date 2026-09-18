@@ -494,6 +494,16 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
    */
   { path: "/sitzungen", name: "meetings", heading: /Ein genehmigtes Protokoll ist der Stand/i },
   { path: "/entscheide", name: "decisions", heading: /er gilt nur nicht mehr/i },
+  /**
+   * The description again, and for the same reason as the four above:
+   * "Pläne" and "Planversand" are both rail rows on every screen.
+   *
+   * No `/plaene/:id` entry — the detail path needs a seeded plan, so
+   * `drawings.spec.ts` opens one from the register and walks its three tabs
+   * rather than this sweep guessing an id.
+   */
+  { path: "/plaene", name: "drawings", heading: /jemand baut danach/i },
+  { path: "/planversand", name: "transmittals", heading: /durch einen neuen ersetzt/i },
   { path: "/inhalte", name: "content-index", heading: /Website|Inhalte/i },
   { path: "/inhalte/projects", name: "content-list-projects", heading: /Referenz/i },
   { path: "/inhalte/team", name: "content-list-team", heading: /Team/i },

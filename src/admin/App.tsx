@@ -5,6 +5,7 @@ import { useNewApplicationCount } from "@/features/applications";
 import { useActiveProjectCount } from "@/features/projects";
 import { useOverdueTaskCount } from "@/features/tasks";
 import { usePendingMinutesCount } from "@/features/meetings";
+import { useAwaitingCheckCount } from "@/features/drawings";
 import { api } from "./lib/api";
 import { useAuth } from "@/core/auth";
 import { RouteMetaProvider, buildTrail, useRoute, useScrollReset, type Crumb } from "@/core/router";
@@ -51,6 +52,9 @@ export function App() {
   // being signed in, so a badge nobody can see costs no request — that is the
   // other half of the fix for the retry loop in `core/api/query.ts`.
   const pendingMinutes = usePendingMinutesCount(can("meeting.read"));
+  // Plans in Prüfung, not plans. "Was liegt bei mir zur Prüfung" is the one
+  // thing Pläne asks of a person; a count of the whole register only grows.
+  const awaitingCheck = useAwaitingCheckCount(can("drawing.read"));
 
   /**
    * The content types the menu's Website groups are made of.
@@ -78,6 +82,7 @@ export function App() {
           projects: liveProjects,
           tasks: overdueTasks,
           meetings: pendingMinutes,
+          drawings: awaitingCheck,
         },
       }),
     [
@@ -87,6 +92,7 @@ export function App() {
       liveProjects,
       overdueTasks,
       pendingMinutes,
+      awaitingCheck,
       canAny,
     ],
   );

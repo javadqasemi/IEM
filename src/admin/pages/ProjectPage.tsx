@@ -1,6 +1,7 @@
 import { ProjectDetailRoute } from "@/features/projects";
 import { ProjectTasksTab } from "@/features/tasks";
 import { ProjectMeetingsTab } from "@/features/meetings";
+import { ProjectDrawingsTab } from "@/features/drawings";
 
 /**
  * The project view, with the other modules' tabs composed into it.
@@ -27,6 +28,7 @@ import { ProjectMeetingsTab } from "@/features/meetings";
 const EMBEDDED = {
   aufgaben: ProjectTasksTab,
   sitzungen: ProjectMeetingsTab,
+  plaene: ProjectDrawingsTab,
 };
 
 export function ProjectPage({ projectId }: { projectId: string }) {

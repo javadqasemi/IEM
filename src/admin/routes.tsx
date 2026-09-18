@@ -8,6 +8,12 @@ import {
   MeetingDetailRoute,
   MeetingsRoute,
 } from "@/features/meetings";
+import {
+  DrawingDetailRoute,
+  DrawingsRoute,
+  TransmittalDetailRoute,
+  TransmittalsRoute,
+} from "@/features/drawings";
 import { match } from "@/core/router";
 
 /**
@@ -301,6 +307,63 @@ export const ROUTES: Route[] = [
     permissions: ["decision.read"],
     component: DecisionsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
     label: "Entscheide",
+  },
+
+  /**
+   * Pläne — two patterns, like `/projekte` and `/sitzungen`.
+   *
+   * The tab is in the URL, so `/plaene/:id/revisionen` is where a reload
+   * returns to, and the three-segment form has to be read before the two.
+   * A plan is cited by number and its URL gets pasted into an e-mail, which is
+   * the same argument that gave Sitzungen a route where Aufgaben has a drawer.
+   */
+  {
+    pattern: "/plaene/:id/:tab",
+    permissions: ["drawing.read"],
+    component: DrawingDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    props: ({ id }) => ({ drawingId: id }),
+    label: "Plan",
+    parent: "/plaene",
+  },
+  {
+    pattern: "/plaene/:id",
+    permissions: ["drawing.read"],
+    component: DrawingDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    props: ({ id }) => ({ drawingId: id }),
+    label: "Plan",
+    parent: "/plaene",
+  },
+  {
+    pattern: "/plaene",
+    permissions: ["drawing.read"],
+    // From the feature's own `lazy()` boundary: the shell statically imports
+    // the same `index.ts` for the rail's awaiting-check badge.
+    component: DrawingsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "Pläne",
+  },
+
+  /**
+   * Planversand — its own destination, not a tab under Pläne.
+   *
+   * A transmittal is found by its own number months later, and the question it
+   * answers — *"welche Revision hatte der Sanitär am 14. März"* — is about the
+   * send rather than about any one plan.
+   */
+  {
+    pattern: "/planversand/:id",
+    permissions: ["transmittal.read"],
+    component: TransmittalDetailRoute as LazyExoticComponent<
+      ComponentType<Record<string, string>>
+    >,
+    props: ({ id }) => ({ transmittalId: id }),
+    label: "Versand",
+    parent: "/planversand",
+  },
+  {
+    pattern: "/planversand",
+    permissions: ["transmittal.read"],
+    component: TransmittalsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "Planversand",
   },
 
   {
