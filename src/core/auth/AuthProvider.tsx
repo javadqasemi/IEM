@@ -7,10 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, setAccessToken, setUnauthenticatedHandler, type Me } from "./api";
+import { clearQueryCache, setAccessToken, setUnauthenticatedHandler } from "@/core/api";
+import { authRepository } from "./repository";
+import type { Session } from "./types";
 
 type AuthState = {
-  user: Me | null;
+  user: Session | null;
   /** True until the first session restore attempt has finished. */
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -39,12 +41,12 @@ const AuthContext = createContext<AuthState | null>(null);
  * someone reaches anyway still gets a 403.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<Me | null>(null);
+  const [user, setUser] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     try {
-      setUser(await api.me());
+      setUser(await authRepository.me());
     } catch {
       setUser(null);
     }
@@ -55,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (async () => {
       // A refresh cookie may exist from a previous visit; if it does, this
       // turns it into a live session before the first screen renders.
-      const restored = await api.refresh();
+      const restored = await authRepository.refresh();
       if (cancelled) return;
       if (restored) await reload();
       if (!cancelled) setLoading(false);
@@ -71,23 +73,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // secret. Clearing the user drops the shell back to the sign-in screen.
     setUnauthenticatedHandler(() => {
       setAccessToken(null);
+      clearQueryCache();
       setUser(null);
     });
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const result = await api.login(email, password);
+    const result = await authRepository.login(email, password);
     setAccessToken(result.accessToken);
+    // Emptied *before* the new user's first render. Anything still cached was
+    // fetched under the previous session on this tab.
+    clearQueryCache();
     setUser(result.user);
   }, []);
 
   const logout = useCallback(async () => {
     try {
-      await api.logout();
+      await authRepository.logout();
     } finally {
       // Local state is cleared even if the call failed — the alternative
       // leaves someone looking at a dashboard they believe they have left.
       setAccessToken(null);
+      clearQueryCache();
       setUser(null);
     }
   }, []);

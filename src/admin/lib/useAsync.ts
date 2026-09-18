@@ -1,5 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError } from "./api";
+import { ApiError } from "@/core/api";
+
+/**
+ * The pre-cache loader.
+ *
+ * Superseded by `useQuery` in `@/core/api` (weakness W2) and kept for the
+ * screens that have not moved to a feature folder yet. The difference that
+ * matters: this re-runs on every mount, dedupes nothing, caches nothing and
+ * cannot be invalidated, so a mutation on one screen cannot tell a sibling
+ * that what it is showing is now false.
+ *
+ * It goes when the last screen leaves `src/admin/pages/`. Nothing new should
+ * use it — `useQuery` is the same four return values plus the three that
+ * matter.
+ *
+ * `useDebounced` and `useMutation` used to live here and moved to
+ * `@/shared/hooks`: neither had anything to do with loading, and the features
+ * need them without reaching into `src/admin`.
+ */
 
 export type AsyncState<T> = {
   data: T | null;
@@ -13,11 +31,6 @@ export type AsyncState<T> = {
 
 /**
  * Loads data, once per change of `deps`.
- *
- * Every screen needs the same four things — data, a loading flag, an error
- * string and a way to reload — and writing that `useEffect` in fifteen files
- * is how three of them end up missing the cancellation guard. This is the one
- * copy.
  *
  * Two behaviours worth knowing:
  *
@@ -67,70 +80,4 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]): AsyncSta
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   return { data, loading, error, reload, set: setData };
-}
-
-/**
- * Wraps a mutating call: tracks the in-flight flag and surfaces field errors.
- *
- * Returns the server's per-field validation messages separately from the
- * general message, so a form can put each one beside its input rather than
- * showing a banner that says "check your entries" and leaves the reader
- * hunting.
- */
-export function useMutation<Args extends unknown[], T>(
-  fn: (...args: Args) => Promise<T>,
-): {
-  run: (...args: Args) => Promise<T | null>;
-  busy: boolean;
-  error: string | null;
-  fields: Record<string, string[]>;
-  reset: () => void;
-} {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fields, setFields] = useState<Record<string, string[]>>({});
-
-  const run = useCallback(
-    async (...args: Args): Promise<T | null> => {
-      setBusy(true);
-      setError(null);
-      setFields({});
-      try {
-        return await fn(...args);
-      } catch (err) {
-        if (err instanceof ApiError) {
-          setError(err.message);
-          setFields(err.fields ?? {});
-        } else {
-          setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
-        }
-        return null;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [fn],
-  );
-
-  const reset = useCallback(() => {
-    setError(null);
-    setFields({});
-  }, []);
-
-  return { run, busy, error, fields, reset };
-}
-
-/**
- * Delays a value, so a search box queries on a pause rather than a keystroke.
- *
- * 300 ms: below about 250 the request fires mid-word, above about 400 the
- * results feel detached from the typing.
- */
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), ms);
-    return () => window.clearTimeout(timer);
-  }, [value, ms]);
-  return debounced;
 }

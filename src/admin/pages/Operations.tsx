@@ -1,437 +1,41 @@
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import { cn } from "@/shared/utils/cn";
-import { formatBytes, formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
-import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { Field, Input, SearchInput, Select, Textarea, Toggle } from "@/shared/ui/forms";
-import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
-import { type Column, DataView } from "@/shared/ui/data";
+import { formatDateTime, relativeTime } from "@/shared/utils/format";
+import {
+  Badge,
+  Button,
+  Card,
+  DownloadButton,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+} from "@/shared/ui/primitives";
+import { Field, Input, SearchInput, Select, Toggle } from "@/shared/ui/forms";
+import { Modal } from "@/shared/ui/overlays";
+import { type Column, DataView, Pair } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
+import { useDebounced, useMutation } from "@/shared/hooks";
 import { actionLabel } from "@/entities/audit";
-import { APPLICATION_STATUS_OPTIONS, ApplicationBadge } from "@/entities/application";
 import { ActivityFeed } from "@/widgets/activity";
-import { api, type ApplicationRow, type SettingRow } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { api, type SettingRow } from "../lib/api";
+import { authRepository, useAuth } from "@/core/auth";
 import { THEME_CHOICES, useTheme } from "../lib/theme";
-import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
-
-/* ================================================================== */
-/* Applications                                                        */
-/* ================================================================== */
+import { useAsync } from "../lib/useAsync";
 
 /**
- * Incoming job applications.
+ * Three screens that share a file: Settings, Audit and Profile.
  *
- * Personal data under the revDSG, and the screen says so: every record shows
- * its deletion date, dossiers download through a permission-checked route
- * rather than a public URL, and opening one is itself recorded in the audit
- * log.
+ * It was four and 1'009 lines. **Applications left** for
+ * `features/applications/`, which is the reference implementation of the five
+ * layers (`docs/enterprise-architecture.md` §3.1.1) — and moving it was worth
+ * more than the line count suggests, because it is the screen with rules:
+ * retention arithmetic and a status transition table, both of which are now
+ * pure functions with tests rather than expressions inside JSX.
+ *
+ * The remaining three follow in Stage D. Each becomes its own feature folder;
+ * nothing here needs to change for that, a screen simply leaves.
  */
-export function ApplicationsPage() {
-  const toast = useToast();
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const [open, setOpen] = useState<ApplicationRow | null>(null);
-  const debounced = useDebounced(search);
-
-  const list = useAsync(
-    () =>
-      api.applications({
-        search: debounced || undefined,
-        status: status || undefined,
-        page,
-        perPage: 50,
-      }),
-    [debounced, status, page],
-  );
-  const stats = useAsync(() => api.applicationStats(), []);
-
-  const columns: Column<ApplicationRow>[] = [
-    {
-      key: "name",
-      header: "Bewerber:in",
-      sortValue: (r) => `${r.lastName} ${r.firstName}`,
-      render: (r) => (
-        <div className="flex flex-col gap-0.5">
-          <span className="font-medium text-ink">
-            {r.firstName} {r.lastName}
-          </span>
-          <span className="text-[12px] text-muted">{r.email}</span>
-        </div>
-      ),
-    },
-    {
-      key: "position",
-      header: "Position",
-      sortValue: (r) => r.position,
-      render: (r) => r.position,
-    },
-    {
-      key: "files",
-      header: "Dateien",
-      numeric: true,
-      secondary: true,
-      className: "w-24",
-      render: (r) => r.files.length,
-    },
-    {
-      key: "status",
-      header: "Status",
-      className: "w-36",
-      sortValue: (r) => r.status,
-      render: (r) => <ApplicationBadge status={r.status} />,
-    },
-    {
-      key: "created",
-      header: "Eingegangen",
-      className: "w-36",
-      sortValue: (r) => r.createdAt,
-      render: (r) => <span title={formatDateTime(r.createdAt)}>{relativeTime(r.createdAt)}</span>,
-    },
-  ];
-
-  if (list.error) return <ErrorState message={list.error} onRetry={list.reload} />;
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Bewerbungen"
-        title="Eingegangene Bewerbungen"
-        description="Über das Formular auf der Website. Unterlagen werden nicht öffentlich abgelegt und nach Ablauf der Aufbewahrungsfrist automatisch gelöscht."
-      />
-
-      {stats.data ? (
-        <div className="flex flex-wrap gap-2">
-          {APPLICATION_STATUS_OPTIONS.map((o) => {
-            const n = stats.data!.byStatus[o.value] ?? 0;
-            return (
-              <button
-                key={o.value}
-                type="button"
-                onClick={() => {
-                  setStatus(status === o.value ? "" : o.value);
-                  setPage(1);
-                }}
-                aria-pressed={status === o.value}
-                className={`flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
-                  status === o.value
-                    ? "bg-ink text-inverse"
-                    : "bg-surface text-muted ring-1 ring-line hover:text-ink hover:ring-line-strong"
-                }`}
-              >
-                {o.label}
-                <span className="font-mono text-[11px] tnum opacity-70">{n}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-
-      <Card bodyClassName="p-5">
-        <DataView
-          rows={list.data?.items ?? []}
-          columns={columns}
-          rowKey={(r) => r.id}
-          onRowClick={(r) => setOpen(r)}
-          loading={list.loading}
-          caption="Bewerbungen"
-          page={list.data?.page ?? 1}
-          pages={list.data?.pages ?? 1}
-          total={list.data?.total ?? 0}
-          perPage={list.data?.perPage ?? 50}
-          onPageChange={setPage}
-          toolbar={
-            <SearchInput
-              value={search}
-              onChange={(v) => {
-                setSearch(v);
-                setPage(1);
-              }}
-              label="Bewerbungen durchsuchen"
-              placeholder="Name, E-Mail oder Position"
-              className="w-full sm:w-80"
-            />
-          }
-          empty={
-            <EmptyState
-              title={debounced || status ? "Nichts gefunden" : "Noch keine Bewerbungen"}
-              description={
-                debounced || status
-                  ? undefined
-                  : "Sobald jemand das Formular auf der Website absendet, erscheint die Bewerbung hier."
-              }
-            />
-          }
-        />
-      </Card>
-
-      <ApplicationDialog
-        application={open}
-        onClose={() => setOpen(null)}
-        onChanged={() => {
-          list.reload();
-          stats.reload();
-          toast.success("Gespeichert");
-        }}
-      />
-    </>
-  );
-}
-
-function ApplicationDialog({
-  application,
-  onClose,
-  onChanged,
-}: {
-  application: ApplicationRow | null;
-  onClose: () => void;
-  onChanged: () => void;
-}) {
-  const { can } = useAuth();
-  const toast = useToast();
-  const [status, setStatus] = useState("");
-  const [note, setNote] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const update = useMutation(api.updateApplication);
-  const remove = useMutation(api.deleteApplication);
-
-  useEffect(() => {
-    if (application) {
-      setStatus(application.status);
-      setNote(application.note ?? "");
-    }
-  }, [application?.id]);
-
-  if (!application) return null;
-
-  return (
-    <>
-      <Modal
-        open
-        onClose={onClose}
-        title={`${application.firstName} ${application.lastName}`}
-        description={application.position}
-        size="lg"
-        busy={update.busy}
-        footer={
-          <>
-            {can("application.delete") ? (
-              <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
-                Löschen
-              </Button>
-            ) : null}
-            <div className="flex-1" />
-            <Button variant="ghost" onClick={onClose} disabled={update.busy}>
-              Schliessen
-            </Button>
-            {can("application.update") ? (
-              <Button
-                variant="primary"
-                busy={update.busy}
-                onClick={async () => {
-                  await update.run(application.id, { status, note });
-                  onChanged();
-                  onClose();
-                }}
-              >
-                Speichern
-              </Button>
-            ) : null}
-          </>
-        }
-      >
-        <div className="flex flex-col gap-5">
-          <dl className="grid gap-x-6 gap-y-3 text-[14px] sm:grid-cols-2">
-            <Pair label="E-Mail">
-              <a
-                href={`mailto:${application.email}`}
-                className="text-brand-blue hover:text-brand-bronze"
-              >
-                {application.email}
-              </a>
-            </Pair>
-            <Pair label="Telefon">
-              {application.phone ? (
-                <a href={`tel:${application.phone}`} className="text-brand-blue hover:text-brand-bronze">
-                  {application.phone}
-                </a>
-              ) : (
-                "—"
-              )}
-            </Pair>
-            <Pair label="Verfügbar ab">{application.availableFrom ?? "—"}</Pair>
-            <Pair label="Eingegangen">{formatDateTime(application.createdAt)}</Pair>
-            <Pair label="Löschung">
-              {/* Shown because it is a promise the system actually keeps —
-                  a nightly job deletes the record and its files on this date. */}
-              <span title="Wird automatisch gelöscht">{formatDate(application.retainUntil)}</span>
-            </Pair>
-          </dl>
-
-          {application.message ? (
-            <div className="flex flex-col gap-1.5">
-              <span className="field-label">Nachricht</span>
-              <p className="whitespace-pre-wrap rounded-md bg-surface-2 px-4 py-3 text-[14px] leading-relaxed text-ink">
-                {application.message}
-              </p>
-            </div>
-          ) : null}
-
-          <div className="flex flex-col gap-1.5">
-            <span className="field-label">Unterlagen ({application.files.length})</span>
-            {application.files.length ? (
-              <ul className="flex flex-col divide-y divide-line rounded-md ring-1 ring-line">
-                {application.files.map((file, i) => (
-                  <li key={i} className="flex items-center gap-3 bg-surface px-4 py-2.5">
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-ink">
-                      {file.originalName}
-                    </span>
-                    <span className="shrink-0 font-mono text-[11px] tnum text-muted">
-                      {formatBytes(file.size)}
-                    </span>
-                    {can("application.download") ? (
-                      // A button, not a link. It was an `<a href>` on the
-                      // belief that the browser would authenticate it with a
-                      // cookie; there is no such cookie, so every click on this
-                      // returned 401. `downloadApplicationFile` fetches it with
-                      // the bearer token and saves the blob.
-                      <DownloadButton
-                        label="Herunterladen"
-                        onDownload={() =>
-                          api.downloadApplicationFile(application.id, i, file.originalName)
-                        }
-                      />
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-[13px] text-muted">
-                Keine Dateien — die Bewerbung kam über den E-Mail-Weg oder ohne Anhänge.
-              </p>
-            )}
-          </div>
-
-          {can("application.update") ? (
-            <>
-              <Field label="Status" htmlFor="app-status">
-                <Select
-                  id="app-status"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  options={APPLICATION_STATUS_OPTIONS}
-                />
-              </Field>
-
-              <Field label="Interne Notiz" htmlFor="app-note" optional>
-                <Textarea
-                  id="app-note"
-                  rows={3}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                />
-              </Field>
-            </>
-          ) : null}
-        </div>
-      </Modal>
-
-      <ConfirmDialog
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        busy={remove.busy}
-        destructive
-        confirmText="LÖSCHEN"
-        title="Bewerbung endgültig löschen?"
-        confirmLabel="Löschen"
-        message={
-          <>
-            <p>
-              Der Datensatz und alle Unterlagen werden unwiderruflich entfernt. Es gibt keinen
-              Papierkorb — es handelt sich um Personendaten.
-            </p>
-            <p className="mt-2">
-              Im Audit-Log bleibt vermerkt, dass gelöscht wurde, aber nicht, was darin stand.
-            </p>
-          </>
-        }
-        onConfirm={async () => {
-          await remove.run(application.id);
-          toast.success("Gelöscht");
-          setConfirmDelete(false);
-          onChanged();
-          onClose();
-        }}
-      />
-    </>
-  );
-}
-
-function Pair({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="field-label">{label}</dt>
-      <dd className="text-ink">{children}</dd>
-    </div>
-  );
-}
-
-/**
- * Starts an authenticated download and reports a failure.
- *
- * Both download routes in the dashboard used to be `<a href>` links that sent no
- * credential and answered 401 — silently, because a browser shows a failed
- * navigation, not an error the application can catch. That is the second reason
- * this is a button: the first is that the request needs an `Authorization`
- * header, and the second is that a failure now has somewhere to go.
- *
- * Shared by the dossier list and the audit export, which is why it sits between
- * them rather than inside either. It has no domain knowledge — the caller hands
- * it the promise.
- */
-function DownloadButton({
-  label,
-  onDownload,
-  variant = "link",
-}: {
-  label: string;
-  onDownload: () => Promise<void>;
-  variant?: "link" | "secondary";
-}) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-
-  const run = async () => {
-    setBusy(true);
-    try {
-      await onDownload();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Der Download ist fehlgeschlagen.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (variant === "secondary") {
-    return (
-      <Button variant="secondary" busy={busy} onClick={() => void run()}>
-        {label}
-      </Button>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={() => void run()}
-      className="shrink-0 text-[13px] text-brand-blue transition-colors hover:text-brand-bronze disabled:opacity-50"
-    >
-      {busy ? "Wird geladen …" : label}
-    </button>
-  );
-}
 
 /* ================================================================== */
 /* Settings                                                            */
@@ -916,7 +520,7 @@ export function ProfilePage() {
   const [repeat, setRepeat] = useState("");
   const [mismatch, setMismatch] = useState("");
 
-  const change = useMutation(api.changePassword);
+  const change = useMutation(authRepository.changePassword);
   const activity = useAsync(
     () => (user ? api.audit({ actorId: user.id, perPage: 15 }) : Promise.resolve(null)),
     [user?.id],

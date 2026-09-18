@@ -34,8 +34,8 @@ business feature; every module depends on all of them.
 | # | Stage | Size | Why it is first |
 | --- | --- | :-: | --- |
 | F1 | Folder skeleton + contracts | S | **Done.** Stage A. |
-| F2 | Split `shared/ui` by family | M | Every module imports it; splitting later means touching every module |
-| F3 | `core/api`: client, **query cache**, and the repository/**mapper**/service/hooks split per feature (architecture §3.1), with **one feature taken through all five layers** as the validated reference (§3.1.1) | M | W1 + W2 + W10. Without the cache, cross-linked records show stale data; without the split, rules cannot be tested without mocking `fetch`; without the mapper the DTO reaches the components anyway |
+| F2 | Split `shared/ui` by family | M | **Done.** Six families, and three domain pieces left for `entities/` and `widgets/` |
+| F3 | `core/api`: client, **query cache**, and the repository/**mapper**/service/hooks split per feature (architecture §3.1), with **one feature taken through all five layers** as the validated reference (§3.1.1) | M | **Done.** `features/applications` is the reference; `architecture.test.ts` enforces the DTO boundary and the layering in both directions. The other eight endpoint groups deliberately stay on the shared `api` object until the reference has been driven |
 | F4 | Nested router + breadcrumbs + route-declared actions | M | W11. Every module is `/x/:id/tab`; retrofitting nesting is a rewrite |
 | F5 | Form layer: `useForm`, `EntityForm`, unsaved-changes guard | M | W9. Twenty-odd modules of forms |
 | F6 | Server `core/list`: filter/sort/paginate contract | M | W5. Every list endpoint, one implementation |

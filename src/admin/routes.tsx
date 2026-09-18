@@ -1,4 +1,5 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { ApplicationsRoute } from "@/features/applications";
 import { match } from "./lib/router";
 
 /**
@@ -124,7 +125,17 @@ export const ROUTES: Route[] = [
   {
     pattern: "/bewerbungen",
     permissions: ["application.read"],
-    component: page(() => import("./pages/Operations"), "ApplicationsPage"),
+    /**
+     * The first route pointing at a feature folder rather than at a page file.
+     *
+     * It takes the component the feature already declared rather than wrapping
+     * it in `page()`, because the feature has to own its own `lazy()` boundary:
+     * the shell statically imports the same `index.ts` for the rail's badge,
+     * and two references to one module — one static, one dynamic — make Rollup
+     * hoist the screen into the entry chunk. See the note in
+     * `features/applications/index.ts`.
+     */
+    component: ApplicationsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
     label: "Bewerbungen",
   },
   {

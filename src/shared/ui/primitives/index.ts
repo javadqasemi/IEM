@@ -7,6 +7,7 @@
  * anything that assumes a *meaning* is domain and lives in `entities/`.
  */
 export { Button, Spinner } from "./Button";
+export { DownloadButton } from "./DownloadButton";
 export { Skeleton, SkeletonTable, EmptyState, ErrorState } from "./states";
 export { Card, PageHeader } from "./Card";
 export { Badge, type BadgeTone } from "./Badge";

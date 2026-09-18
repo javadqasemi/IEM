@@ -7,10 +7,11 @@ import { type Column, DataView } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
 import { WorkflowBadge } from "@/entities/content";
 import { api, type ContentTypeRow, type EntryRow } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { useAuth } from "@/core/auth";
 import { attachVisibilitySwitches, buildEntryIndex } from "../lib/inlineEdit";
 import { Link, navigate } from "../lib/router";
-import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
+import { useDebounced, useMutation } from "@/shared/hooks";
+import { useAsync } from "../lib/useAsync";
 
 /* ================================================================== */
 /* The site itself, embedded                                           */

@@ -181,6 +181,20 @@ async function bootstrap() {
     credentials: true,
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    /**
+     * Without this the dashboard cannot read `Content-Disposition`.
+     *
+     * A cross-origin response exposes only the CORS-safelisted headers to
+     * script, so `filenameFrom()` — which exists to keep an applicant's own
+     * filename on a downloaded dossier — was reading `null` on every call and
+     * silently falling back. The fallback happens to be the same name, so the
+     * failure was invisible: the feature worked and the header it was built
+     * around was never once reachable.
+     *
+     * Only in development, strictly: in production the dashboard and the API
+     * share an origin and none of this applies.
+     */
+    exposedHeaders: ["Content-Disposition"],
   });
 
   app.useGlobalPipes(

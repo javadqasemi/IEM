@@ -6,8 +6,9 @@ import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { type Column, DataView } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
 import { api, type RoleRow, type UserRow } from "../lib/api";
-import { useAuth } from "../lib/auth";
-import { useAsync, useDebounced, useMutation } from "../lib/useAsync";
+import { useAuth } from "@/core/auth";
+import { useDebounced, useMutation } from "@/shared/hooks";
+import { useAsync } from "../lib/useAsync";
 
 /* ================================================================== */
 /* Users                                                               */

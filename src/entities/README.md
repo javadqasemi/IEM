@@ -46,11 +46,26 @@ refused anyway.
 
 ## Entities
 
-Defined in `docs/data-model.md`: project, customer, contact, building, offer,
-contract, task, meeting, document, model-file, employee, department, time-entry,
-absence, resource, allocation, budget, invoice, inspection, risk, notification,
-user, role.
+Three exist, all created by the Stage B split rather than by a new module —
+which is the useful proof that the rule has teeth. Each left `shared/ui`
+because it broke the "no domain knowledge" rule there:
 
-## Migration
+```
+entities/application/  types.ts   the entity, its status union, its files
+                       status.tsx labels, tones, the option list, the badge
+entities/content/      WorkflowBadge — the six content states
+entities/audit/        labels.ts  47 German phrases for audit actions
+```
 
-Created per entity as its module is built. Empty until Wave 1.
+`application/types.ts` is the first written-down example of the difference
+`entities/` exists for: dates are `Date`, the status is a closed union, and
+nothing carries a field that exists only because of how JSON serialises.
+`features/applications/dto.ts` holds the wire shape and `mapper.ts` is the only
+file that has seen both.
+
+The rest are defined in `docs/data-model.md` and created per entity as its
+module is built: project, customer, contact, building, building-system,
+discipline, offer, contract, task, meeting, decision, document, drawing,
+model-file, issue, employee, department, time-entry, absence, resource,
+allocation, cost-code, invoice, inspection, risk, notification, workflow, user,
+role.

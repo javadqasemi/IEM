@@ -7,9 +7,10 @@ import { type Column, DataTable } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
 import { WorkflowBadge } from "@/entities/content";
 import { api, type ReviewRow } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { useAuth } from "@/core/auth";
 import { Link } from "../lib/router";
-import { useAsync, useMutation } from "../lib/useAsync";
+import { useMutation } from "@/shared/hooks";
+import { useAsync } from "../lib/useAsync";
 
 /* ================================================================== */
 /* Review queue                                                        */

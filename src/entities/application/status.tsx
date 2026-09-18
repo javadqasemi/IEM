@@ -1,4 +1,5 @@
 import { Badge, type BadgeTone } from "@/shared/ui/primitives";
+import { APPLICATION_STATUSES, type ApplicationStatus } from "./types";
 
 /**
  * A job application's status: its labels, its tones, and the option list the
@@ -9,7 +10,7 @@ import { Badge, type BadgeTone } from "@/shared/ui/primitives";
  * separately the filter offered a status the badge had no label for, which is
  * the class of drift `entities/` exists to remove.
  */
-const APPLICATION_TONES: Record<string, { tone: BadgeTone; label: string }> = {
+const APPLICATION_TONES: Record<ApplicationStatus, { tone: BadgeTone; label: string }> = {
   NEW: { tone: "navy", label: "Neu" },
   IN_REVIEW: { tone: "gold", label: "In Prüfung" },
   INTERVIEW: { tone: "water", label: "Gespräch" },
@@ -18,12 +19,25 @@ const APPLICATION_TONES: Record<string, { tone: BadgeTone; label: string }> = {
   WITHDRAWN: { tone: "neutral", label: "Zurückgezogen" },
 };
 
+export function applicationLabel(status: string): string {
+  return APPLICATION_TONES[status as ApplicationStatus]?.label ?? status;
+}
+
 export function ApplicationBadge({ status }: { status: string }) {
-  const meta = APPLICATION_TONES[status] ?? { tone: "neutral" as BadgeTone, label: status };
+  const meta = APPLICATION_TONES[status as ApplicationStatus] ?? {
+    tone: "neutral" as BadgeTone,
+    label: status,
+  };
   return <Badge tone={meta.tone}>{meta.label}</Badge>;
 }
 
-export const APPLICATION_STATUS_OPTIONS = Object.entries(APPLICATION_TONES).map(([value, m]) => ({
+/**
+ * Built from `APPLICATION_STATUSES` rather than from the tone table's own keys,
+ * so the option list and the union cannot drift: a status added to the union
+ * and forgotten here is a type error on `APPLICATION_TONES`, not a filter that
+ * quietly offers five of six.
+ */
+export const APPLICATION_STATUS_OPTIONS = APPLICATION_STATUSES.map((value) => ({
   value,
-  label: m.label,
+  label: APPLICATION_TONES[value].label,
 }));

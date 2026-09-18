@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filenameFrom } from "./api";
+import { filenameFrom } from "./download";
 
 /**
  * Parsing the filename out of `Content-Disposition`.

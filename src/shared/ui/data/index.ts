@@ -9,4 +9,5 @@
  */
 export { DataTable, DataView, type Column } from "./DataTable";
 export { KpiCard, KpiUnavailable } from "./Kpi";
+export { Pair } from "./Pair";
 export { BarChart } from "./BarChart";

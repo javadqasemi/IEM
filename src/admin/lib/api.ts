@@ -1,297 +1,30 @@
-/**
- * The dashboard's single HTTP client.
- *
- * Every request in the application goes through `api`. That is what makes four
- * cross-cutting behaviours exist once rather than in forty call sites:
- *
- * 1. **The access token is attached**, and kept in memory only — never in
- *    `localStorage`. A token in storage survives the tab and is readable by
- *    any script that gets onto the page; one in a module variable dies with
- *    the tab. The *refresh* token is an `httpOnly` cookie the server sets, so
- *    reloading the page still restores the session without either credential
- *    being reachable from JavaScript.
- * 2. **A 401 refreshes once and retries.** Access tokens last fifteen minutes,
- *    so an editor who spends twenty minutes writing a job advert would
- *    otherwise lose it on save. The single in-flight refresh promise means a
- *    screen firing six parallel requests refreshes once, not six times.
- * 3. **The envelope is unwrapped.** The server returns `{ data: … }`; callers
- *    get the payload.
- * 4. **Errors arrive as one type.** `ApiError` carries the machine-readable
- *    `code` and the per-field validation messages, so a form can put each
- *    message beside its input instead of showing a banner.
- */
-
-export type ApiErrorBody = {
-  statusCode: number;
-  code: string;
-  message: string;
-  fields?: Record<string, string[]>;
-  path?: string;
-};
-
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly fields?: Record<string, string[]>;
-
-  constructor(body: ApiErrorBody) {
-    super(body.message);
-    this.name = "ApiError";
-    this.status = body.statusCode;
-    this.code = body.code;
-    this.fields = body.fields;
-  }
-
-  /** True when the server rejected the *input* rather than the caller. */
-  get isValidation(): boolean {
-    return this.code === "validation_failed" || this.status === 422;
-  }
-}
-
-export type Paginated<T> = {
-  items: T[];
-  total: number;
-  page: number;
-  perPage: number;
-  pages: number;
-};
+import { download, request, type Paginated } from "@/core/api";
+import type { FieldDef } from "@/shared/ui/forms";
 
 /**
- * Where the API is. Empty means same origin, which is what a deployment that
- * puts the dashboard behind the same host wants.
+ * The dashboard's endpoint surface, **pre-migration**.
+ *
+ * The transport that used to live at the top of this file — token handling,
+ * the single in-flight refresh, the envelope, `ApiError` — moved to
+ * `@/core/api` and is unchanged. What is left is the thing weakness W1 is
+ * about: every endpoint in the application as a property of one object. At
+ * nineteen more modules this would be ~4'000 lines and every screen would
+ * import the whole surface.
+ *
+ * It is **deliberately still here.** The firm's review set the rule that a
+ * pattern gets one fully tested reference implementation before it is copied
+ * (`docs/enterprise-architecture.md` §3.1.1), so exactly one group — the job
+ * applications — has moved to `features/applications/` with all five layers.
+ * Fanning the other eight out at the same time would be copying a shape that
+ * had not yet been driven once, which is the thing the rule forbids.
+ *
+ * Each group below moves to its feature's `repository.ts` + `mapper.ts` once
+ * that reference is validated. Nothing here needs to change for that to
+ * happen — a group leaves, its call sites change, and the rest is untouched.
  */
-const BASE = (import.meta.env.VITE_CMS_API ?? "").replace(/\/$/, "");
-const PREFIX = "/api/v1";
 
-let accessToken: string | null = null;
-let onUnauthenticated: (() => void) | null = null;
-
-export function setAccessToken(token: string | null) {
-  accessToken = token;
-}
-
-export function getAccessToken(): string | null {
-  return accessToken;
-}
-
-/** Called when a refresh fails — the shell uses it to return to the login screen. */
-export function setUnauthenticatedHandler(fn: () => void) {
-  onUnauthenticated = fn;
-}
-
-/**
- * The in-flight refresh, shared by every request that hits a 401 at once.
- *
- * Without this, a dashboard page that loads content, media and users in
- * parallel would fire three refreshes; the server rotates the refresh token on
- * each, so the second and third would present an already-revoked token — which
- * the server correctly treats as replay and responds to by ending every
- * session. The bug would look like "the dashboard logs me out at random".
- */
-let refreshing: Promise<boolean> | null = null;
-
-async function refreshSession(): Promise<boolean> {
-  refreshing ??= (async () => {
-    try {
-      const res = await fetch(`${BASE}${PREFIX}/auth/refresh`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!res.ok) return false;
-      const body = (await res.json()) as { data: { accessToken: string } };
-      accessToken = body.data.accessToken;
-      return true;
-    } catch {
-      return false;
-    } finally {
-      // Cleared in a microtask so every caller awaiting this promise reads the
-      // same result before the next 401 can start a second refresh.
-      queueMicrotask(() => {
-        refreshing = null;
-      });
-    }
-  })();
-  return refreshing;
-}
-
-type RequestOptions = {
-  method?: string;
-  body?: unknown;
-  /** Sent as-is; used for uploads. Sets no `Content-Type` — the browser does. */
-  formData?: FormData;
-  query?: Record<string, string | number | boolean | undefined | null>;
-  signal?: AbortSignal;
-  /** Internal: prevents a refreshed request from refreshing again. */
-  retried?: boolean;
-};
-
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const url = new URL(`${BASE}${PREFIX}${path}`, window.location.origin);
-  for (const [k, v] of Object.entries(options.query ?? {})) {
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
-  }
-
-  const headers: Record<string, string> = { accept: "application/json" };
-  if (accessToken) headers.authorization = `Bearer ${accessToken}`;
-  if (options.body !== undefined) headers["content-type"] = "application/json";
-
-  const res = await fetch(url.toString(), {
-    method: options.method ?? (options.body || options.formData ? "POST" : "GET"),
-    headers,
-    body: options.formData ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
-    // The refresh cookie has to ride along, and it is `sameSite: lax` +
-    // `httpOnly`, so `include` is required for a cross-origin dashboard.
-    credentials: "include",
-    signal: options.signal,
-  });
-
-  if (res.status === 401 && !options.retried) {
-    if (await refreshSession()) {
-      return request<T>(path, { ...options, retried: true });
-    }
-    onUnauthenticated?.();
-  }
-
-  if (res.status === 204) return undefined as T;
-
-  let payload: unknown;
-  try {
-    payload = await res.json();
-  } catch {
-    payload = null;
-  }
-
-  if (!res.ok) {
-    throw new ApiError(
-      (payload as ApiErrorBody | null) ?? {
-        statusCode: res.status,
-        code: "network_error",
-        message: `Die Anfrage ist fehlgeschlagen (${res.status}).`,
-      },
-    );
-  }
-
-  return (payload as { data: T })?.data as T;
-}
-
-/* ------------------------------------------------------------------ */
-/* Downloads                                                           */
-/* ------------------------------------------------------------------ */
-
-/**
- * Fetches a non-JSON route and saves the body as a file.
- *
- * The two download routes — the audit CSV and an application dossier — were
- * plain `<a href>` links, on the belief recorded in the old comment here that
- * "the link carries the session cookie and the server checks the permission on
- * the way through". It does not. The only cookie this system issues is
- * `refresh_token`, scoped to `path=/api/v1/auth`, so a browser navigating to
- * `/api/v1/audit/export` sends no credential at all; `JwtAuthGuard` had an
- * `access_token` cookie fallback that nothing ever set. **Both links returned
- * 401** — reproduced against a running server, then fixed here and in
- * `guards.ts`.
- *
- * So the credential is carried the same way every other call carries it, in the
- * `Authorization` header, which means this goes through the shared refresh-and-
- * retry path and a download started twenty minutes into a session works. The
- * cost is that the file is buffered in memory before it is saved. Both bodies
- * here are small — a CSV of the audit log and a CV — and the alternative, giving
- * the browser a credential it attaches by itself, is the one that would reopen
- * CSRF on every other route.
- *
- * The filename comes from `Content-Disposition` when the server sends one, so
- * the dossier keeps the applicant's own filename rather than becoming `4`.
- */
-async function download(path: string, options: RequestOptions & { fallbackName: string }): Promise<void> {
-  const url = new URL(`${BASE}${PREFIX}${path}`, window.location.origin);
-  for (const [k, v] of Object.entries(options.query ?? {})) {
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
-  }
-
-  const send = async (): Promise<Response> =>
-    fetch(url.toString(), {
-      headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
-      credentials: "include",
-    });
-
-  let res = await send();
-  if (res.status === 401) {
-    if (await refreshSession()) {
-      res = await send();
-    } else {
-      onUnauthenticated?.();
-    }
-  }
-
-  if (!res.ok) {
-    let payload: ApiErrorBody | null = null;
-    try {
-      payload = (await res.json()) as ApiErrorBody;
-    } catch {
-      /* A non-JSON error body tells us nothing more than the status does. */
-    }
-    throw new ApiError(
-      payload ?? {
-        statusCode: res.status,
-        code: "download_failed",
-        message: `Der Download ist fehlgeschlagen (${res.status}).`,
-      },
-    );
-  }
-
-  const blob = await res.blob();
-  const href = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = href;
-  link.download = filenameFrom(res.headers.get("content-disposition")) ?? options.fallbackName;
-  // Firefox needs the element in the document for a programmatic click to
-  // count as a user-initiated download.
-  document.body.append(link);
-  link.click();
-  link.remove();
-  // Revoked on the next tick rather than immediately: revoking synchronously
-  // races the browser's own read of the URL and silently saves an empty file.
-  setTimeout(() => URL.revokeObjectURL(href), 0);
-}
-
-/**
- * `attachment; filename="Lebenslauf%20M.pdf"` → `Lebenslauf M.pdf`.
- *
- * Exported for its own test. The header is written by the server for a filename
- * an *applicant* chose, so it is the one string here shaped by someone outside
- * the organisation — umlauts, spaces and quotes all turn up, and getting it
- * wrong means a dossier saved as `files` with no extension.
- */
-export function filenameFrom(header: string | null): string | null {
-  if (!header) return null;
-  const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
-  const plain = /filename="?([^";]+)"?/i.exec(header);
-  const raw = star?.[1] ?? plain?.[1];
-  if (!raw) return null;
-  try {
-    return decodeURIComponent(raw.trim());
-  } catch {
-    return raw.trim();
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* The typed surface                                                   */
-/* ------------------------------------------------------------------ */
-
-export type Me = {
-  id: string;
-  email: string;
-  name: string;
-  avatarUrl: string | null;
-  locale: string;
-  status: string;
-  mfaEnabled: boolean;
-  lastLoginAt: string | null;
-  roles: { key: string; name: string }[];
-  permissions: string[];
-  isSuperAdmin: boolean;
-};
+export type { Paginated };
+export type { FieldDef };
 
 export type ContentTypeRow = {
   key: string;
@@ -304,17 +37,6 @@ export type ContentTypeRow = {
   icon: string | null;
   rank: number;
 };
-
-/**
- * Re-exported, not declared.
- *
- * The descriptor's shape belongs to the form layer — `FieldRenderer` is the
- * only thing that reads it — and it was declared here and there until the two
- * copies were one field apart. A content type's `schema` is *transported*
- * here; it is not defined here.
- */
-import type { FieldDef } from "@/shared/ui/forms";
-export type { FieldDef };
 
 export type WorkflowState =
   | "DRAFT"
@@ -412,22 +134,6 @@ export type PermissionGroup = {
   permissions: { id: string; key: string; resource: string; action: string; description: string | null }[];
 };
 
-export type ApplicationRow = {
-  id: string;
-  position: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string | null;
-  availableFrom: string | null;
-  message: string | null;
-  files: { originalName: string; size: number; mimeType: string }[];
-  status: string;
-  note: string | null;
-  createdAt: string;
-  retainUntil: string | null;
-};
-
 export type AuditRow = {
   id: string;
   action: string;
@@ -501,20 +207,11 @@ export type Overview = {
 };
 
 export const api = {
-  /* ---- Auth ---- */
-  login: (email: string, password: string) =>
-    request<{ accessToken: string; expiresIn: number; user: Me }>("/auth/login", {
-      body: { email, password },
-    }),
-  refresh: refreshSession,
-  logout: () => request<void>("/auth/logout", { method: "POST" }),
-  me: () => request<Me>("/auth/me"),
-  changePassword: (currentPassword: string, newPassword: string) =>
-    request<void>("/auth/change-password", { body: { currentPassword, newPassword } }),
-  forgotPassword: (email: string) =>
-    request<{ message: string }>("/auth/forgot-password", { body: { email } }),
-  resetPassword: (token: string, password: string) =>
-    request<void>("/auth/reset-password", { body: { token, password } }),
+  /*
+   * Auth moved to `core/auth/repository.ts`. It is the one repository not owned
+   * by a feature folder: the router, the client and every screen depend on the
+   * session, so it sits below all of them rather than beside them.
+   */
 
   /* ---- Content ---- */
   contentTypes: () => request<ContentTypeRow[]>("/content/types"),
@@ -629,25 +326,10 @@ export const api = {
   deleteRole: (id: string) => request<void>(`/roles/${id}`, { method: "DELETE" }),
   permissions: () => request<PermissionGroup[]>("/permissions"),
 
-  /* ---- Applications ---- */
-  applications: (query: Record<string, string | number | undefined>) =>
-    request<Paginated<ApplicationRow>>("/applications", { query }),
-  application: (id: string) => request<ApplicationRow>(`/applications/${id}`),
-  updateApplication: (id: string, body: { status?: string; note?: string }) =>
-    request<ApplicationRow>(`/applications/${id}`, { method: "PATCH", body }),
-  deleteApplication: (id: string) => request<void>(`/applications/${id}`, { method: "DELETE" }),
-  applicationStats: () =>
-    request<{ total: number; byStatus: Record<string, number> }>("/applications/stats"),
-  /**
-   * Downloads one dossier file.
-   *
-   * A call rather than an href — see `download`. The route checks
-   * `application.download` and records the download in the audit log, and that
-   * only happens if the request actually carries a credential, which the old
-   * link did not.
+  /*
+   * Applications moved to `features/applications/repository.ts` — the
+   * reference implementation of the five layers (architecture §3.1.1).
    */
-  downloadApplicationFile: (id: string, index: number, fallbackName: string) =>
-    download(`/applications/${id}/files/${index}`, { fallbackName }),
 
   /* ---- Settings, audit, dashboard ---- */
   settings: () => request<{ group: string; settings: SettingRow[] }[]>("/settings"),

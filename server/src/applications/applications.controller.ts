@@ -135,12 +135,54 @@ export class ApplicationsController {
       user,
       this.ctx(req, ip),
     );
-    // `attachment`, always: a dossier is a PDF or a Word file from an unknown
-    // sender, and rendering one inline in the admin's browser is exactly the
-    // path this download route exists to avoid.
-    res.setHeader("Content-Type", file.mimeType);
-    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.originalName)}"`);
+    /**
+     * Three deliberate headers, and the third is the one that was a bug.
+     *
+     * **`application/octet-stream`, not `file.mimeType`.** The declared type is
+     * a string the *applicant* controls. Echoing it back tells the browser what
+     * to do with bytes we have already decided it should only save — the same
+     * mistake the media CSP fix closed for uploaded SVGs. With `nosniff` beside
+     * it, a browser cannot be talked into rendering a dossier whatever it
+     * contains.
+     *
+     * **No `Content-Disposition` at all, and that is not a weakening.** Every
+     * dossier download in Chromium 153 was **broken**, and the failure looked
+     * like a CORS bug that was not one: the request died with
+     * `MissingAllowOriginHeader` although the response carried
+     * `Access-Control-Allow-Origin` — verified against `curl`, against a Node
+     * client replaying Chrome's exact preflight-then-GET on one keep-alive
+     * socket, and through Playwright's own request interception, all three of
+     * which received the header. Same-origin it failed differently and worse:
+     * HTTP 204 with an empty body, so the operator would have saved a 0-byte
+     * file with no error anywhere.
+     *
+     * The trigger is `Content-Disposition` **together with a body Chrome
+     * sniffs as a PDF**. Isolated by serving the identical route with PNG and
+     * JPEG dossiers, which both succeeded; `attachment` and `inline` both fail
+     * and removing the header fixes both origins. Chromium hands that pair to
+     * its PDF/download machinery and the `fetch()` is left with nothing.
+     *
+     * Losing the header costs nothing here, because it was never what
+     * protected this route or named the file:
+     *
+     *   - A browser **cannot navigate to it at all** — it requires an
+     *     `Authorization: Bearer` header, and a navigation cannot send one.
+     *     The only caller is `fetch`, which renders nothing; the client builds
+     *     the `<a download>` itself.
+     *   - `application/octet-stream` + `nosniff` is what forces a save.
+     *   - The filename the operator gets is the one the dashboard passes as
+     *     `fallbackName`, which is `file.originalName` — the same string this
+     *     header carried. `/audit/export` keeps its `Content-Disposition`,
+     *     because there the client genuinely does not know the name, and its
+     *     CSV body triggers none of this.
+     *
+     * **`Content-Length`** rather than chunked, because we know the size: it
+     * gives the browser a progress figure and lets a truncated transfer be
+     * detected instead of silently producing a short file.
+     */
+    res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Length", String(file.size));
     stream.pipe(res);
   }
 

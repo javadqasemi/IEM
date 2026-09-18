@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/shared/utils/cn";
 import { Button } from "@/shared/ui/primitives";
 import { Wordmark } from "@/components/Wordmark";
-import { useAuth } from "../lib/auth";
+import { useAuth } from "@/core/auth";
 import { Link, useRoute } from "../lib/router";
 import { useTheme } from "../lib/theme";
 import { activeSection, type NavSection } from "../lib/navigation";

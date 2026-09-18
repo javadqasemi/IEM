@@ -1,8 +1,9 @@
 import { Suspense, useMemo } from "react";
 import { Button, EmptyState, Skeleton, Spinner } from "@/shared/ui/primitives";
 import { ErrorBoundary } from "@/shared/ui/feedback";
+import { useNewApplicationCount } from "@/features/applications";
 import { api } from "./lib/api";
-import { useAuth } from "./lib/auth";
+import { useAuth } from "@/core/auth";
 import { useRoute } from "./lib/router";
 import { useAsync } from "./lib/useAsync";
 import { AdminLayout } from "./layout/AdminLayout";
@@ -31,13 +32,10 @@ export function App() {
     () => (user ? api.reviews().catch(() => []) : Promise.resolve([])),
     [user?.id],
   );
-  const applications = useAsync(
-    () =>
-      user
-        ? api.applicationStats().catch(() => ({ total: 0, byStatus: {} as Record<string, number> }))
-        : Promise.resolve(null),
-    [user?.id],
-  );
+  // Applications is the one group that has moved to a feature folder, so its
+  // count comes through the feature's public surface rather than off the shared
+  // `api` object. It shares a cache entry with the list screen's filter chips.
+  const newApplications = useNewApplicationCount(Boolean(user));
 
   /**
    * The content types the menu's Website groups are made of.
@@ -61,10 +59,10 @@ export function App() {
         canAny: (permissions) => permissions.length === 0 || canAny(...permissions),
         badges: {
           reviews: reviews.data?.length,
-          applications: applications.data?.byStatus?.NEW,
+          applications: newApplications,
         },
       }),
-    [types.data, reviews.data, applications.data, canAny],
+    [types.data, reviews.data, newApplications, canAny],
   );
 
   if (loading) {

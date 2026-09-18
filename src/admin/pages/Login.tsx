@@ -2,8 +2,9 @@ import { useEffect, useId, useState } from "react";
 import { Button } from "@/shared/ui/primitives";
 import { Field, Input } from "@/shared/ui/forms";
 import { Wordmark } from "@/components/Wordmark";
-import { api, ApiError } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { ApiError } from "@/core/api";
+import { authRepository } from "@/core/auth";
+import { useAuth } from "@/core/auth";
 import { navigate, useRoute } from "../lib/router";
 
 /**
@@ -130,7 +131,7 @@ function Forgot() {
     e.preventDefault();
     setBusy(true);
     try {
-      await api.forgotPassword(email);
+      await authRepository.forgotPassword(email);
     } finally {
       // Always shows the same confirmation, whether or not the address exists.
       // Anything else turns this form into a way to find out who has an
@@ -206,7 +207,7 @@ function SetPassword({ token, invite }: { token: string; invite: boolean }) {
     setError("");
     setBusy(true);
     try {
-      await api.resetPassword(token, password);
+      await authRepository.resetPassword(token, password);
       setDone(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Das hat nicht geklappt.");
