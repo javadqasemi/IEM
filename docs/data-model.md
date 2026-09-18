@@ -26,7 +26,7 @@ per table.
 | Money | `Decimal @db.Decimal(12, 2)` plus a `currency` field defaulting `"CHF"`. **Never `Float`** |
 | Enums | Postgres enums, not strings. A status typo should fail at the database |
 | Numbering | Human-readable business keys (`P-2026-014`) `@unique`, alongside the cuid |
-| Office | `officeId String?` on operational entities — Thun/Bern, not tenancy (see architecture §7.6) |
+| Office | `officeId String?` on operational entities — Thun/Bern, not tenancy (see architecture §7.7) |
 | Search | A `tsvector` generated column on the two or three text fields a module searches, not `LIKE` on JSON |
 
 ### 1.1 Shared enums
@@ -66,13 +66,19 @@ erDiagram
 
     BUILDING   ||--o{ PROJECT       : "is site of"
     BUILDING   ||--o{ FLOOR         : "stacks"
+    BUILDING   ||--o{ BUILDING_SYSTEM : "is served by"
     BUILDING   |o--o| MODEL_FILE    : "is modelled by"
     FLOOR      ||--o{ ROOM          : "contains"
     ROOM       ||--o{ ROOM_LOAD     : "is calculated for"
+    ROOM       ||--o{ ROOM_SYSTEM   : "served via"
+    BUILDING_SYSTEM ||--o{ ROOM_SYSTEM : "serves via"
+    BUILDING_SYSTEM }o--|| DISCIPLINE  : "belongs to"
 
     DISCIPLINE ||--o{ PROJECT_DISCIPLINE : "scoped as"
     DISCIPLINE ||--o{ DRAWING            : "drawn for"
     DISCIPLINE ||--o{ DELIVERABLE        : "owes"
+    DISCIPLINE ||--o{ ISSUE              : "raised against"
+    DISCIPLINE }o--o| EMPLOYEE           : "led by"
     PROJECT    ||--o{ PROJECT_DISCIPLINE : "covers"
 
     PROJECT       ||--o{ PROJECT_PHASE : "runs through"
@@ -84,11 +90,18 @@ erDiagram
     PROJECT    ||--o{ DRAWING       : "produces"
     DRAWING    ||--o{ DRAWING_REV   : "revised as"
     DRAWING    }o--o| FLOOR         : "depicts"
+    DRAWING    }o--o| BUILDING_SYSTEM : "documents"
+    DRAWING    ||--o{ DRAWING_ROOM  : "covers"
+    ROOM       ||--o{ DRAWING_ROOM  : "is drawn on"
     DRAWING_REV ||--o{ TRANSMITTAL_ITEM : "sent in"
     TRANSMITTAL ||--o{ TRANSMITTAL_ITEM : "bundles"
     TRANSMITTAL }o--o| CONTACT           : "sent to"
 
     MODEL_FILE ||--o{ MODEL_LINK    : "linked to"
+    MODEL_LINK }o--o| ROOM          : "represents"
+    MODEL_LINK }o--o| BUILDING_SYSTEM : "represents"
+    MODEL_LINK }o--o| DRAWING       : "derives"
+    MODEL_LINK }o--o| ISSUE         : "raises"
 
     OFFER      ||--o{ OFFER_VERSION : "revised as"
     OFFER      |o--o| CONTRACT      : "becomes"
@@ -130,19 +143,35 @@ erDiagram
 
     MEETING    ||--o{ MEETING_ATTENDEE : "attended by"
     MEETING    ||--o{ MEETING_ITEM     : "minutes"
+    MEETING    ||--o{ DECISION         : "records"
     MEETING_ITEM |o--o| TASK           : "becomes"
+    MEETING_ITEM |o--o| DECISION       : "carries"
+    DECISION   ||--o{ DECISION         : "superseded by"
+    PROJECT    ||--o{ DECISION         : "is steered by"
 
     MILESTONE  ||--o{ TASK          : "gathers"
+
+    PROJECT    ||--o{ ISSUE         : "coordinates"
+    ISSUE      }o--o| ROOM          : "located in"
+    ISSUE      }o--o| DRAWING       : "seen on"
+    ISSUE      |o--o| TASK          : "escalates to"
 
     DOCUMENT   ||--o{ DOCUMENT_VERSION : "versioned as"
     DOCUMENT   }o--o| FOLDER           : "filed in"
     FOLDER     ||--o{ FOLDER           : "parent of"
 
     MODEL_FILE ||--o{ MODEL_VERSION : "versioned as"
-    MODEL_FILE ||--o{ MODEL_ISSUE   : "raises"
+    MODEL_FILE ||--o{ ISSUE         : "raises clashes as"
+    INSPECTION ||--o{ ISSUE         : "raises defects as"
 
     RESOURCE   ||--o{ ALLOCATION    : "is booked by"
     RESOURCE   ||--o{ MAINTENANCE   : "serviced by"
+
+    COST_CODE  ||--o{ BUDGET_LINE   : "structures"
+    COST_CODE  ||--o{ COST_ITEM     : "classifies"
+    COST_CODE  ||--o{ INVOICE_LINE  : "bills as"
+    COST_CODE  ||--o{ TIME_ENTRY    : "charged to"
+    COST_CODE  ||--o{ COST_CODE     : "parent of"
 
     BUDGET     ||--o{ BUDGET_LINE   : "breaks into"
     COST_ITEM  }o--o| BUDGET_LINE   : "charged to"
@@ -152,18 +181,24 @@ erDiagram
     TIME_ENTRY }o--o| TASK          : "against"
     TIME_ENTRY }o--|| ACTIVITY_TYPE : "classified as"
 
-    INSPECTION ||--o{ DEFECT        : "finds"
     INSPECTION ||--o{ CHECKLIST_ITEM: "uses"
 
+    WORKFLOW_RULE ||--o{ WORKFLOW_CONDITION : "guards"
+    WORKFLOW_RULE ||--o{ WORKFLOW_ACTION    : "performs"
+    WORKFLOW_RULE ||--o{ WORKFLOW_RUN       : "fired as"
+    WORKFLOW_ACTION |o--o| NOTIFICATION     : "sends"
+
     USER       ||--o{ NOTIFICATION  : "receives"
+    NOTIFICATION ||--o{ NOTIFICATION_DELIVERY : "delivered via"
+    USER       ||--o{ NOTIFICATION_PREFERENCE : "configures"
     USER       ||--o{ USER_ROLE     : "holds"
     ROLE       ||--o{ USER_ROLE     : "granted by"
     ROLE       ||--o{ ROLE_PERMISSION : "grants"
     PERMISSION ||--o{ ROLE_PERMISSION : "granted in"
 ```
 
-`USER`, `ROLE`, `PERMISSION`, `USER_ROLE`, `ROLE_PERMISSION` and `NOTIFICATION`
-exist today. Everything else is new.
+`USER`, `ROLE`, `PERMISSION`, `USER_ROLE` and `ROLE_PERMISSION` exist today, and
+`NOTIFICATION` exists as a table with nothing behind it. Everything else is new.
 
 ---
 
@@ -206,7 +241,7 @@ login, no salary and no time entries.
 unique index. Email unique per customer, not globally: the same person may
 appear under two customers.
 
-### 3.3 Building, Floor, Room
+### 3.3 Building, Floor, BuildingSystem, Room
 
 The physical object, and the thing the firm's work is actually *about*. A
 customer often owns several, and a building outlives any one project — so it is
@@ -228,7 +263,7 @@ its own entity, and it is not an address field.
 | `floorCount`, `undergroundFloorCount` | Int? | |
 | `heatedArea` (EBF m²), `grossArea` (GF m²), `volume` (GV m³) | Decimal? | SIA 416 terms |
 | `energyStandard` | enum? | `MINERGIE` `MINERGIE_P` `MINERGIE_A` `GEAK_A`…`GEAK_G` `KEINER` |
-| `heatingSystem`, `ventilationSystem` | String? | what is installed now |
+| ~~`heatingSystem`, `ventilationSystem`~~ | | replaced by `BuildingSystem` rows — below |
 | `primaryModelFileId` | → ModelFile? | the coordination model |
 | `officeId` | → Office? | which office looks after it |
 
@@ -245,6 +280,50 @@ reference) `grossArea` `heatedArea` `order` Int
 
 Composite unique on `(buildingId, code)`. `order` is what sorts a stack
 correctly — `UG2 < UG1 < EG < OG1` is not alphabetical and not numeric.
+
+#### BuildingSystem (Anlage)
+
+**Added after review, and it removes a smell the first draft carried.** Building
+had `heatingSystem` and `ventilationSystem` as free text — two string columns
+standing in for the thing the firm is actually engaged to design, replace or
+operate. A building is served by *n* plants, not by two sentences, and each one
+has its own discipline, location, capacity, age and end of life.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `buildingId` | → Building | |
+| `code` | String | `H1`, `L2`, `K1` — the designation on the schematic |
+| `name` | String | "Wärmepumpe Hauptgebäude" |
+| `disciplineId` | → Discipline | which Gewerk owns it |
+| `kind` | enum | `HEIZUNG` `LUEFTUNG` `KLIMA` `KAELTE` `SANITAER` `ELEKTRO` `PV` `WAERMEPUMPE` `MSRL` `SPRINKLER` `AUFZUG` `ANDERE` |
+| `energySource` | enum? | `GAS` `OEL` `HOLZ` `FERNWAERME` `ERDSONDE` `LUFT_WASSER` `STROM` `SOLAR` |
+| `capacity`, `capacityUnit` | Decimal?, String? | 120 kW · 4'500 m³/h · 32 kWp |
+| `locationRoomId` | → Room? | the Technikraum it stands in |
+| `manufacturer`, `model`, `serialNumber` | String? | |
+| `yearInstalled`, `expectedLifetimeYears` | Int? | drives replacement planning |
+| `status` | enum | `GEPLANT` `IN_BETRIEB` `AUSSER_BETRIEB` `ERSETZT` `RUECKGEBAUT` |
+| `parentSystemId` | → BuildingSystem? | a Lüftungsanlage under a Monobloc |
+| `primaryModelFileId`, `schemaDrawingId` | → | model and Prinzipschema |
+
+Composite unique on `(buildingId, code)`.
+
+**RoomSystem** — `roomId` `buildingSystemId` `role` (`VERSORGT` `STEUERT`
+`BEHERBERGT`) `note`. Many-to-many: one plant serves many rooms and one room is
+served by several. `BEHERBERGT` is the Technikraum case and is what makes
+"which rooms does the ventilation plant serve, and where does it stand" one
+query instead of two conventions.
+
+**Why it earns a table** — it is the axis the firm's own work is sold along. A
+`Sanierung` commission is *replace plant H1*; a `Wartung` contract is *against
+these plants*; a GEAK figure is per plant; and the replacement forecast that
+sells the next project is `yearInstalled + expectedLifetimeYears` across the
+portfolio. None of that is derivable from two strings on the building, and all
+of it is a list the firm already keeps somewhere less durable.
+
+**Validation** — `capacity` positive and refused without a `capacityUnit`, the
+same rule `RoomLoad.method` carries; `parentSystemId` must not cycle and must
+stay inside the same building; a system may not be `IN_BETRIEB` with a
+`yearInstalled` in the future.
 
 #### Room
 
@@ -276,13 +355,31 @@ discipline.
 
 #### Discipline — master data
 
-`code` (`HZG` `LFT` `KLT` `SAN` `ELT` `ENE` `MSR` `BIM`) `name` (`Heizung`,
-`Lüftung`, `Klima/Kälte`, `Sanitär`, `Elektro`, `Energie`, `MSRL`,
-`BIM/Koordination`) `colour` `defaultHourlyRate Decimal?` `order` `active`
+| Field | Type | Notes |
+| --- | --- | --- |
+| `code` | String @unique | `HZG` `LFT` `KLT` `SAN` `ELT` `ENE` `MSR` `BIM` |
+| `name` | String | Heizung · Lüftung · Klima/Kälte · Sanitär · Elektro · Energie · MSRL · BIM/Koordination |
+| `managerId` | → Employee? | the **Fachbereichsleiter** — who owns this Gewerk across the firm |
+| `defaultColour` | String | the token key, not a hex literal |
+| `defaultBudgetShare` | Decimal? | the share of a typical fee this Gewerk carries |
+| `defaultHourlyRate` | Decimal? | overridable per project on `ProjectDiscipline` |
+| `order`, `active` | Int, Boolean | |
 
-`colour` is the one the drawings, the Gantt and the model views all use, so a
-Lüftung run is the same colour on a plan, in a schedule and in the 3D scene —
-which the public site's `disc-*` tokens already do for six of these.
+`managerId` and `defaultBudgetShare` were added after review. The first is the
+difference between a lookup table and an org chart: *who do I ask about Lüftung*
+is a question the system should answer without anybody knowing the answer
+already, and it is the default assignee for a `ProjectDiscipline` that has no
+lead yet. The second is what makes a new project's budget breakdown a proposal
+rather than an empty form — SIA 102 gives the fee per *phase*, and the split
+across Gewerke is the firm's own experience, which belongs in master data where
+it can be corrected once.
+
+`defaultColour` is the one the drawings, the Gantt, the Kanban and the model
+views all use, so a Lüftung run is the same colour on a plan, in a schedule and
+in the 3D scene — which the public site's `disc-*` tokens already do for six of
+these. It is **a token name**, resolved per theme; a hex literal here would be
+the one colour in the system that cannot answer to dark mode, and
+`theme.tokens.test.ts` would not see it.
 
 #### ProjectDiscipline — the scope of one Gewerk on one project
 
@@ -351,7 +448,7 @@ a due date, which is what makes the phase plannable.
 who released the last deliverable. `customerSignedAt` without a
 `customerContactId` is refused — "the client approved it" needs a name.
 
-### 3.4 Offer
+### 3.6 Offer
 
 A quotation, versioned, with an approval chain. The entity the audit called out
 as needing versions, approval, PDF, status and signature.
@@ -381,7 +478,7 @@ create a `Project`.
 **OfferVersion** — `offerId` `version` `snapshot Json` `pdfDocumentId?`
 `note` `authorId` `createdAt`. Append-only.
 
-### 3.5 Contract
+### 3.7 Contract
 
 `number` `title` `type` (`WERKVERTRAG` `PLANERVERTRAG` `WARTUNG` `RAHMEN`)
 `status` (`DRAFT` `ACTIVE` `SUSPENDED` `COMPLETED` `TERMINATED`) `startDate`
@@ -391,7 +488,7 @@ create a `Project`.
 **Validation** — `endDate` after `startDate`; a contract cannot move to
 `COMPLETED` while its projects are open.
 
-### 3.6 Project
+### 3.8 Project
 
 The centre of the system.
 
@@ -431,7 +528,7 @@ time entries or invoices exist (archive instead).
 `DRAFTSMAN` `CONSULTANT` `APPRENTICE`) `allocationPercent` `from` `to?`.
 Composite unique on `(projectId, employeeId, from)`.
 
-### 3.7 Task
+### 3.9 Task
 
 `title` `description` `status` `priority` `dueDate?` `startDate?`
 `estimateHours?` `spentHours` (derived) `position` (for Kanban ordering)
@@ -444,7 +541,7 @@ unfinished blocking dependency exists. Cycle detection on dependencies.
 **TaskDependency** — `predecessorId` `successorId` `type` (`FS` `SS` `FF` `SF`)
 `lagDays`. The four standard types, because Planning's Gantt needs them.
 
-### 3.8 Milestone
+### 3.10 Milestone
 
 `name` `dueDate` `status` (`OPEN` `AT_RISK` `MET` `MISSED` `WAIVED`)
 `phase SiaPhase` `projectId` `isBillingTrigger Boolean`
@@ -452,7 +549,7 @@ unfinished blocking dependency exists. Cycle detection on dependencies.
 `isBillingTrigger` is what connects Planning to Finance: meeting such a
 milestone raises `MilestoneReached`, and Finance may create an invoice draft.
 
-### 3.9 Meeting
+### 3.11 Meeting, Decision
 
 `title` `type` (`KICKOFF` `BAUSITZUNG` `ABNAHME` `INTERN` `KUNDE`) `startsAt`
 `endsAt` `location` `status` (`PLANNED` `HELD` `CANCELLED`) `projectId?`
@@ -464,7 +561,7 @@ milestone raises `MilestoneReached`, and Finance may create an invoice draft.
 `durationMinutes?` `note`. Set before the meeting; the protocol is written
 against it.
 **MeetingItem** (protocol) — `meetingId` `agendaItemId?` `order` `text`
-`kind` (`INFORMATION` `ENTSCHEID` `PENDENZ`) `decision?` `taskId?`
+`kind` (`INFORMATION` `ENTSCHEID` `PENDENZ`) `decisionId?` `taskId?`
 `responsibleId?` `dueDate?` `disciplineId?`.
 **MeetingApproval** — `meetingId` `decidedById` `decidedAt` `decision`
 (`APPROVED` `AMENDED`) `note`. Minutes of a Bausitzung are approved at the
@@ -478,7 +575,50 @@ Lüftung across every Bausitzung" be a query rather than a re-read.
 items carry the meeting's number in their display key (`14.3`), because that is
 how they are referred to out loud on site.
 
-### 3.10 Document
+#### Decision (Entscheid)
+
+**Added after review.** The first draft had `ENTSCHEID` as one of three kinds of
+protocol line and a `decision` string beside it. That is enough to *print* the
+minutes and not enough to answer the question the firm actually asks:
+
+> Wann wurde beschlossen, die Lüftung umzubauen — und von wem?
+
+A decision outlives the meeting that recorded it. It is referenced by later
+minutes, it is the reason a drawing changed, it gets superseded by a different
+decision two months on, and in a dispute it is the thing that gets looked up. A
+line inside a protocol row cannot be cited, linked to, filtered or reversed.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `number` | String | `E-4723-017`, unique per project |
+| `title`, `rationale` | String | *what* was decided and *why* — both required |
+| `projectId` | → Project | a decision is always about a project |
+| `meetingId`, `meetingItemId` | → | where it was taken, when it was taken in one |
+| `decidedAt` | DateTime | may predate the minutes; a decision on site is still a decision |
+| `decidedById` | → Employee | |
+| `customerContactId?` | → Contact | when the Bauherrschaft decided it |
+| `type` | enum | `TECHNISCH` `KOMMERZIELL` `TERMIN` `GESTALTUNG` `ORGANISATORISCH` |
+| `disciplineId?`, `buildingSystemId?` | → | what it is about |
+| `status` | enum | `OFFEN` `ENTSCHIEDEN` `UMGESETZT` `AUFGEHOBEN` |
+| `impact` | enum? | `KOSTEN` `TERMIN` `QUALITAET` `KEINE` — and `costImpact`, `scheduleImpactDays` when known |
+| `supersedesId` | → Decision? | the one it reverses or replaces |
+| `documentId?` | → Document | the signed sheet, where there is one |
+
+**Lifecycle** — `OFFEN` is a decision that has been *asked for* and not yet
+taken, which is a state a Bausitzung produces constantly and which nothing in
+the first draft could represent. `AUFGEHOBEN` requires a `supersedesId` on the
+decision that replaces it: a reversal names its successor or it is not a
+reversal.
+**Validation** — `rationale` is required, on the same principle as
+`DrawingRevision.changeNote` and `RoomLoad.method`: the record exists to answer
+*why*, and a decision without a reason is the row nobody can act on two years
+later. `supersedesId` must not cycle and must stay inside the project.
+
+Decisions and `Task`s are different things and both are produced by a meeting: a
+decision is a *fact about what was agreed*, a task is *work someone owes*. A
+decision may spawn tasks; it is not one.
+
+### 3.12 Document
 
 Enterprise document management, distinct from `MediaAsset` (which is website
 imagery and stays as it is).
@@ -495,7 +635,7 @@ survive, exactly as `MediaAssetVersion` does.
 (the four-eyes rule `ContentService` already enforces, and which
 `workflow.requireApproval` can lift).
 
-### 3.10b Drawing, DrawingRevision, Transmittal (Pläne)
+### 3.13 Drawing, DrawingRevision, Transmittal (Pläne)
 
 **A drawing is not a document**, and collapsing the two — which the first draft
 did — loses the three things that make a plan a plan: it carries a revision
@@ -510,6 +650,7 @@ date, and which revision someone received is a liability question.
 | `title` | String | |
 | `projectId`, `disciplineId` | → | both required |
 | `buildingId?`, `floorId?` | → | what it depicts |
+| `buildingSystemId?` | → BuildingSystem | which plant, for a Schema or Strangschema |
 | `type` | enum | `GRUNDRISS` `SCHNITT` `ANSICHT` `SCHEMA` `PRINZIPSCHEMA` `DETAIL` `STRANGSCHEMA` `ISOMETRIE` |
 | `scale` | String | `1:50`, `1:100`, `o.M.` |
 | `format` | enum | `A0` `A1` `A2` `A3` `A4` `SONDER` |
@@ -519,6 +660,21 @@ date, and which revision someone received is a liability question.
 | `drawnById`, `checkedById?`, `approvedById?` | → Employee | gezeichnet / geprüft / freigegeben |
 
 Composite unique on `(projectId, number)`.
+
+**DrawingRoom** — `drawingId` `roomId`. A plan covers many rooms and a room
+appears on many plans, so the link is a join and not a column. It is populated
+from the model where one exists (`ModelLink`), and by hand otherwise.
+
+**Where the anchors earn their keep.** Discipline + building + floor + system +
+rooms is not metadata for its own sake — it is what makes the questions the
+office asks out loud into filters:
+
+> *Alle Lüftungspläne für OG2* · *jeder Plan, auf dem Raum 2.14 vorkommt* ·
+> *alles zur Anlage H1* · *was muss neu ausgegeben werden, wenn OG2 sich ändert*
+
+The last one is the expensive one. Without the anchors it is a person opening
+plans until they are sure; with them it is a query whose result is the
+transmittal list.
 
 **Status** `WIP → IN_CHECK → CHECKED → RELEASED → ISSUED → SUPERSEDED`, with
 `WITHDRAWN` from any state.
@@ -560,7 +716,7 @@ revision may not be transmitted at all; sending a revision that supersedes one
 already issued to the same recipient raises a warning naming them, because that
 is precisely the person who must be told.
 
-### 3.11 ModelFile (BIM/CAD)
+### 3.14 ModelFile, ModelLink (BIM/CAD)
 
 `name` `kind` (`IFC` `RVT` `DWG` `DXF` `NWD` `PDF_PLAN`) `discipline`
 `status` (`WIP` `SHARED` `PUBLISHED` `ARCHIVED`) `projectId` `version`
@@ -568,26 +724,47 @@ is precisely the person who must be told.
 `elementCount?` `ifcSchema?` `uploadedById`
 
 **ModelVersion** — as DocumentVersion.
-**ModelIssue** — `modelFileId` `kind` (`CLASH` `MISSING_DATA` `PENETRATION`
-`SCHEMA`) `severity RiskLevel` `description` `elementGuid?` `status`
-(`OPEN` `IN_PROGRESS` `RESOLVED` `WONT_FIX`) `assigneeId?`.
+~~**ModelIssue**~~ — **folded into `Issue`** (§3.22). A clash is an issue with
+`kind: KOLLISION`, a `modelFileId`, an `elementGuid` and a responsible
+discipline; a missing-data finding is `FEHLENDE_INFO`. Keeping a separate table
+would have given the firm two lists of open problems and no way to sort them
+together, which is the one thing a coordinator needs.
 
 The `cad/audit_ifc.py` toolchain already produces exactly this shape of finding
-offline; `ModelIssue` is where its output lands when it is wired in.
+offline; `Issue` is where its output lands when it is wired in.
 **Validation** — an IFC upload is checked for schema and unit declarations
 before `SHARED`; ingestion runs as a job, never in the request (architecture
 §7.5).
 
-**ModelLink** — `modelFileId`, one of `drawingId` / `documentId` / `roomId` /
-`buildingId`, `elementGuid?`, `relation` (`DERIVED_FROM` `DOCUMENTS`
-`REPRESENTS` `COORDINATES_WITH`).
+**ModelLink** — `modelFileId`, exactly one of `drawingId` / `documentId` /
+`roomId` / `buildingId` / `buildingSystemId` / `issueId` / `modelFileId2`,
+`elementGuid?`, `relation` (`DERIVED_FROM` `DOCUMENTS` `REPRESENTS`
+`COORDINATES_WITH` `FEDERATES`), `note`.
 
-This is the table that makes BIM a domain rather than a file store. A plan
-derived from a model, a room whose loads came from a model element, a report
-documenting a coordination state — each is a link with a reason, and
-`elementGuid` reaches the individual IFC object. `build_scene_ifc.py` already
-accounts for every `IfcProduct` in the federation with a reason for each of the
-11'194 it excludes; that inventory is what populates this.
+This is the table that makes BIM a domain rather than a file store, and the
+review is right that it should reach further than the first draft let it:
+
+| Link | Relation | What it answers |
+| --- | --- | --- |
+| → Drawing | `DERIVED_FROM` | which plans go stale when this model is re-issued |
+| → Document | `DOCUMENTS` | the calculation or report behind the geometry |
+| → Room | `REPRESENTS` | the room whose loads came from a model element |
+| → BuildingSystem | `REPRESENTS` | the plant the `IfcUnitaryEquipment` *is* |
+| → Issue | `COORDINATES_WITH` | the clash, on the element that causes it |
+| → ModelFile | `FEDERATES` | the discipline models inside a coordination model |
+
+`elementGuid` reaches the individual IFC object, which is what makes every one
+of those rows survive a re-export: the GUID is stable and the element id is not.
+`build_scene_ifc.py` already accounts for every `IfcProduct` in the federation
+with a reason for each of the 11'194 it excludes; that inventory is what
+populates this, and it is why the model → room and model → system links are
+extractions rather than data entry.
+
+**The `Issue` link is what turns the BIM module from a viewer into a workflow.**
+A clash that is a row in a report is a PDF nobody reopens; a clash that is an
+`Issue` with a discipline, a room, an assignee and a due date is work. The
+BCF interchange format models exactly this pairing — a topic plus a viewpoint —
+and `ModelLink.elementGuid` is the viewpoint's anchor.
 
 **Federation** — a coordination model is a `ModelFile` of kind `NWD`/`IFC` whose
 `ModelLink` rows point at the discipline models it federates. Guglera is already
@@ -595,7 +772,7 @@ three files — Architektur, Heizung, Lüftung — and the audit report the Pyth
 chain produces is a cross-model clash list, so the federated case is the normal
 one here, not an advanced feature.
 
-### 3.12 Employee
+### 3.15 Employee
 
 The person. Distinct from `User` (a login) and from the `team` content type
 (public portraits).
@@ -618,7 +795,7 @@ blocks new time entries, but keeps every historical record.
 `documentId?`. Expiry drives a notification: a lapsed certificate is a
 compliance problem, not a diary entry.
 
-### 3.13 Department / Office
+### 3.16 Department / Office
 
 **Department** — `name` `code` `parentId?` `headId?` → Employee. Self-referencing
 tree; the audit noted no Department entity exists and the closest thing is a
@@ -626,7 +803,7 @@ hardcoded option list on the team content type.
 **Office** — `name` `address` `zip` `city` `phone` `isHeadquarters`. Thun and
 Bern.
 
-### 3.14 TimeEntry
+### 3.17 TimeEntry
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -637,6 +814,7 @@ Bern.
 | `billable` | Boolean | |
 | `status` | enum | `DRAFT` `SUBMITTED` `APPROVED` `REJECTED` `INVOICED` |
 | `employeeId`, `projectId?`, `taskId?`, `activityTypeId` | → | |
+| `costCodeId?` | → CostCode | §3.20 — the axis plan and actuals share |
 | `approvedById`, `approvedAt` | | |
 
 **Validation** — `minutes` 1–1440; the sum for one employee on one date may not
@@ -647,7 +825,7 @@ Finance when the entry lands on an invoice line, which is what stops the same
 hour being billed twice.
 **ActivityType** — `name` `code` `billableByDefault` `active`.
 
-### 3.15 Absence
+### 3.18 Absence
 
 `employeeId` `type` (`VACATION` `SICK` `MILITARY` `TRAINING` `UNPAID`
 `PARENTAL`) `from` `to` `days Decimal` `status` (`REQUESTED` `APPROVED`
@@ -657,7 +835,7 @@ hour being billed twice.
 employee; `days` recomputed server-side from the holiday calendar and the
 employee's workload rather than trusted from the client.
 
-### 3.16 Resource / Allocation / Maintenance
+### 3.19 Resource / Allocation / Maintenance
 
 **Resource** — `name` `kind` (`VEHICLE` `EQUIPMENT` `LAPTOP` `LICENCE`
 `PRINTER` `MEASURING_DEVICE` `ROOM`) `identifier` (plate, serial, licence key)
@@ -675,53 +853,252 @@ refusal — over-allocation is a real state that Planning must be able to *show*
 `dueAt` `completedAt?` `cost?` `note`. A calibration due date on a measuring
 device is exactly the kind of thing a Messtechnik firm must not miss.
 
-### 3.17 Finance
+### 3.20 Finance and CostCode
+
+#### CostCode — the axis, added after review
+
+The review's point: *do not call it Budget, call it a cost code, and hang the
+budget, the hours, the invoices and the forecast off it.* That is right, and the
+reason is that the first draft had four different ways of classifying the same
+franc. `BudgetLine` was keyed by discipline + phase, `CostItem` by a `kind`
+enum, `InvoiceLine` by free text, and `TimeEntry` by `ActivityType`. Four
+vocabularies over one number means the plan and the actuals can never be
+subtracted from each other without a mapping nobody wrote down.
+
+One axis, referenced by all four:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `code` | String @unique | `4723.LFT.41.LOHN` — structured, sortable, spoken |
+| `name` | String | |
+| `parentId` | → CostCode? | a tree: project → Gewerk → phase → kind |
+| `level` | enum | `PROJEKT` `GEWERK` `PHASE` `ART` |
+| `projectId?`, `disciplineId?`, `phase?` | → , SiaPhase? | what the node stands for |
+| `kind` | enum | `LOHN` `MATERIAL` `FREMDLEISTUNG` `SPESEN` `SONSTIGES` |
+| `billable` | Boolean | |
+| `active` | Boolean | closed codes stop receiving postings and keep their history |
 
 **Budget** — `projectId @unique` `plannedHours` `plannedCost Decimal`
 `plannedRevenue Decimal` `contingencyPercent` `approvedById?`.
-**BudgetLine** — `budgetId` `discipline` `phase SiaPhase?` `plannedHours`
-`plannedCost` `note`.
-**CostItem** — `projectId` `budgetLineId?` `kind` (`LABOUR` `MATERIAL`
-`SUBCONTRACTOR` `TRAVEL` `OTHER`) `amount` `date` `supplier?`
-`invoiceReference?` `timeEntryId?`. Labour costs are created from approved time
-entries by the event listener, never typed.
+**BudgetLine** — `budgetId` **`costCodeId`** `plannedHours` `plannedCost` `note`.
+The discipline and phase now come from the code rather than being repeated.
+**CostItem** — `projectId` **`costCodeId`** `budgetLineId?` `amount` `date`
+`supplier?` `invoiceReference?` `timeEntryId?`. Labour costs are created from
+approved time entries by the event listener, never typed.
 **Invoice** — `number @unique` `type` (`ACOMPTE` `SCHLUSS` `GUTSCHRIFT`)
 `status` (`DRAFT` `SENT` `PARTIALLY_PAID` `PAID` `OVERDUE` `CANCELLED`)
 `issueDate` `dueDate` `netAmount` `vatRate` `grossAmount` `paidAmount`
 `customerId` `projectId?` `contractId?`.
-**InvoiceLine** — `invoiceId` `description` `quantity` `unit` `unitPrice`
-`amount` `timeEntryIds String[]`.
+**InvoiceLine** — `invoiceId` **`costCodeId?`** `description` `quantity` `unit`
+`unitPrice` `amount` `timeEntryIds String[]`.
 **Payment** — `invoiceId` `amount` `paidAt` `method` `reference`.
+**Forecast** — `costCodeId` `asOf` `method` (`LINEAR` `EARNED_VALUE` `MANUAL`)
+`forecastCost` `forecastHours` `confidence` `note` `createdById`. Append-only:
+a forecast is a statement made on a date, and overwriting last month's is how a
+project looks like it was always going to cost this much.
 
-**Validation** — `grossAmount = netAmount × (1 + vatRate)`, checked server-side;
-`paidAmount` may not exceed `grossAmount`; a `SENT` invoice is immutable except
-through a credit note. `OVERDUE` is derived from `dueDate` and `paidAmount` by a
-nightly job, not stored by hand.
+**What the one axis buys.** `TimeEntry.costCodeId` is what makes *plan vs.
+actual vs. forecast* a single grouped query instead of a reconciliation:
 
-### 3.18 Quality
+```
+CostCode 4723.LFT.41
+  Budget      480 h   CHF  62'400
+  Hours       391 h   CHF  50'830   (approved time entries)
+  Invoiced            CHF  45'000
+  Forecast    520 h   CHF  67'600   ← linear, as of 31.08.2026
+```
+
+**Validation** — a posting is refused against a non-leaf code (money lands on
+leaves, totals roll up) and against an `active: false` one; a code may not be
+deactivated while an open `BudgetLine` references it; `grossAmount = netAmount ×
+(1 + vatRate)`, checked server-side; `paidAmount` may not exceed `grossAmount`;
+a `SENT` invoice is immutable except through a credit note. `OVERDUE` is derived
+from `dueDate` and `paidAmount` by a nightly job, not stored by hand.
+
+**Where it comes from** — the code tree is generated when the project's
+disciplines and phases are created, not typed. A firm that has to hand-build a
+four-level code tree per project will stop using it by the third project, and an
+unused cost structure is worse than none because the numbers in it are half
+true.
+
+### 3.21 Quality
 
 **Inspection** — `projectId` `type` (`BAUSTELLE` `ABNAHME` `QS_INTERN`)
 `scheduledAt` `performedAt?` `inspectorId` `status` (`PLANNED` `DONE`
 `CANCELLED`) `result` (`PASS` `PASS_WITH_DEFECTS` `FAIL`)? `notes`
-**Defect** — `inspectionId` `description` `severity RiskLevel` `location`
-`responsibleId?` `dueDate?` `status` (`OPEN` `IN_PROGRESS` `FIXED` `VERIFIED`
-`WAIVED`) `photoDocumentId?`
+~~**Defect**~~ — **folded into `Issue`** (§3.22) with `kind: BAUMANGEL` and
+`inspectionId` as its origin. It had the same six fields and a worse name.
 **Risk** — `projectId` `title` `description` `probability` (1–5) `impact` (1–5)
 `score` (derived = p × i) `status` (`IDENTIFIED` `MITIGATING` `CLOSED`
 `OCCURRED`) `ownerId` `mitigation`
 **ChecklistItem** — `inspectionId?` `taskId?` `text` `done` `doneById?`
 `doneAt?` `order`
 
-### 3.19 Notification
+### 3.22 Issue (Koordination und Mängel)
+
+**Added after review, and deliberately not merged into `Task`.** The review's
+instinct is right and worth stating precisely, because "why not just a task with
+a type field" is the question this section has to survive.
+
+A task is **work someone owes**: it has an assignee, an estimate, a due date and
+a Kanban position, and it is finished when the person does it. An issue is **a
+defect in the thing being designed**: it has a location, a discipline pair, a
+severity, evidence, and it is finished when the *design* is correct — which may
+require three tasks, two decisions and a new drawing revision, or none of them.
+
+| They differ in | Task | Issue |
+| --- | --- | --- |
+| What it is | work owed | a fault found |
+| Where it lives | a project, a milestone | a room, a drawing, a model element |
+| Who it involves | one assignee | a *raising* and a *responsible* discipline |
+| How it ends | done | resolved **and verified** by someone else |
+| Where it comes from | a person | a clash run, an inspection, a site visit |
+| Volume | hundreds | thousands — a single clash run is 400 |
+
+Merging them costs both: the board fills with 400 machine-generated clashes
+nobody planned, and the issue loses the two fields it exists for — where it is,
+and who has to fix it versus who found it.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `number` | String | `I-4723-0412`, unique per project |
+| `title`, `description` | String | |
+| `projectId` | → Project | required |
+| `kind` | enum | `KOLLISION` `FEHLENDE_INFO` `PLANFEHLER` `BAUMANGEL` `KOORDINATION` `NORMABWEICHUNG` |
+| `priority`, `severity` | Priority, RiskLevel | |
+| `status` | enum | `OPEN` `ASSIGNED` `IN_PROGRESS` `RESOLVED` `VERIFIED` `WONT_FIX` `DUPLICATE` |
+| `raisedById`, `raisedByDisciplineId` | → | who found it, from which Gewerk |
+| `responsibleDisciplineId`, `assigneeId?` | → | who must fix it |
+| `buildingId?`, `floorId?`, `roomId?`, `buildingSystemId?` | → | **where** |
+| `drawingId?`, `drawingRevisionId?` | → | which plan it is visible on |
+| `modelFileId?`, `elementGuid?` | → , String? | the BCF viewpoint anchor |
+| `taskId?` | → Task | the work it spawned, when it needed work |
+| `decisionId?` | → Decision | the decision that closed it, when it needed one |
+| `dueDate?`, `resolvedAt?`, `verifiedAt?`, `verifiedById?` | | |
+| `photoDocumentIds` | String[] | site photographs |
+| `duplicateOfId` | → Issue? | 400 clashes contain duplicates, always |
+
+**Lifecycle** `OPEN → ASSIGNED → IN_PROGRESS → RESOLVED → VERIFIED`, with
+`WONT_FIX` and `DUPLICATE` as explicit dead ends that both require a note.
+**`RESOLVED` is not `VERIFIED`**, and that separation is the whole point: the
+person who fixes it may not be the person who confirms it, which is the four-eyes
+rule this codebase already applies to content, documents and time entries.
+**Validation** — `verifiedById` may not equal the resolver; `DUPLICATE` requires
+`duplicateOfId`; an issue anchored to a `drawingRevisionId` that is later
+superseded is flagged rather than moved, because whether the new revision fixed
+it is a judgement.
+
+**Relation to `Defect` and `ModelIssue`.** Both collapse into this. `Defect`
+(§3.21) was the site-inspection case and `ModelIssue` (§3.14) the clash case;
+they differ only in `kind` and in what raised them, and keeping three tables
+would mean three screens, three permission sets and three notions of "open". An
+`Inspection` now raises `Issue` rows of kind `BAUMANGEL`, the clash job raises
+`KOLLISION`, and both appear in one list that can actually be worked through.
+
+### 3.23 Notification
 
 Exists as a Prisma model today **with no implementation at all** — the audit
-lists it as a table with nothing behind it. It becomes real here.
+lists it as a table with nothing behind it. The review is right that it is a
+domain and not a toast: a toast is what you show the person who just clicked;
+a notification is what you owe the person who is not looking.
 
-`userId` `kind` `title` `body?` `link?` `entityType?` `entityId?`
-`priority Priority` `readAt?` `emailedAt?`
+#### Notification
 
-Raised by the domain event bus (architecture §7.4): a task assigned, a document
-awaiting approval, a certificate expiring, an invoice overdue.
+`recipientUserId` `kind` (a stable key: `task.assigned`, `phase.approval.due`,
+`certificate.expiring`, `invoice.overdue`, `issue.assigned`, `drawing.issued`)
+`title` `body?` `priority Priority` `groupKey?` `entityType?` `entityId?`
+`link?` `actorUserId?` `readAt?` `dismissedAt?` `expiresAt?`
+`sourceEvent?` `workflowRunId?`
+
+`groupKey` is what stops the bell becoming useless. Forty tasks assigned by one
+import are one notification saying forty, not forty rows — collapsing is a
+property of the record, not of the rendering, because the *email* has to
+collapse too.
+
+#### NotificationDelivery
+
+`notificationId` `channel` (`IN_APP` `EMAIL` `DIGEST`) `status` (`PENDING`
+`SENT` `FAILED` `SUPPRESSED`) `sentAt?` `error?` `attempts`
+
+A separate row per channel, because "did she get the email" and "has she read
+it" are different questions with different answers, and the first draft's single
+`emailedAt` column could only answer half of one. `SUPPRESSED` records a
+deliberate non-send (the recipient's preference, or the actor being the
+recipient) — a silence with a reason, which is the difference between working
+and broken.
+
+#### NotificationPreference
+
+`userId` `kind?` (null = the default) `channel` `enabled` `digest`
+(`NONE` `DAILY` `WEEKLY`) `quietHoursFrom?` `quietHoursTo?`
+
+**Validation** — a `priority: URGENT` notification ignores quiet hours and
+digest batching. A certificate expiring in three days and an overdue invoice are
+not the same urgency as a comment, and a preference system that cannot say so
+gets switched off wholesale.
+
+**Where they come from** — the domain event bus (architecture §7.4) and the
+workflow engine below. Never from a controller: a notification written by hand
+in a service is one that will be forgotten when the second path to the same
+state is added.
+
+### 3.24 Workflow (Automation)
+
+**Added after review.** The case for it is the one the review makes — *Phase
+genehmigt, Zeichnung freigegeben, Offerte akzeptiert, Aufgabe überfällig* are
+four sentences of the same shape, and the alternative to a rule engine is that
+each of them is a hard-coded listener that only a developer can change.
+
+The boundary that keeps this from becoming a second application:
+
+> **Domain events are the facts. Workflow rules are the firm's reactions to
+> them.** A rule may notify, assign, create a task, set a field, or call a
+> webhook. It may **not** change a status that has a transition rule, because
+> that rule lives in `domain/` on the server and is tested there.
+
+Without that line an office automation quietly becomes a place where business
+rules hide, and the transitions table stops being the truth.
+
+#### WorkflowRule
+
+`name` `description` `trigger` `active` `runOrder` `createdById` `lastRunAt?`
+`officeId?`
+
+`trigger` is a domain event name from a generated list — `TimeEntryApproved`,
+`PhaseApproved`, `DrawingReleased`, `OfferAccepted`, `IssueRaised`,
+`CertificateExpiring`, plus the scheduled pseudo-triggers `TaskOverdue` and
+`InvoiceOverdue` that a nightly job raises. Generated, so a typo fails a test
+rather than producing a rule that never fires — the same treatment §7.3 gives
+permissions.
+
+#### WorkflowCondition
+
+`ruleId` `field` (a dotted path into the event payload) `operator` (`eq` `ne`
+`in` `gt` `gte` `lt` `lte` `contains` `isNull`) `value Json` `group` `negate`
+
+Conditions in one `group` are ANDed; groups are ORed. Two levels, deliberately:
+a third would be a query language, and a query language in a settings screen is
+a support burden with no test suite.
+
+#### WorkflowAction
+
+`ruleId` `order` `type` (`NOTIFY` `ASSIGN` `CREATE_TASK` `SET_FIELD`
+`ADD_WATCHER` `WEBHOOK` `EMAIL`) `config Json` `continueOnError`
+
+#### WorkflowRun
+
+`ruleId` `triggeredAt` `eventType` `eventPayload Json` `status` (`MATCHED`
+`SKIPPED` `FAILED`) `actionResults Json` `durationMs` `error?`
+
+Append-only, and the reason the whole thing is defensible: an automation nobody
+can see the history of is an automation nobody trusts. "Why did this task appear"
+must be answerable, and `WorkflowRun` is the answer. It shares its retention
+policy with `AuditLog` and, like it, has no API to edit a row.
+
+**Validation** — a rule whose actions would re-raise its own trigger is refused
+at save time (static check) and capped at depth 3 at run time (dynamic); a rule
+that fails 10 consecutive runs is deactivated and its owner notified, because a
+silently failing automation is worse than no automation.
 
 ---
 
@@ -739,7 +1116,7 @@ contacts and an address, and half of them are also clients.
 a project; a task is a refinement. Requiring a task would make people invent
 tasks to book time, which corrupts both.
 
-**Allocation is one table for people and resources.** See §3.16.
+**Allocation is one table for people and resources.** See §3.19.
 
 **Document vs MediaAsset stay separate.** `MediaAsset` is website imagery bound
 to the publish pipeline, with alt text and responsive derivatives. `Document` is
@@ -772,6 +1149,37 @@ attached to a project.
 so a second commission on the same object inherits its floors, rooms, loads and
 model. That inheritance is most of the reason this table earns its place.
 
+**A plant is not a string on the building.** `BuildingSystem` replaced
+`heatingSystem` and `ventilationSystem`. A building is served by *n* plants,
+each with a discipline, a location, a capacity and an end of life, and the
+replacement forecast across the portfolio is what sells the next project.
+
+**Issue is not Task, and it absorbs two other tables.** §3.22 has the full
+argument. The short form: a task is work owed and ends when it is done; an issue
+is a fault in the design, carries *where* it is and *which two disciplines* it
+sits between, and ends only when someone other than the fixer verifies it.
+`Defect` and `ModelIssue` were the same record under two names and are gone.
+
+**Decision is not MeetingItem.** A protocol line is a sentence in one document;
+a decision is cited by later minutes, is the reason a revision exists, and gets
+reversed by a named successor. It outlives its meeting, so it is not stored
+inside it.
+
+**CostCode is the single axis for money.** Budget, hours, cost items, invoice
+lines and forecasts all reference it, which is what makes plan minus actual a
+subtraction rather than a reconciliation. The first draft classified the same
+franc four different ways — §3.20.
+
+**Notification is a domain, not a toast.** A toast is for the person who just
+clicked; a notification is what is owed to the person who is not looking. It has
+recipients, channels, delivery state, grouping and preferences, and it is raised
+by events and rules, never written by hand in a controller — §3.23.
+
+**Workflow rules react; they do not decide.** A rule may notify, assign, create
+or set a field. It may not perform a status transition that has a rule, because
+that rule lives in `domain/` on the server where it is tested. Without that line
+the settings screen quietly becomes the place business logic hides — §3.24.
+
 ---
 
 ## 5. Indexing and volume
@@ -783,20 +1191,27 @@ model. That inheritance is most of the reason this table earns its place.
 | Document | 200k | `(projectId, category)`, `(status)`, tsvector on name |
 | **DrawingRevision** | 150k | `(drawingId, revision)`, `(releasedAt)` |
 | **Drawing** | 30k | `(projectId, disciplineId)`, `(status)`, tsvector on number+title |
+| **Notification** | 2m+ | `(recipientUserId, readAt)`, `(groupKey)`, `(createdAt)` — **partition by month** |
+| **Issue** | 300k+ | `(projectId, status)`, `(responsibleDisciplineId, status)`, `(roomId)`, `(modelFileId, elementGuid)` |
 | **Room** | 100k+ | `(floorId)`, `(buildingId)` via floor — a hospital is 2'000 rooms |
 | **RoomLoad** | 400k+ | `(roomId, disciplineId, kind)` |
-| CostItem | 200k | `(projectId, date)`, `(budgetLineId)` |
+| **WorkflowRun** | 1m+ | `(ruleId, triggeredAt)`, `(status)` — same retention as AuditLog |
+| CostItem | 200k | `(projectId, date)`, `(costCodeId)`, `(budgetLineId)` |
+| **CostCode** | ~40k | `(projectId, level)`, `(parentId)`, `code` unique |
 | **TransmittalItem** | 200k | `(drawingRevisionId)`, `(transmittalId)` |
 | AuditLog | millions | already indexed; **needs partitioning by month** |
 | ProjectDiscipline | ~10k | `(projectId)`, `(disciplineId, status)` |
 | ProjectPhase | ~14k | `(projectId, phase)` |
 | Project | ~2k | `(status)`, `(managerId)`, `(customerId)`, `(currentPhase)` |
 | Building | ~3k | `(customerId)`, `(egid)`, tsvector on name+address |
+| **BuildingSystem** | ~15k | `(buildingId)`, `(disciplineId, status)`, `(yearInstalled)` |
+| **Decision** | ~20k | `(projectId, decidedAt)`, `(status)` |
 | Customer | ~2k | tsvector on name |
 
-`Room`, `RoomLoad` and `DrawingRevision` join `TimeEntry` and `AuditLog` as the
-tables where access paths matter. The rest are small enough that correctness
-matters more.
+Five tables force real decisions about access paths: `TimeEntry`, `AuditLog`,
+`Notification`, `WorkflowRun` and `Issue`. The first four are append-heavy and
+want monthly partitioning; `Issue` is the one that is *queried* hard, because a
+coordination list is filtered by four dimensions at once.
 
-`TimeEntry` and `AuditLog` are the two that force real decisions. Everything
-else is small enough that correctness matters more than access paths.
+`RoomLoad`, `Room` and `DrawingRevision` are large but read along one path each.
+Everything else is small enough that correctness matters more than access paths.

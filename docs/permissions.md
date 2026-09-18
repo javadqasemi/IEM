@@ -16,8 +16,8 @@ would multiply:
 1. **Twelve of the 51 are enforced on no route.** They are selectable in the
    role editor and grant nothing. At 51 entries that is 24% dead; the mechanism
    that let it happen is a list nobody can cross-check against the guards.
-2. **It is typed by hand.** Nineteen modules × seven actions is 133 entries,
-   plus the ~25 that do not fit the grid. Hand-maintained, it will drift further
+2. **It is typed by hand.** Twenty-six modules × seven actions is 182 entries,
+   plus the ~45 that do not fit the grid. Hand-maintained, it will drift further
    and faster.
 
 ## 2. The rule: declare the resource, derive the catalogue
@@ -83,7 +83,11 @@ employee.compensation   see and edit salary and hourly rate
 employee.documents      see personnel files
 document.approve
 document.restore        from the recycle bin
-bim.upload · bim.publish · bim.resolveIssue
+bim.upload · bim.publish · bim.link
+issue.assign · issue.resolve · issue.verify
+decision.supersede
+workflow.activate · workflow.testRun · workflow.viewRuns
+notification.sendBroadcast
 invoice.send · invoice.recordPayment · invoice.credit
 finance.viewMargins     see profitability, not just budget
 report.schedule
@@ -329,6 +333,74 @@ the four-eyes rule still forbids approving a phase whose last deliverable they
 released themselves. Only `management` and `super_admin` hold
 `projectPhase.reopen`.
 
+## 3.11 Resources added in the second review
+
+Plants, decisions, issues, cost codes, notifications and workflow rules. Two of
+these carry the only permissions in the catalogue that protect the *system* from
+its own users rather than users from each other.
+
+| Resource | Standard actions | Extra keys | Notes |
+| --- | --- | --- | --- |
+| `buildingSystem` | read, create, update, delete, export | `buildingSystem.decommission` | Taking a plant out of service is a fact about the building, not an edit |
+| `decision` | read, create, update, delete | `decision.supersede` | `update` is corrections; reversing a decision is its own authority |
+| `issue` | read, create, update, delete, export | `issue.assign`, `issue.resolve`, `issue.verify`, `issue.bulkImport` | `resolve` and `verify` are separate people — that separation *is* the entity |
+| `costCode` | read, manage, export | `costCode.close` | Only `manage` writes; the tree is generated, not typed |
+| `notification` | read | `notification.sendBroadcast`, `notification.managePreferences` | Everyone reads their own; `◐` is the only sensible default |
+| `workflow` | read, create, update, delete | `workflow.activate`, `workflow.testRun`, `workflow.viewRuns` | The most dangerous resource in the system |
+
+**`issue.resolve` and `issue.verify` are two keys because they are two people.**
+The fixer says it is fixed; someone else confirms it. Granting both to the same
+role by default would quietly undo the four-eyes rule this codebase applies to
+content, documents and time entries — so the matrix below grants `verify` more
+narrowly than `resolve`, and the service refuses `verifiedById === resolvedById`
+regardless of what the role holds.
+
+**`workflow.activate` is separate from `workflow.update` deliberately.** Writing
+a rule is drafting; switching it on makes it act on everybody's records without
+anybody clicking anything. `workflow.testRun` exists so a rule can be exercised
+against a real past event *without performing its actions* — the alternative is
+that the only way to find out what a rule does is to let it do it.
+
+**`notification.sendBroadcast` is not `notification.create`.** Nothing creates a
+notification by hand in the normal path — they come from events and rules
+(`data-model.md` §3.23). A broadcast is the exception, it reaches every user at
+once, and it is the one that needs a name in the audit log.
+
+**`costCode` has `manage` and no `update`.** The tree is generated from a
+project's disciplines and phases; editing a node in a list is not the operation,
+maintaining the structure is. `costCode.close` stops postings while keeping
+history, and it is refused while an open `BudgetLine` references the node.
+
+### By role
+
+| Resource | Mgmt | PM | Engineer | Draftsman | HR | Finance |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| `buildingSystem` read / write | ● / ○ | ● / ● | ● / ● | ● / ○ | ○ | ● / ○ |
+| `decision` read / create | ● / ● | ● / ● | ● / ● | ● / ○ | ○ | ● / ○ |
+| `decision.supersede` | ● | ● ◐ | ○ | ○ | ○ | ○ |
+| `issue` read / create | ● / ● | ● / ● | ● / ● | ● / ● | ○ | ● / ○ |
+| `issue.assign` | ● | ● | ● | ○ | ○ | ○ |
+| `issue.resolve` | ○ | ● | ● | ● ◐ | ○ | ○ |
+| `issue.verify` | ● | ● | ● | ○ | ○ | ○ |
+| `costCode` read / manage | ● / ○ | ● / ○ | ● read | ○ | ○ | ● / ● |
+| `notification` | ● ◐ | ● ◐ | ● ◐ | ● ◐ | ● ◐ | ● ◐ |
+| `notification.sendBroadcast` | ● | ○ | ○ | ○ | ● | ○ |
+| `workflow` read | ● | ● | ○ | ○ | ○ | ○ |
+| `workflow` create/update | ● | ○ | ○ | ○ | ○ | ○ |
+| `workflow.activate` | ● | ○ | ○ | ○ | ○ | ○ |
+| `workflow.viewRuns` | ● | ● | ○ | ○ | ○ | ○ |
+
+`workflow.create` and `workflow.activate` sit with `management`,
+`super_admin` and the `administrator` role and nowhere else. A rule engine whose
+rules anybody can switch on is a way for one person to change how the system
+behaves for everyone, and the blast radius does not match a project manager's
+job. `workflow.viewRuns` is wider on purpose: *why did this task appear* is a
+question its recipient is entitled to an answer to.
+
+`issue.resolve` is `◐` for the Draftsman — issues assigned to them. Management
+holds `verify` but not `resolve`, which is the correct shape for a role that
+signs off rather than fixes.
+
 ## 4. Row-level rules (`◐`)
 
 The guard is coarse and the service is fine-grained. The `◐` cells resolve to
@@ -341,6 +413,16 @@ these rules, each implemented once in the owning service and covered by a test:
 | **Assigned** — actor is `assigneeId` | Task update |
 | **Member** — actor is any `ProjectMember` | project Documents, project BIM |
 | **Shared** — an explicit share row names the actor | Guest documents |
+| **Own notification** — `recipientUserId === actor.userId` | Notification read, dismiss, preferences |
+| **Assigned issue** — actor is `assigneeId` | `issue.resolve` for the Draftsman |
+| **Not the resolver** — `actor.id !== issue.resolvedById` | `issue.verify`, always, whatever the role |
+| **Not the releaser** — actor did not release the phase's last deliverable | `projectPhase.approve` |
+
+The last two are the four-eyes rule, written twice because it applies to two
+entities. It is enforced in the service in both cases and holds regardless of
+which permissions the role carries — a rule a permission can lift is not a rule,
+and `workflow.requireApproval` is the one place this codebase makes that
+exception explicit and deliberate.
 
 Two rules that override all of the above and are absolute:
 

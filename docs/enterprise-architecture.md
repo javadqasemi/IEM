@@ -175,7 +175,13 @@ ingestion are long-running work that cannot live in a request.
 6. **Permissions are generated, not typed.** A module declares its resource and
    its actions; the catalogue is derived. 133 permissions nobody hand-maintains.
 7. **Nothing that exists is broken to get there.** The CMS keeps working
-   throughout; §9 is a migration in stages, each independently shippable.
+   throughout; §8 is a migration in stages, each independently shippable.
+8. **A pattern is proven once before it is copied.** Every layer ships with one
+   fully tested reference implementation, and no second module adopts the shape
+   until that one is validated — §3.1.1. An architecture error that reaches ten
+   modules is ten modules to re-cut.
+9. **A DTO stops at the mapper.** The wire format is a detail of the transport,
+   and a detail that reaches a component is no longer a detail.
 
 ### 2.2 Layers
 
@@ -252,6 +258,8 @@ src/
     projects/
       routes.tsx              this feature's routes + permissions
       repository.ts           HTTP only — the one file that knows URLs  §3.1
+      dto.ts                  the wire shapes. Imported by repository + mapper
+      mapper.ts               DTO ⇄ entity. The DTO boundary ends here
       service.ts              domain only — pure rules, no React, no fetch
       hooks/                  useProjects, useProject, useProjectBudget
       screens/                ProjectList, ProjectDetail, ProjectCreate
@@ -287,31 +295,51 @@ They are a different application that happens to share a repository, their
 stylesheet is the one every visitor downloads, and its content hash has been
 unchanged through ten commits. Moving them would buy nothing and risk that.
 
-### 3.1 Four layers inside a feature
+### 3.1 Five layers inside a feature
 
-The first draft gave each feature a single `api.ts`. That is one layer too few:
-it leaves transport, domain rules and React state in one file, so an API change
-reaches the components and the rules cannot be tested without mocking `fetch`.
+The first draft gave each feature a single `api.ts`. That is three layers too
+few: it leaves transport, wire format, domain rules and React state in one file,
+so an API change reaches the components and the rules cannot be tested without
+mocking `fetch`.
 
 ```
-repository.ts   HTTP only. URLs, methods, DTOs. No React, no rules.
-      ↓
+repository.ts   HTTP only. URLs, methods, status codes. Speaks DTOs.
+      ↓         Returns wire shapes; knows nothing about the domain.
+mapper.ts       Translation only. DTO → entity and entity → DTO.
+      ↓         The last file in which a DTO type is legal.
 service.ts      Domain only. Pure functions over entity types —
-                canTransition(), deriveHealth(), validatePhaseApproval().
+      ↓         canTransition(), deriveHealth(), validatePhaseApproval().
                 No React, no fetch, therefore testable with no mocks at all.
-      ↓
 hooks/          React only. Cache keys, loading state, invalidation,
-                optimistic updates. Calls the repository, applies the service.
-      ↓
-screens/        Rendering only. No fetch call and no rule.
+      ↓         optimistic updates. Calls the repository through the mapper.
+screens/        Rendering only. No fetch call and no rule. Never sees a DTO.
 ```
 
 | Layer | Changeable without touching | Tested with |
 | --- | --- | --- |
-| `repository` | screens, hooks, rules | a stubbed client |
-| `service` | transport and UI | plain unit tests, no mocks |
+| `repository` | screens, hooks, rules, mapping | a stubbed client |
+| `mapper` | everything above and below it | plain unit tests, no mocks |
+| `service` | transport, wire format and UI | plain unit tests, no mocks |
 | `hooks` | screens | the cache + a stubbed repository |
 | `screens` | — | render tests and Playwright |
+
+**The mapper was added after domain review and it is the layer that makes the
+rest hold.** Without it `repository.ts` returns wire shapes straight into the
+hooks and the DTO reaches the components anyway — the split exists on paper and
+not in the import graph. The rule is therefore stated as a boundary, not as a
+folder:
+
+> **A DTO type may be named in `repository.ts` and `mapper.ts` and nowhere
+> else.** Not in a hook, not in a screen, not in `entities/`.
+
+That single rule is what buys the thing the review asked for: an API change
+— a renamed field, `snake_case` becoming `camelCase`, a date arriving as a
+string, one endpoint splitting into two — is absorbed in two files whose tests
+run in milliseconds. It also removes the most common class of bug in a system
+like this, the one where `"2026-03-14"` is compared to a `Date` and nothing
+throws. The mapper is where the string becomes a `Date`, the `"1450.00"` becomes
+a number, the `null` becomes `undefined`, and the open enum becomes a closed
+one.
 
 `service.ts` is the layer that matters most and the one easiest to skip. The
 transitions table, the derived `health`, the four-eyes check on a phase approval
@@ -320,8 +348,40 @@ The **server holds the authoritative copy of every rule**; the client's exists s
 a button that would be refused is disabled rather than clicked.
 
 **A feature with no domain logic omits `service.ts`.** Disciplines is master
-data; inventing an empty service for symmetry is ceremony. The layer appears
-when it has something to hold.
+data; inventing an empty service for symmetry is ceremony. **`mapper.ts` is not
+optional**, even when it is nearly an identity function: it is the seam, and a
+seam that exists only when convenient is not a seam. An identity mapper is four
+lines and one test, and the day the API changes it is the only file that moves.
+
+### 3.1.1 The reference-implementation gate
+
+**Set by the firm at review, and adopted verbatim:**
+
+> Every architectural layer — Repository, Mapper, Service, Hooks and UI — must
+> include at least one fully tested reference implementation before migrating
+> additional modules. Do not duplicate patterns until the reference
+> implementation has been validated.
+
+It is the right constraint and it is cheap to state, so it is written here as a
+gate rather than as advice:
+
+| Gate | Satisfied by |
+| --- | --- |
+| The five layers exist, in one feature, end to end | the reference feature, not a sketch |
+| Each layer has tests that fail if the layer is bypassed | not just tests that pass |
+| The DTO boundary is enforced by a test, not by discipline | a lint rule or an import test |
+| The feature's screens pass axe and the Playwright matrix | `npm run e2e` |
+| Only then does a second feature adopt the shape | reviewed against the reference |
+
+The cost of getting this wrong is the reason: a shape copied into ten modules
+before it has been driven once is ten modules to re-cut, and the mistake will
+not be in the parts anybody looked at.
+
+**The reference is built on an existing feature, not an invented one.** The
+foundation stages may not ship business modules, so the pattern is proven by
+migrating something the application already runs and the e2e suite already
+covers — which also means the gate is enforced by tests that existed before the
+pattern did.
 
 ### 3.2 Server structure
 
@@ -341,6 +401,9 @@ server/src/
                                           audit, domain events
                 projects.repository.ts    Prisma access, list contract,
                                           the where-builder
+                projects.mapper.ts        Prisma row ⇄ domain type; the
+                                          server's DTO boundary, and where
+                                          Decimal stops being a Decimal
                 domain/                   pure rules — the same transitions
                                           table the client's service holds
                 dto/
@@ -585,7 +648,31 @@ mesh. Nest's `EventEmitterModule` or ~80 lines of our own — decided in Stage D
 and scheduled publishing are its first users. `main.ts` already refuses to run
 clustered without Redis, so the constraint is already enforced.
 
-### 7.6 Multi-tenancy
+### 7.6 Automation, and the line under it
+
+`data-model.md` §3.24 adds a workflow engine — trigger, conditions, actions —
+and §3.23 makes notifications a domain. Both sit *on top of* the event bus in
+§7.4, and the boundary between them is the decision that keeps this from
+becoming a second application hiding in a settings screen:
+
+```
+domain/         decides whether a transition is legal      ← tested, in code
+core/events/    announces that it happened                 ← a fact
+workflow/       reacts: notify, assign, create, set        ← configurable
+```
+
+A rule may **not** perform a transition that has a rule. It may create a task,
+notify a person, set a free field or call a webhook; it may not approve a phase,
+release a drawing or accept an offer, because those have transition tables that
+live in `domain/` and are tested there. Without that line, "why did this get
+approved" becomes a question whose answer is in a database row somebody edited,
+and the transitions table stops being the truth.
+
+`WorkflowRun` is append-only for the same reason `AuditLog` is: an automation
+whose history cannot be read is an automation nobody trusts, and *"why did this
+task appear"* has to be answerable.
+
+### 7.7 Multi-tenancy
 
 **Single tenant, multiple locations.** IEM is one firm with Thun and Bern. Every
 entity gets an optional `officeId`, not a `tenantId`. Adding real multi-tenancy
@@ -603,14 +690,20 @@ Each stage is independently shippable and leaves the application working.
 | --- | --- | --- | --- |
 | **A** | Create `app/ core/ entities/ features/ shared/ widgets/` with their README contracts. Move **nothing**. | none | trivially |
 | **B** | Move the domain-free UI into `shared/ui/*`, split `primitives.tsx` and `data.tsx` by family. Imports updated mechanically; 274 tests are the net. | low | yes |
-| **C** | Move `lib/*` into `core/*` and split `api.ts`: request core to `core/api/client.ts`, endpoint groups into each owning feature's `repository.ts` (§3.1). | medium — touches every screen | yes |
+| **C** | Move `lib/*` into `core/*` and split `api.ts`: request core to `core/api/client.ts`, endpoint groups into each owning feature's `repository.ts` + `mapper.ts` (§3.1). One feature goes all five layers as the reference; the rest get repository + mapper only. | medium — touches every screen | yes |
 | **D** | Move each existing screen into a feature folder. `Operations.tsx` splits into `applications/`, `settings/`, `audit/`, `account/`. | medium | yes |
 | **E** | Server: wrap the flat controllers in feature modules; add `core/list`, `core/events`, generated permissions. | medium | yes |
 | **F** | Add the query cache, the nested router and the form layer — the three that every module depends on. | medium | yes |
 | **G** | Build the UI families in §6.2 that Stage 1 modules need. | low | yes |
-| **H** | First module (Customers), end to end, as the reference implementation every later module is copied from. | — | — |
+| **H** | First business module (**Projects**), end to end. | — | — |
 
-**Stage A is done in this commit.** B–H are sequenced in `roadmap.md`.
+**Stage A is done.** B–H are sequenced in `roadmap.md`.
+
+**Stage H is no longer the first time the pattern is exercised.** The
+reference-implementation gate (§3.1.1) moves that into Stage C, on a feature the
+application already runs and the e2e suite already covers — so the shape is
+validated by tests that predate it, and Projects inherits a proven pattern
+rather than establishing one.
 
 ### 8.1 What must not change
 

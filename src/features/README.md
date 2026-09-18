@@ -27,15 +27,18 @@ is not a feature concern — promote it to `entities/`, `shared/` or `core/`.
 
 ## The shape
 
-Every feature looks the same. That is deliberate: `Customers` is built first as
-the reference implementation and every later module is a copy of its shape.
+Every feature looks the same. That is deliberate: one existing feature is taken
+through all five layers first, as the validated reference, and every later
+module is a copy of its shape.
 
 ```
 features/projects/
   index.ts           the public surface: routes + nav entries. Nothing else
                      leaves the folder.
   routes.tsx         route definitions with their permissions and breadcrumbs
-  repository.ts      HTTP only — the one file that knows URLs and DTOs
+  dto.ts             the wire shapes. Imported by repository.ts and mapper.ts
+  repository.ts      HTTP only — the one file that knows URLs
+  mapper.ts          DTO ⇄ entity. The last file where a DTO type is legal
   service.ts         domain only — pure rules, no React, no fetch
   hooks/             React only — cache, loading state, invalidation
   screens/           ProjectList.tsx, ProjectDetail.tsx, ProjectCreate.tsx
@@ -43,23 +46,47 @@ features/projects/
   __tests__/
 ```
 
-### The four layers
+### The five layers
 
 ```
-repository.ts  →  service.ts  →  hooks/  →  screens/
-   HTTP            pure rules      React       rendering
+repository.ts  →  mapper.ts  →  service.ts  →  hooks/  →  screens/
+   HTTP           DTO⇄entity     pure rules      React      rendering
 ```
 
-Each is replaceable without touching the ones above it, and `service.ts` — the
-transitions table, the derived values, the four-eyes checks — is testable with
-no mocks at all, because it touches neither the network nor React. That is the
-layer worth being strict about; it is also the one easiest to skip.
+Each is replaceable without touching the ones above it.
 
-A feature with no domain logic omits `service.ts`. Disciplines is master data;
-an empty service for symmetry is ceremony.
+**The rule that makes the split real:** a DTO type may be named in
+`repository.ts` and `mapper.ts` and **nowhere else**. Not in a hook, not in a
+screen, not in `entities/`. Without that line the repository returns wire shapes
+straight into the hooks, the DTO reaches the components anyway, and the layering
+exists on paper but not in the import graph.
+
+The mapper is where `"2026-03-14"` becomes a `Date`, `"1450.00"` becomes a
+number, `null` becomes `undefined`, and an open string enum becomes a closed
+one. A renamed field, a casing change or one endpoint splitting into two is then
+absorbed in two files whose tests run in milliseconds.
+
+`service.ts` — the transitions table, the derived values, the four-eyes checks —
+is testable with no mocks at all, because it touches neither the network nor
+React. That is the layer worth being strict about; it is also the one easiest to
+skip.
+
+**A feature with no domain logic omits `service.ts`.** Disciplines is master
+data; an empty service for symmetry is ceremony. **`mapper.ts` is not
+optional**, even when it is nearly an identity function: it is the seam, and a
+seam that exists only when convenient is not a seam. Four lines and one test,
+and the day the API changes it is the only file that moves.
 
 The server holds the authoritative copy of every rule. The client's copy exists
 so a button that would be refused is disabled rather than clicked.
+
+### The gate before the shape is copied
+
+Set by the firm at review and enforced here: every layer ships **one fully
+tested reference implementation** before a second feature adopts the shape
+(`docs/enterprise-architecture.md` §3.1.1). An architecture error copied into
+twenty modules is twenty modules to re-cut, and the mistake will not be in the
+part anybody looked at.
 
 `index.ts` is the boundary. `app/routes.tsx` imports `features/*/index.ts` and
 nothing deeper; if something outside the folder needs a file two levels in, the
