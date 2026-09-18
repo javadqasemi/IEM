@@ -25,11 +25,16 @@ what may go in them, and `src/architecture.test.ts` enforces the four that matte
 | `docs/permissions.md` | The RBAC catalogue and the role × module × action matrix, including the row-level `◐` rules |
 | `docs/roadmap.md` | Build order, complexity, dependencies, database and API impact, and the definition of done per module |
 
-As of 18 September 2026 the **twelve Foundation stages are done**, and so is
-**Wave 1 module 4 — Projects, the reference standard**. The four modules it needs as data
-(Customer, Building, Employee, Discipline) ship as **read-only slices**: the subset
-`docs/data-model.md` documents that a real project requires, no more, each in the folder its own
-module will grow into.
+As of 18 September 2026 the **fourteen Foundation stages are done**, so is
+**Wave 1 module 4 — Projects, the reference standard**, and so is the first module of Wave 2,
+**Aufgaben**. The four modules Projects needs as data (Customer, Building, Employee, Discipline)
+ship as **read-only slices**: the subset `docs/data-model.md` documents that a real project
+requires, no more, each in the folder its own module will grow into.
+
+**Wave 2 is ordered by dependency, not by the roadmap table:**
+`Project → Tasks → Meetings → Documents → Drawings → SIA Phases → BIM`. The prose in
+`docs/roadmap.md` §Wave 2 that argues Meetings ahead of Tasks predates the reorder and is wrong;
+the code block above it is right.
 
 **The rule the firm set is that no second business module starts until Projects meets all ten rows
 of the gate in `docs/roadmap.md` → Wave 1.** It does. The next module derives from this shape
@@ -43,7 +48,7 @@ permissions and the tests, not a folder with the same names in it.
 | F4 | `core/router` with `parent`, derived breadcrumbs, and route-published actions |
 | F5 | `useForm`, `EntityForm`, and an unsaved-changes guard that covers a hash change |
 | F6 | `rbac/resources.ts` → generated catalogue, with a two-way agreement test |
-| F7 | `core/events` — a named catalogue of 45 events, not a string bus |
+| F7 | `core/events` — a named catalogue of 55 events, not a string bus |
 | F8 | Audit derived from those events, with a `correlationId` per request |
 | F9 | `Combobox`, `EntityPicker`, `DatePicker`, `DateRangePicker`, `Drawer`, `FilterBar` |
 | F10 | `core/jobs` — a `Job` table, a poller, retries with capped backoff |
@@ -51,6 +56,8 @@ permissions and the tests, not a folder with the same names in it.
 | F12 | A Nest module per feature; `app.module.ts` lists modules and nothing else |
 | W1·4 | **Projects** — ten tables, the five layers on both sides, ten events, row-level scope, fourteen tabs |
 | F13 | **Versionierung** — `EntityVersion`, the optimistic lock, and both revision schemes |
+| F14 | `core/metrics` — six operational figures per module, and a module that declares itself |
+| W2·1 | **Aufgaben** — four tables, ten events, a board, row-level *write* scope, and the first embedded project tab |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -61,6 +68,14 @@ and each is far more expensive to retrofit than to establish:
 | Security validation | `e2e/security.spec.ts` — the role × verb × resource matrix against the live API, plus direct-id, query-manipulation and nested-route attempts |
 | Performance budgets | `e2e/budgets.spec.ts` and `e2e/budgets.ts` — the numbers, the method, and the N+1 slope check |
 | Versionierung | F13 above, demonstrated on Projects: `v12`, the history tab, and a lock a concurrent write actually loses |
+
+**No module ships without metrics**, set by the firm at the same review, and F14 is how that is
+paid for once rather than per module. A module declares a `ModuleMetricsSource` — a key, a label,
+a record count, a route prefix, and the events, jobs and audit resources it owns — and everything
+else (latency, p50/p95, error rate, job durations) is measured centrally by `MetricsInterceptor`
+and the event bus. `GET /metrics/modules` is the report, behind `system.health`.
+`architecture.test.ts` fails a feature folder that has no `*.metrics.ts`, with the eleven folders
+that predate the rule on a shrink-only list.
 
 **The rule the firm set, and it holds for every layer:** one fully tested reference
 implementation before the pattern is copied. `features/applications/` was that reference for the
@@ -75,6 +90,16 @@ therefore the only part that can be tested exhaustively. Do **not** copy the fou
 master-data slices as a pattern: they are thin because their own modules are not built yet, and a
 module that ships without a `service.ts` because Projects' customers did is a module that has
 skipped its domain rules rather than found it had none.
+
+**What Aufgaben changed about the pattern, because deriving is not copying.** Four decisions were
+argued rather than inherited, and each is written up where it lives:
+
+| | |
+| --- | --- |
+| No stored `isOverdue` or `progressPercent` | Both are a `where` clause or a count the server already has. Projects stores its two because a *list sorts by them*; a stored figure nothing sorts by goes stale for free, and copying the reconciler would be deriving the shape rather than the reasoning |
+| A job anyway — `tasks.flagOverdue` | Knowing a task is late needs no column; **telling somebody** is an event, and time is the trigger, so a clock has to raise it. Once per due date, guarded by `overdueNotifiedAt`, announced *before* it is marked |
+| Row-level **write** scope | `task.updateOwn` is the first of its kind. It cannot be a route decorator — `@RequirePermissions` is AND, and ownership depends on a row the guard has not read — so `requireWritable` is the single gate and the agreement test counts the `permissions.has` inside it |
+| A drawer, not a route | A task is opened, ticked and closed, often four in a row. The cost is stated rather than discovered: **a task has no shareable URL** |
 
 ## Commands
 
@@ -248,6 +273,24 @@ Routes that send non-JSON (`/audit/export`, the application file download) use `
 which strips any property that carries none. An undecorated `data!: unknown` on the content DTOs
 meant `data` never reached the service and every save failed with a message about the *downstream*
 validator. Undecorated fields do not fail loudly; they vanish.
+
+**`Object.keys(dto)` returns every declared field, not the ones the caller sent.** The other half
+of the same mechanism, and it shipped for a whole wave before anybody saw it. `tsconfig.json`
+targets ES2022, so `useDefineForClassFields` defines every `@IsOptional() foo?: string` as
+`undefined` on the instance; `ValidationPipe` runs with `transform: true`, so the service receives
+that instance rather than the parsed body. A `PATCH` carrying one field therefore produced a
+version row whose `changed` listed all sixteen, and a `ProjectUpdated` event whose `fields` payload
+was the whole DTO — so the history stopped reading as a sentence and a workflow rule on "somebody
+moved the deadline" would fire on every save. Use **`changedFields(dto, VERSION_CONTROL_FIELDS)`**
+from `core/versioning/changed.ts`, which keeps a `null` (that is a change) and drops an
+`undefined`.
+
+**And vitest cannot reproduce it**, which is why it survived 600 passing tests: esbuild does not
+emit the class-field definitions, so the instance it builds has only the keys the request sent and
+a unit test running the real pipe passes against the broken code. The same gap as the Nest DI note
+below. `node dist/…` is the check — `changed.test.ts` records the measured numbers — and
+`e2e/tasks.spec.ts` and `e2e/versioning.spec.ts` are the regression guards, because they run
+against the build.
 
 **A deletion never becomes `APPROVED`.** Deleting marks the row `deletedAt` and leaves `status`
 alone, so it never enters the review workflow — and neither does a reordering. Any screen that
@@ -515,6 +558,24 @@ global `SettingsModule` in `core/` is the provider. When a new service is going 
 more than the feature it sits in, it belongs in `core/` before the second caller appears, not
 after.
 
+**`server/src/scheduler/` is the cron host; `server/src/tasks/` is Aufgaben.** The scheduler was
+called `tasks/` until Wave 2 needed that name for a real module, and the rename was the cheap half
+of the rule above: two folders called `tasks/`, one infrastructure and one a feature, would make
+every `../tasks/…` resolve while telling a reader nothing about which of the two it meant.
+`INFRASTRUCTURE` in `server/src/architecture.test.ts` lists `scheduler`, which is what makes the
+scheduler's imports of `ApplicationsModule` and `ContentModule` legal — a timer commanding a
+feature is not a feature reaching into a sibling.
+
+**A feature may not import another feature, and `widgets/` may not import a feature at all.** Both
+are in `src/architecture.test.ts`, and together they decide where the project detail's embedded
+tabs are composed: not in `features/projects`, not in `widgets/`, but in `admin/pages/ProjectPage.tsx`
+— the only layer above both. `ProjectDetail` takes an `embedded` map of slug → component and falls
+back to `ModulePlaceholder` for a slug nobody supplied, so the seven remaining tabs need no change
+as their modules arrive. The same pair is why `features/tasks/repository.ts` calls `/projects`,
+`/employees` and `/disciplines` itself rather than importing `projectRepository`: **a repository
+may know any endpoint**, and two repositories calling one endpoint is duplication while one feature
+reaching into another is a mesh.
+
 **Generated files are overwritten.** `src/components/SchnittGuglera.tsx`, `src/components/SchnittAA.tsx`,
 `src/generated/scene_guglera.json` and `src/generated/scene.ts` come from the Python chain in `cad/`.
 Do not hand-edit them.
@@ -609,6 +670,22 @@ Documented in the audit performed on this repo, still open:
 - **The client renders any route to any signed-in user.** `routes.tsx` declares each route's
   permissions and `App.tsx` checks them, so the *shell* refuses — but that is a courtesy. The
   server's 403 is the control, as it has always been.
+
+Opened by Wave 2 module 1, and each is a deliberate stop rather than an oversight:
+
+- **`Task.spentHours` has no writer.** The column is declared because
+  `docs/data-model.md` §3.9 lists it and Wave 2 module 14 (Time Tracking) fills it; nothing seeds
+  it and no rule reads it, so a reconciler that stopped working cannot hide behind a plausible
+  number.
+- **`TaskOverdue` is raised and nothing consumes it.** `tasks.flagOverdue` runs at 06:00 and
+  announces once per due date; Notifications is Wave 2 module 9. The event exists now so that
+  module is a consumer rather than a reason to revisit this one.
+- **`Comment` is polymorphic and only Tasks writes it.** The table takes `entity`/`entityId`, so
+  Meetings and Drawings call it through their own repositories when they arrive. Editing a comment
+  is not implemented — `editedAt` is a column nothing sets.
+- **Eleven feature folders report no metrics.** `WITHOUT_METRICS` in
+  `server/src/architecture.test.ts`, one line each with what it is waiting for, and the list may
+  only shrink.
 
 `README.md` → *Known limitations* carries the product-level list (no MFA flow, local-disk media,
 placeholder legal pages, `CodeGate` is a display barrier and not security).

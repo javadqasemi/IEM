@@ -290,7 +290,7 @@ follow; they are not on the critical path the review drew.
 | --- | --- | :-: | --- | --- | --- | --- |
 | 6 | **Buildings (full): floors, systems, rooms, loads** | L | Wave 1 slice | + TreeView, spreadsheet import | `Floor`, `BuildingSystem`, `RoomSystem`, `Room`, `RoomLoad` | `/buildings/:id/*`, import |
 | 7 | **Meetings + Decisions** | L | Projects, Employees | + RichText, PDF | `Meeting`, `MeetingAgendaItem`, `MeetingItem`, `MeetingAttendee`, `MeetingApproval`, `Decision` | `/meetings`, protocol, Pendenz → task |
-| 8 | **Tasks** | M | Projects, Employees | + KanbanBoard, Combobox | `Task`, `TaskDependency`, `ChecklistItem`, `Comment` | `/tasks` + board reorder |
+| 8 | **Tasks** | M | Projects, Employees | + KanbanBoard, Combobox | `Task`, `TaskDependency`, `ChecklistItem`, `Comment` | **Done — the first Wave 2 module.** The gate below |
 | 9 | **Notifications** | M | F7, F10, Tasks | + bell, NotificationList, preferences pane | `Notification`, `NotificationDelivery`, `NotificationPreference` | `/notifications`, mark-read, preferences |
 | 10 | **Drawings + Transmittals** | L | Projects, Disciplines, Buildings | + FilePreview, VersionList, DataTable | `Drawing`, `DrawingRoom`, `DrawingRevision`, `Transmittal`, `TransmittalItem`, `TransmittalRecipient` | `/drawings`, revisions, `/transmittals` |
 | 11 | **Documents** | L | Projects | + FileTree, Uploader, FilePreview, VersionList | `Document`, `DocumentVersion`, `Folder` | `/documents`, upload, versions |
@@ -306,11 +306,48 @@ are the part that sells the next commission — a plant inventory with
 forecast. It needs spreadsheet and IFC import from day one: a school with 120
 rooms × four load kinds is 480 rows nobody will type.
 
-**Meetings ahead of Tasks**, which is the review's order and the right one. A
-Bausitzung produces Pendenzen and Entscheide from the first active project
-onwards; it is the single biggest source of tasks, so the module that *creates*
-the work comes before the board that shows it. Tasks stays right behind it
-because a Pendenz with nowhere to go is a line in a PDF.
+**Tasks ahead of Meetings** — and the paragraph that stood here argued the
+opposite. It was written before the review reordered this wave and was simply
+left behind, which is how a document starts contradicting itself on one page:
+the code block at the top of this section said Tasks second while the prose
+below it said Meetings.
+
+The argument the old paragraph made is what settles it the other way. A
+Bausitzung is the biggest *source* of tasks — a `PENDENZ` line becomes a `Task` —
+so building Meetings first means building that seam against a module which does
+not exist, and then building it again. Tasks needs only a project; Meetings needs
+Tasks.
+
+**Tasks is done.** The ten rows of the gate, as this module met them:
+
+| | Met by |
+| --- | --- |
+| Entities, migration, seed | `Task`, `TaskDependency`, `ChecklistItem`, and the shared polymorphic `Comment`; nine seeded tasks, each making one otherwise unreachable case visible on a screen |
+| Permissions | `task.*` in `resources.ts`, including `readAll` **and** `updateOwn` — the system's first row-level *write* rule |
+| Audit | derived from events. The module calls `AuditService` nowhere |
+| Events | ten in the catalogue, queued until the request commits |
+| API | the full list contract, CSV export, bulk, plus the board's own `PUT /tasks/:id/position` |
+| Repository / mapper / service | all three, both halves of the DTO boundary enforced by `architecture.test.ts` |
+| UI | board and table over one query, a drawer with five tabs, create and edit dialogs, and the project detail's Aufgaben tab |
+| Tests | 192 on the server, 70 on the client: the rules exhaustively, the mapper both ways, the DTO whitelist, the list spec, the scope |
+| E2E | `tasks.spec.ts` plus `/aufgaben` in `SCREENS`; both themes, three widths, axe clean |
+| Metrics | `tasks.metrics.ts`, and `architecture.test.ts` now fails a feature folder that has none |
+
+Three things the build changed from what this document assumed, all worth
+recording rather than quietly correcting:
+
+- **`Task.projectId` is nullable.** The firm's own to-dos have no project, and
+  the consequence is the interesting half of the module: row-level visibility
+  cannot be "the project's scope" and is a union of three reachability rules.
+  A predicate built only from project membership would hide every firm-level
+  task from the person it is assigned to, and an empty list looks like an empty
+  backlog.
+- **A task has no detail route.** It opens in a drawer beside the board, so it
+  has no shareable URL — a real loss, taken deliberately, and reversible without
+  moving anything but the route table.
+- **The embedded tab is composed in `admin/`, not in `widgets/`.** This document
+  said `widgets/`; the architecture test forbids it, because `widgets` may not
+  import a feature. The shell is the only layer above both.
 
 **Deviation 2 — Notifications is inserted at 9**, which the review places last
 under Automation. The bell is what makes Tasks, Meetings and Issues visible to
@@ -469,6 +506,12 @@ work.
 10. `npm run verify` and `npm run e2e` green.
 11. The non-obvious decisions written down *in the code*, in the style the rest
     of this repository uses.
+12. **A `*.metrics.ts` declaring what the module owns** — records, route prefix,
+    events, jobs, audit resources. Set by the firm before Wave 2: *"Ab jetzt
+    würde ich keine Module mehr ohne Metriken akzeptieren. Nicht für Benutzer.
+    Sondern für Betrieb und Monitoring."* Latency, percentiles, error rate and
+    job durations are measured centrally, so this row is four lists and a count;
+    `server/src/architecture.test.ts` fails a feature folder without one.
 
 ---
 
@@ -476,7 +519,8 @@ work.
 
 | Risk | Why it matters here | Mitigation |
 | --- | --- | --- |
-| **Foundation skipped under pressure** | The first module ships faster and the next twenty inherit its shortcuts | F2–F12 are a gate, not a suggestion |
+| **Foundation skipped under pressure** | The first module ships faster and the next twenty inherit its shortcuts | F2–F14 are a gate, not a suggestion |
+| **A bug the type system cannot see** | `changed: string[]` was wrong on every version row for a wave, and 600 green tests said otherwise. The toolchain hid it: vitest transforms with esbuild, which does not reproduce the compiled DTO | Run the thing. `node dist/main.js` after a build, and a browser for anything a screen renders — the two checks that found this and the F12 DI failures |
 | **The pattern copied before it is proven** | An architecture error reaches twenty modules and the mistake is not in the part anybody looked at | §2.2's gate: five layers, one feature, fully tested, before the second |
 | **The DTO boundary erodes** | It erodes silently — one import, and the mapper is decorative | An import test, in `verify`, from the first feature |
 | **Finance built on unapproved time** | Confident wrong invoices | Finance does not start until time approval has run for a real month |

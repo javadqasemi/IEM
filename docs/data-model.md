@@ -530,16 +530,48 @@ Composite unique on `(projectId, employeeId, from)`.
 
 ### 3.9 Task
 
-`title` `description` `status` `priority` `dueDate?` `startDate?`
+**Built — Wave 2, module 1.** What follows is the shape as it shipped; three
+things differ from the first draft and each is marked.
+
+`title` `description` `status` `priority` `dueDate?` `startDate?` `completedAt?`
 `estimateHours?` `spentHours` (derived) `position` (for Kanban ordering)
-`projectId?` `milestoneId?` `assigneeId?` `parentTaskId?` `createdById`
+`blockedFrom?` `blockedReason?` `overdueNotifiedAt?`
+`projectId?` `milestoneId?` `assigneeId?` `parentTaskId?` `disciplineId?`
+`createdById` `version`
 
 **Status** `TODO → IN_PROGRESS → IN_REVIEW → DONE`, plus `BLOCKED` from any
 active state and `CANCELLED`.
 **Validation** — a task cannot be `DONE` while an incomplete subtask or an
-unfinished blocking dependency exists. Cycle detection on dependencies.
+unfinished blocking dependency exists. Cycle detection on dependencies, and on
+the subtask tree, which is the same failure in a different shape.
 **TaskDependency** — `predecessorId` `successorId` `type` (`FS` `SS` `FF` `SF`)
-`lagDays`. The four standard types, because Planning's Gantt needs them.
+`lagDays`. The four standard types, because Planning's Gantt needs them — and
+only `FS` and `FF` gate completion, which is what makes the other two more than
+decoration.
+
+Three additions the build made, and the reason for each:
+
+- **`blockedFrom` and `blockedReason`.** `BLOCKED` is a status rather than a
+  flag beside one — a boolean produces four states that mean "blocked and also
+  in progress", and every list then has to decide which to show. `blockedFrom`
+  is what makes unblocking a *return*: a task that was in review when the client
+  went quiet must not reappear in the backlog three weeks later as though nobody
+  had done anything. The reason is required by the server, because a blocked
+  column whose cards say nothing is a column nobody can triage.
+- **`disciplineId`.** "Alle offenen Lüftungs-Aufgaben" is a question the firm
+  asks weekly, and a join through the project cannot answer it for a task whose
+  Gewerk differs from its project's scope — nor at all for a firm-level task.
+- **`overdueNotifiedAt`.** Whether a task is overdue is a `where` clause and is
+  **not stored**; announcing it is an event, and this column is what makes
+  "once per due date" true. Cleared whenever `dueDate` moves, in the mapper
+  rather than the service, because it is a property of the column pair.
+
+**`projectId` is nullable, and it is the module's defining decision.** The firm's
+own to-dos — chase an offer, renew a certificate — are tasks with no project.
+Requiring one would mean a "Sonstiges" dummy project polluting every project
+list, or those to-dos living outside the system. The consequence is that
+row-level visibility cannot be the project's scope and is a union of three
+reachability rules (`server/src/tasks/tasks.scope.ts`).
 
 ### 3.10 Milestone
 
