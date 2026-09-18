@@ -14,8 +14,8 @@ nothing about it — it is *not* the source of the Known gaps at the foot of thi
 
 Five further documents describe the **enterprise platform** the CMS is becoming the foundation of.
 Read them in this order before touching `src/app`, `src/core`, `src/entities`, `src/features`,
-`src/shared` or `src/widgets` — those folders exist but are empty, and their README files are the
-contracts that say what may go in them:
+`src/shared`, `src/widgets` or `server/src/core` — their README files are the contracts that say
+what may go in them, and `src/architecture.test.ts` enforces the four that matter:
 
 | Document | |
 | --- | --- |
@@ -25,9 +25,31 @@ contracts that say what may go in them:
 | `docs/permissions.md` | The RBAC catalogue and the role × module × action matrix, including the row-level `◐` rules |
 | `docs/roadmap.md` | Build order, complexity, dependencies, database and API impact, and the definition of done per module |
 
-**None of the nineteen business modules is implemented, and the architecture says not to start one
-until the Foundation stages (F2–F9 in the roadmap) are done.** The folder skeleton is Stage A and is
-the only part built so far.
+**None of the business modules is implemented, and the architecture says not to start one until the
+Foundation stages are done.** As of 18 September 2026, **F1–F10 are done and F11–F12 are not**:
+
+| Done | |
+| --- | --- |
+| F2 | `shared/ui` split into six families; three domain pieces moved to `entities/` and `widgets/` |
+| F3 | `core/api` with the query cache, and `features/applications` as the five-layer reference |
+| F4 | `core/router` with `parent`, derived breadcrumbs, and route-published actions |
+| F5 | `useForm`, `EntityForm`, and an unsaved-changes guard that covers a hash change |
+| F6 | `rbac/resources.ts` → generated catalogue, with a two-way agreement test |
+| F7 | `core/events` — a named catalogue of 45 events, not a string bus |
+| F8 | Audit derived from those events, with a `correlationId` per request |
+| F9 | `Combobox`, `EntityPicker`, `DatePicker`, `DateRangePicker`, `Drawer`, `FilterBar` |
+| F10 | `core/jobs` — a `Job` table, a poller, retries with capped backoff |
+
+| Still owed | |
+| --- | --- |
+| F11 | Server `core/list`: one filter/sort/paginate contract for every collection |
+| F12 | Feature modules on the server; `app.module.ts` still lists controllers |
+
+**The rule the firm set, and it holds for every layer:** one fully tested reference
+implementation before the pattern is copied. `features/applications/` is that reference on the
+client and `ApplicationsService` is it for events — the other eight endpoint groups stay on the
+shared `api` object and the other services keep their hand-written audit calls until each is
+migrated deliberately.
 
 ## Commands
 
@@ -151,6 +173,21 @@ work", check the snapshot version before reading any code — `GET /content/pend
 whether the live document and the next one would differ.
 
 `src/content/schema.ts` is shared ground: the site and the server depend on the same shapes.
+
+**On the server, a change to a record is announced, not logged.** `EventBus.publish` from
+`core/events` raises one of the 45 named events in `core/events/catalogue.ts`; `AuditListener`
+turns it into the audit row, and notifications, reporting and the workflow engine will read the
+same event without the module knowing they exist. Events are queued on the request context and
+flushed when the request succeeds, so a listener never sees an uncommitted row and a failed request
+announces nothing.
+
+Call `AuditService.record` directly only for things that happened to *nobody* — a failed sign-in, a
+denial — or for an **access** rather than a change: opening a dossier has no before and no after,
+and it is in the log because personal data was looked at.
+
+Anything slow goes through `JobService.enqueue` (`core/jobs`). A job is durable, retried with a
+capped backoff, attributable — it inherits the correlation id and actor of the request that queued
+it — and visible as a row, which is the property an operator needs when an export never arrives.
 
 ## Invariants that fail silently
 
@@ -283,6 +320,31 @@ guarantee. A `Bin` marker on a `.tsx` file here is this, not corruption.
 resolves inconsistently — the dev server throws while the build passes — and a failing stylesheet
 renders a blank page. Write it as plain CSS.
 
+**`AsyncLocalStorage` cannot be opened in a Nest interceptor.** `run(store, fn)` propagates to what
+`fn` *starts*; an interceptor's `intercept()` only builds the observable, and Nest subscribes after
+it returns — so the route handler runs outside the scope. Everything typechecks, every unit test
+passes (they call `runWithContext` themselves), and in a live request every `correlationId()` mints
+a fresh id. The symptom was an audit row that never appeared. `RequestContextMiddleware` calls
+`next()` synchronously inside the scope, which is the only placement that works.
+
+**A feature's screen must own its own `lazy()` boundary.** When the shell statically imports a
+feature's `index.ts` (for a rail badge, say) and the route table imports it dynamically, Rollup
+resolves the conflict by hoisting the shared module into the *entry* chunk — the route's own chunk
+disappears and the bundle grows, with no error. `features/applications/index.ts` therefore exports
+`lazy(() => import("./screens/…"))` rather than re-exporting the component.
+
+**`Content-Disposition` plus a PDF body breaks `fetch` in Chromium 153.** It is reported as
+`MissingAllowOriginHeader` even though the response carries `Access-Control-Allow-Origin`, and
+same-origin it is worse: HTTP 204 with an empty body, so the caller saves a 0-byte file. Confirmed
+against curl, a Node client replaying the exact preflight-then-GET, and Playwright's interception —
+all three get the header. PNG and JPEG on the same route succeed. The dossier download therefore
+sends `application/octet-stream` + `nosniff` + `Content-Length` and **no** `Content-Disposition`;
+`/audit/export` keeps its, because a CSV body triggers none of this.
+
+**A DTO type may be named in `repository.ts` and `mapper.ts` and nowhere else.** That rule is what
+makes the mapper a seam rather than a decoration, and `src/architecture.test.ts` enforces it along
+with feature isolation, the `index.ts` boundary and the direction of every layer arrow.
+
 **Generated files are overwritten.** `src/components/SchnittGuglera.tsx`, `src/components/SchnittAA.tsx`,
 `src/generated/scene_guglera.json` and `src/generated/scene.ts` come from the Python chain in `cad/`.
 Do not hand-edit them.
@@ -300,9 +362,16 @@ own; `buildNavigation` sorts by it, so `flattenNavigation` feeds search in the o
 the rows. A section in the `hidden` zone is searchable but never drawn, which is how "Mein Konto"
 stays reachable without a rail row duplicating the header's user panel.
 
-A group's entries render in the shell's **sticky top bar** (`src/admin/ui/SectionTabs.tsx`), beside
-the group's name, not above the page content. They are anchors in a `<nav>`, deliberately *not*
-`role="tab"` — they change the route rather than switching a panel.
+The shell's **sticky top bar** carries the group's name, the breadcrumb trail and whatever the
+current screen has published through `usePageActions`. `SectionTabs` is gone — the rail folds its
+groups open in place, so a copy of the entries up here would be the same navigation twice.
+
+The trail is *derived*: a route names its `parent` in `routes.tsx` and `core/router/breadcrumbs.ts`
+walks it. Do not write a `<Breadcrumb>` in a screen — `ContentEditor` did, and a hand-written trail
+keeps pointing at the old path the first time a route moves, with nothing to notice. The last
+crumb's label comes from the screen through `usePageTitle`, because only it has fetched the record;
+the *middle* crumb comes from a dictionary the shell passes, because no screen can name its own
+parent list.
 
 Two flags exist because a destination that is the parent of other destinations breaks the default
 rules. `exact` on a `NavItem`/`NavSection` switches `isActive` from prefix to exact matching:
@@ -310,32 +379,46 @@ rules. `exact` on a `NavItem`/`NavSection` switches `isActive` from prefix to ex
 win `activeSection` ahead of the group the editor is actually in. `hideBarTitle` leaves the
 section's name out of the top bar, for a page that already says where it is.
 
-Only add a menu entry for a route `renderRoute` in `src/admin/App.tsx` actually serves.
+Only add a menu entry for a route the table in `src/admin/routes.tsx` actually serves —
+`routes.test.ts` checks both directions, plus that every `parent` resolves and nothing cycles.
 
 ## Permissions
 
-`server/src/rbac/permissions.catalog.ts` is the source of truth, not the database; the seeder
+`server/src/rbac/resources.ts` is the source of truth, not the database and no longer
+`permissions.catalog.ts` — that file *derives* the flat list from the resource declarations. Add a
+module by adding a resource; the role editor groups itself from `label` and `category`. The seeder
 reconciles and reports orphans rather than deleting them. `JwtAuthGuard` is global and **denies by
 default** — a route is protected unless it carries `@Public()`. Permissions are resolved from the
 database on every request, so revoking a role takes effect immediately. Super Admin short-circuits
 on the role key, never on holding every permission.
 
-The backend half is complete. The **frontend half is not**: `renderRoute` renders any page to any
-signed-in user, and the server's 403 is what stops the data. The rail hides what a user cannot
-reach, but that is a courtesy, not a control.
+The backend half is complete. The frontend half is **partial**: every route in `routes.tsx` now
+declares the permissions that open it and `App.tsx` shows a "no access" screen instead of rendering
+one it cannot fill. That is still a courtesy — the server's 403 is what stops the data, and the rail
+hiding what a user cannot reach is a third courtesy on top.
+
+`permissions.agreement.test.ts` compares the catalogue against every guard in the tree, in both
+directions, and counts a `permissions.has(...)` check inside a handler as enforcement — those are
+the row- and field-level `◐` rules in `docs/permissions.md` §4, and `settings.secrets` is one.
 
 ## Known gaps
 
 Documented in the audit performed on this repo, still open:
 
-- 12 of the 51 permissions in the catalogue are enforced on no route (`content.export`,
-  `content.import`, `content.schedule`, `content.unpublish`, `contentType.update`, `media.download`,
-  `seo.read`, `seo.update`, `system.api`, `system.backup`, `user.impersonate`, `application.export`).
-  They are selectable in the role editor and grant nothing.
-- `ContentEntry.scheduledAt` is read and cleared by the cron job but set by nothing — no endpoint,
-  no UI. Scheduled publishing is half built.
+- 12 permissions in the catalogue are enforced on no route. **They are now a list rather than a
+  paragraph**: `KNOWN_UNENFORCED` in `server/src/rbac/permissions.agreement.test.ts`, one line each
+  with what it is waiting for. A thirteenth fails the build, and so does an entry that has started
+  being enforced and was left on the list. (The audit said twelve; the test found a thirteenth on
+  its first run and it was a false positive — `settings.secrets` is checked inside the handler
+  rather than by a decorator, which is the documented `◐` pattern.)
+- `ContentEntry.scheduledAt` is read and cleared by the publish job but set by nothing — no
+  endpoint, no UI. Scheduled publishing is half built.
 - The `Notification` and `Redirect` Prisma models have tables and no implementation at all.
+  `docs/data-model.md` §3.23 makes Notification a real domain; nothing reads it yet.
 - No Department entity; the closest thing is a hardcoded option list on the team type's `group`.
+- **The client renders any route to any signed-in user.** `routes.tsx` declares each route's
+  permissions and `App.tsx` checks them, so the *shell* refuses — but that is a courtesy. The
+  server's 403 is the control, as it has always been.
 
 `README.md` → *Known limitations* carries the product-level list (no MFA flow, local-disk media,
 placeholder legal pages, `CodeGate` is a display barrier and not security).
