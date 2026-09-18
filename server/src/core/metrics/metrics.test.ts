@@ -22,7 +22,7 @@ const source = (over: Partial<ModuleMetricsSource> & { key: string; routePrefix:
     label: over.key,
     events: [],
     auditResources: [],
-    records: async () => ({ total: 0, deleted: 0 }),
+    records: async () => ({ total: 0, active: 0, archived: null, deleted: 0 }),
     ...over,
   }) as ModuleMetricsSource;
 
@@ -218,6 +218,58 @@ describe("the quantiles", () => {
   });
 });
 
+describe("the mean, beside the percentiles", () => {
+  it("is null for an empty sample, like the quantiles", () => {
+    expect(apiFor(service(), "/projects").meanMs).toBeNull();
+  });
+
+  it("is rounded to a whole millisecond", () => {
+    // `12.833333333333334` implies a precision the sample does not have, and it
+    // is the figure most likely to end up pasted into a report.
+    const metrics = service();
+    metrics.register(source({ key: "project", routePrefix: "/projects" }));
+    for (const ms of [10, 11, 12, 13, 14, 15]) {
+      metrics.recordRequest("GET", "/projects", ms, false);
+    }
+    expect(apiFor(metrics, "/projects").meanMs).toBe(13);
+  });
+
+  it("is the figure a single slow request moves and the p95 does not", () => {
+    /**
+     * Why both are reported and why the mean is **not** the one to alert on.
+     * Ninety-nine at 10 ms and one at 2 s: the mean says 30 and the p95 says
+     * 10. Neither is wrong; the mean is comparable across deployments and the
+     * p95 is what describes a request somebody actually made.
+     */
+    const metrics = service();
+    metrics.register(source({ key: "project", routePrefix: "/projects" }));
+    for (let i = 0; i < 99; i += 1) metrics.recordRequest("GET", "/projects", 10, false);
+    metrics.recordRequest("GET", "/projects", 2_000, false);
+
+    const api = apiFor(metrics, "/projects");
+    expect(api.meanMs).toBe(30);
+    expect(api.p95Ms).toBe(10);
+  });
+
+  it("is drawn from the same window as the percentiles", () => {
+    /*
+      Otherwise the three figures describe different populations — a mean from
+      a week ago beside a p95 from the last five hundred requests — and an
+      operator comparing them is comparing nothing.
+    */
+    const metrics = service();
+    metrics.register(source({ key: "project", routePrefix: "/projects" }));
+    for (let i = 0; i < 600; i += 1) metrics.recordRequest("GET", "/projects", 1_000, false);
+    for (let i = 0; i < 500; i += 1) metrics.recordRequest("GET", "/projects", 10, false);
+
+    const api = apiFor(metrics, "/projects");
+    expect(api.meanMs).toBe(10);
+    expect(api.p95Ms).toBe(10);
+    // The counters are not a window, though: the request total is every one.
+    expect(api.requests).toBe(1_100);
+  });
+});
+
 describe("events", () => {
   it("reports a declared event that has not happened as 0", () => {
     // Absent and zero are different, and only one of them is a fact. A module
@@ -238,5 +290,100 @@ describe("events", () => {
     metrics.recordEvent("ContentEntryPublished");
 
     expect(eventsFor(metrics, ["ProjectCreated"]).total).toBe(1);
+  });
+});
+
+/**
+ * A Prisma stub with only what `modules()` reads.
+ *
+ * The job and audit figures come from tables rather than from the ring buffer,
+ * so they are the one part of the report that needs a database — and two
+ * `async () => rows` are cheaper and far more legible than a test container.
+ */
+const prismaWith = (rows: { name: string; status: string; durationMs: number | null }[]) =>
+  ({
+    auditLog: { groupBy: async () => [] },
+    job: { findMany: async () => rows },
+  }) as never;
+
+const sample = () => ({ total: 0, active: 0, archived: null, deleted: 0 });
+
+describe("jobs", () => {
+  it("counts every state and both durations", async () => {
+    /**
+     * Exercised through `modules()` with a stubbed Prisma, because `jobsFor` is
+     * private and the report is the contract. The four counts and the two
+     * durations all come from one sample of rows, so they cannot disagree.
+     */
+    const rows = [
+      { name: "a.job", status: "QUEUED", durationMs: null },
+      { name: "a.job", status: "RUNNING", durationMs: null },
+      { name: "a.job", status: "DEAD", durationMs: 400 },
+      { name: "a.job", status: "DONE", durationMs: 100 },
+      { name: "a.job", status: "DONE", durationMs: 200 },
+      { name: "b.job", status: "DEAD", durationMs: 9_999 },
+    ];
+
+    const metrics = new MetricsService(prismaWith(rows));
+    metrics.register(
+      source({ key: "m", routePrefix: "/m", jobs: ["a.job"] as never, records: async () => sample() }),
+    );
+
+    const [module] = await metrics.modules();
+    expect(module.jobs.total, "another module's job was counted").toBe(5);
+    expect(module.jobs.queued).toBe(1);
+    expect(module.jobs.running).toBe(1);
+    expect(module.jobs.dead).toBe(1);
+    // Only the rows that have a duration: a queued job has taken no time yet,
+    // and counting it as 0 would halve every average in the report.
+    expect(module.jobs.meanDurationMs).toBe(233);
+    expect(module.jobs.p50DurationMs).toBe(200);
+  });
+
+  it("reports null durations for a module whose jobs have never run", async () => {
+    const metrics = new MetricsService(
+      prismaWith([{ name: "a.job", status: "QUEUED", durationMs: null }]),
+    );
+    metrics.register(
+      source({ key: "m", routePrefix: "/m", jobs: ["a.job"] as never, records: async () => sample() }),
+    );
+
+    const [module] = await metrics.modules();
+    expect(module.jobs.total).toBe(1);
+    expect(module.jobs.meanDurationMs).toBeNull();
+    expect(module.jobs.p50DurationMs).toBeNull();
+  });
+});
+
+describe("record counts", () => {
+  it("passes a module's four figures through untouched, `null` included", async () => {
+    /**
+     * `archived: null` means "this module has no archive" and must survive the
+     * report. Coercing it to 0 — which is what a `?? 0` anywhere on this path
+     * would do — invites an operator to ask why nothing is ever archived, which
+     * is a question about a feature that does not exist.
+     */
+    const metrics = new MetricsService(prismaWith([]));
+    metrics.register(
+      source({
+        key: "task",
+        routePrefix: "/tasks",
+        records: async () => ({ total: 12, active: 9, archived: null, deleted: 3 }),
+      }),
+    );
+    metrics.register(
+      source({
+        key: "project",
+        routePrefix: "/projects",
+        records: async () => ({ total: 100, active: 60, archived: 30, deleted: 10 }),
+      }),
+    );
+
+    const modules = await metrics.modules();
+    const task = modules.find((m) => m.key === "task")!;
+    const project = modules.find((m) => m.key === "project")!;
+
+    expect(task.records).toEqual({ total: 12, active: 9, archived: null, deleted: 3 });
+    expect(project.records).toEqual({ total: 100, active: 60, archived: 30, deleted: 10 });
   });
 });

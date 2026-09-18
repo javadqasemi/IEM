@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
 import { MetricsService } from "../core/metrics/metrics.service";
-import type { ModuleMetricsSource } from "../core/metrics/metrics.types";
+import type { ModuleMetricsSource, RecordCounts } from "../core/metrics/metrics.types";
 
 /**
  * What Projekte reports about itself to operations.
@@ -66,17 +66,26 @@ export class ProjectsMetrics implements OnModuleInit, ModuleMetricsSource {
   }
 
   /**
-   * Live rows and soft-deleted ones, separately.
+   * Four figures, in one transaction so they agree with each other.
    *
-   * The pair rather than a single total: everything here is soft-deleted, so a
-   * table that grows while the live count does not is a retention question, and
-   * one number cannot ask it.
+   * **`archived` is the one that earns its place here.** A firm's project table
+   * is mostly archive after a decade, and a single live count would say the
+   * module had shrunk when what happened is that work finished. `Project` has a
+   * real `archivedAt`, stamped by the transition rather than typed, so the
+   * split is a fact rather than a guess at what `COMPLETED` means.
+   *
+   * Separate counts rather than a `groupBy`, because the three predicates
+   * overlap in the way that matters: an archived project that is later deleted
+   * keeps its `archivedAt`, so `deleted` has to exclude it from `archived` and
+   * a `groupBy` on one column cannot.
    */
-  async records(): Promise<{ total: number; deleted: number }> {
-    const [total, deleted] = await this.prisma.$transaction([
-      this.prisma.project.count({ where: { deletedAt: null } }),
+  async records(): Promise<RecordCounts> {
+    const [total, active, archived, deleted] = await this.prisma.$transaction([
+      this.prisma.project.count(),
+      this.prisma.project.count({ where: { deletedAt: null, archivedAt: null } }),
+      this.prisma.project.count({ where: { deletedAt: null, archivedAt: { not: null } } }),
       this.prisma.project.count({ where: { deletedAt: { not: null } } }),
     ]);
-    return { total, deleted };
+    return { total, active, archived, deleted };
   }
 }

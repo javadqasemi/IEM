@@ -512,6 +512,14 @@ work.
     Sondern für Betrieb und Monitoring."* Latency, percentiles, error rate and
     job durations are measured centrally, so this row is four lists and a count;
     `server/src/architecture.test.ts` fails a feature folder without one.
+13. **Anything the build and the test toolchain disagree about is asserted
+    against the build.** Vitest transforms with esbuild, which emits neither
+    `design:paramtypes` nor ES2022 class-field definitions — so a test of a Nest
+    container, a validated DTO or a decorator passes under vitest while the
+    shipped code is wrong. It has cost this project twice. An e2e assertion
+    first, `node dist/…` second, and a pure-function unit test third *with a
+    comment saying what it cannot see*. CLAUDE.md → *The rule about which
+    toolchain a test runs in*.
 
 ---
 

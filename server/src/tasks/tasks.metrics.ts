@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
 import { MetricsService } from "../core/metrics/metrics.service";
-import type { ModuleMetricsSource } from "../core/metrics/metrics.types";
+import type { ModuleMetricsSource, RecordCounts } from "../core/metrics/metrics.types";
 
 /**
  * What Aufgaben reports about itself to operations.
@@ -56,11 +56,26 @@ export class TasksMetrics implements OnModuleInit, ModuleMetricsSource {
     this.metrics.register(this);
   }
 
-  async records(): Promise<{ total: number; deleted: number }> {
-    const [total, deleted] = await this.prisma.$transaction([
+  /**
+   * `archived: null`, and that is the module saying it has no archive rather
+   * than reporting an empty one.
+   *
+   * A task has nothing hanging off it that a soft delete would orphan, so
+   * `CANCELLED` is the whole of "this will not happen" and there is no second
+   * mechanism — `rbac/resources.ts` gives `task` no `archive` action for the
+   * same reason. Reporting `0` here would invite an operator to ask why nothing
+   * is ever archived, which is a question about a feature that does not exist.
+   *
+   * `active` is therefore "not deleted", and a cancelled task is counted in it:
+   * it is a live row with a terminal status, and the status breakdown under
+   * `/tasks/stats` is where that distinction belongs.
+   */
+  async records(): Promise<RecordCounts> {
+    const [total, active, deleted] = await this.prisma.$transaction([
+      this.prisma.task.count(),
       this.prisma.task.count({ where: { deletedAt: null } }),
       this.prisma.task.count({ where: { deletedAt: { not: null } } }),
     ]);
-    return { total, deleted };
+    return { total, active, archived: null, deleted };
   }
 }

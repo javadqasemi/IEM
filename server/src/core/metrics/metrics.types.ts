@@ -28,6 +28,36 @@ import type { DomainEventName } from "../events/catalogue";
 import type { JobName } from "../jobs/catalogue";
 
 /**
+ * How many records a module holds, and in what state.
+ *
+ * **Four figures rather than two, because "how much is in here" and "how much
+ * of it is still work" are different questions** and an operator asks both. The
+ * split matters most where it is largest: a firm's project table is mostly
+ * archive after a decade, and a single total would say the module had grown
+ * when what grew was the filing cabinet.
+ *
+ * `archived` is **nullable, and `null` is not zero**. A module with no archive
+ * concept — Tasks, where `CANCELLED` is the whole of "this will not happen" —
+ * reports `null`, and a report that showed it as 0 would invite somebody to ask
+ * why nothing is ever archived.
+ *
+ * `active + archived + deleted === total` where all three exist, and the
+ * arithmetic is the module's to get right: `records()` is one `$transaction` of
+ * counts, so the four are consistent with each other even under a concurrent
+ * write.
+ */
+export type RecordCounts = {
+  /** Every row the module owns, whatever its state. */
+  total: number;
+  /** Live work: not archived, not deleted. */
+  active: number;
+  /** Kept, finished with. `null` when the module has no archive. */
+  archived: number | null;
+  /** Soft-deleted. Growth here against a flat `active` is a retention question. */
+  deleted: number;
+};
+
+/**
  * One module's declaration of what it is.
  *
  * Deliberately small. A module that had to describe *how* to measure itself
@@ -42,13 +72,13 @@ export type ModuleMetricsSource = {
   label: string;
 
   /**
-   * How many records it holds, and how many are soft-deleted.
+   * How many records it holds, split four ways.
    *
    * A callback rather than a table name, because only the module knows its own
    * soft-delete predicate and whether a row belongs to it — `ProjectMember` is
    * the project module's, not a module of its own.
    */
-  records(): Promise<{ total: number; deleted: number }>;
+  records(): Promise<RecordCounts>;
 
   /**
    * The path prefix its routes share — `/projects`, `/tasks`.
@@ -78,18 +108,38 @@ export type ModuleMetricsSource = {
 export type ModuleMetrics = {
   key: string;
   label: string;
-  records: { total: number; deleted: number };
+  records: RecordCounts;
   api: {
     /** Since the process started. Says so, because a restart resets it. */
     requests: number;
     errors: number;
     /** 0–1. The figure an alert is actually set on. */
     errorRate: number;
+    /**
+     * The arithmetic mean, reported **beside** the percentiles and never
+     * instead of them.
+     *
+     * It is here because it is what people ask for and because it is the one
+     * figure that can be compared across two deployments of different shapes.
+     * It is not the one to alert on: ninety-nine requests at 10 ms and one at
+     * 2 s average to 30 ms, which is indistinguishable from a healthy module.
+     * `p95Ms` beside it is what makes the mean safe to read.
+     */
+    meanMs: number | null;
     p50Ms: number | null;
     p95Ms: number | null;
     slowest: { route: string; p95Ms: number } | null;
   };
   events: { total: number; byName: Record<string, number> };
   audit: { total: number; last24h: number };
-  jobs: { queued: number; running: number; dead: number; p50DurationMs: number | null };
+  jobs: {
+    /** Every job row the module owns that the sample saw. */
+    total: number;
+    queued: number;
+    running: number;
+    /** The one an operator is paged for: retries exhausted. */
+    dead: number;
+    meanDurationMs: number | null;
+    p50DurationMs: number | null;
+  };
 };

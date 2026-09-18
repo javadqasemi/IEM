@@ -198,6 +198,37 @@ saying none existed. Three things about them are deliberate:
   real `ValidationPipe` with the real options because the bug it guards was a missing decorator
   being silently stripped — asserting the decorator is present would not have caught it.
 
+### The rule about which toolchain a test runs in
+
+**A business-critical assertion runs against the compiled build wherever the build and the test
+toolchain are known to behave differently.** Vitest transforms with esbuild; `nest build` and
+`tsc -b` do not. Where those two disagree, a vitest test is not a weaker check — it is a check of
+something else, and it will pass while the shipped code is wrong.
+
+Three places they disagree, all found the hard way:
+
+| | esbuild | `tsc` / `nest build` | What it cost |
+| --- | --- | --- | --- |
+| `emitDecoratorMetadata` | not emitted | emitted | A Nest DI test is impossible; F12 broke the app twice with 355 tests green |
+| `useDefineForClassFields` (ES2022) | absent fields not defined | every declared field defined as `undefined` | `changed` on every version row listed every field, for a whole wave, with 600 tests green |
+| Decorator evaluation order | differs in edge cases | — | Not yet bitten; assume it will |
+
+So, in order of preference:
+
+1. **An e2e assertion against the running API.** `e2e/tasks.spec.ts` and `e2e/versioning.spec.ts`
+   guard `changed` this way, and it is the only guard that would have caught it.
+2. **`node dist/…` after a build**, when the thing under test is not reachable over HTTP —
+   `node dist/main.js` for DI, a throwaway script against `dist/` for a shape.
+3. **A vitest test of the pure function**, with a comment saying what it cannot see and the
+   measured numbers from (2) written down. `core/versioning/changed.test.ts` is the template: it
+   tests `changedFields` against an object shaped the way the *compiled* DTO is, because running
+   the real pipe under vitest would pass against the broken code.
+
+A vitest test that appears to exercise the pipe, the container or a decorator is the dangerous
+shape — it looks like the strongest test in the file and is the one that proves nothing. If a test
+would only be meaningful under `tsc` semantics, say so in the test rather than writing it and
+believing it.
+
 `npm run build`, `npm run server:build` and the typechecks remain the other gates.
 `docs/ARCHITECTURE.md` → *Verifying a change* describes the Node `react-dom/server` smoke test,
 which is still the strongest check available without a browser.

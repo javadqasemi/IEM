@@ -38,18 +38,26 @@ test.afterAll(async () => {
 type Module = {
   key: string;
   label: string;
-  records: { total: number; deleted: number };
+  records: { total: number; active: number; archived: number | null; deleted: number };
   api: {
     requests: number;
     errors: number;
     errorRate: number;
+    meanMs: number | null;
     p50Ms: number | null;
     p95Ms: number | null;
     slowest: { route: string; p95Ms: number } | null;
   };
   events: { total: number; byName: Record<string, number> };
   audit: { total: number; last24h: number };
-  jobs: { queued: number; running: number; dead: number; p50DurationMs: number | null };
+  jobs: {
+    total: number;
+    queued: number;
+    running: number;
+    dead: number;
+    meanDurationMs: number | null;
+    p50DurationMs: number | null;
+  };
 };
 
 async function report(ctx: APIRequestContext = admin): Promise<Module[]> {
@@ -112,16 +120,62 @@ test.describe("the six figures", () => {
     // Records: a seeded database has projects. 0 would mean `records()` is
     // counting with the wrong predicate, which is invisible in a type.
     expect(module.records.total).toBeGreaterThan(0);
+    expect(module.records.active).toBeGreaterThan(0);
     expect(module.records.deleted).toBeGreaterThanOrEqual(0);
 
     expect(module.api).toMatchObject({ requests: expect.any(Number), errorRate: expect.any(Number) });
     expect(module.audit.total).toBeGreaterThanOrEqual(module.audit.last24h);
-    expect(module.jobs).toMatchObject({ queued: expect.any(Number), dead: expect.any(Number) });
+    expect(module.jobs).toMatchObject({ total: expect.any(Number), dead: expect.any(Number) });
 
     // Every declared event is a key, present at 0 rather than absent. Absent
     // and zero are different, and only one of them is a fact.
     expect(Object.keys(module.events.byName)).toContain("ProjectUpdated");
     expect(Object.keys(module.events.byName)).toContain("MilestoneMissed");
+  });
+
+  test("splits records four ways, and they add up", async () => {
+    /**
+     * `active + archived + deleted === total`, computed in one `$transaction`
+     * so the four agree with each other even under a concurrent write. The
+     * arithmetic is the assertion: three separate `count`s with overlapping
+     * predicates is exactly the shape that double-counts an archived project
+     * which was later deleted, and no type can see it.
+     */
+    const module = projects(await report());
+    expect(module.records.active + (module.records.archived ?? 0) + module.records.deleted).toBe(
+      module.records.total,
+    );
+  });
+
+  test("reports no archive as null rather than as zero", async () => {
+    /**
+     * Aufgaben has no archive — `CANCELLED` is the whole of "this will not
+     * happen", and `rbac/resources.ts` gives `task` no `archive` action. `0`
+     * would invite an operator to ask why nothing is ever archived, which is a
+     * question about a feature that does not exist.
+     */
+    const tasks = (await report()).find((m) => m.key === "task");
+    expect(tasks, "kein Modul mit key „task“ im Bericht").toBeTruthy();
+    expect(tasks!.records.archived).toBeNull();
+    expect(tasks!.records.active).toBeGreaterThan(0);
+  });
+
+  test("reports the mean beside the percentiles, from the same window", async () => {
+    // The mean is what people ask for and the one figure comparable across
+    // deployments; the p95 beside it is what makes the mean safe to read. Both
+    // are drawn from the same ring, so they describe one population.
+    await admin.get(`${API}/projects?perPage=1`);
+    const api = projects(await report()).api;
+
+    expect(api.meanMs).not.toBeNull();
+    expect(api.p95Ms).not.toBeNull();
+    // A mean above the 95th percentile of the same sample is arithmetically
+    // possible only with an extreme tail, and here would mean the two are
+    // reading different windows.
+    expect(api.meanMs!).toBeLessThanOrEqual(api.p95Ms!);
+    expect(Number.isInteger(api.meanMs!), "a mean with eleven decimals ends up in a report").toBe(
+      true,
+    );
   });
 
   test("attributes a request to the module whose prefix it starts with", async () => {

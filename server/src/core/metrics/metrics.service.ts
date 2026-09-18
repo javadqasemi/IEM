@@ -184,6 +184,15 @@ export class MetricsService {
       // 0 rather than NaN for a module nobody has called. An alert on NaN fires
       // once and is muted for ever after.
       errorRate: requests ? Number((errors / requests).toFixed(4)) : 0,
+      /*
+        The mean over the same ring the percentiles use, not over every request
+        since boot.
+
+        Otherwise the three figures would describe different populations — a
+        mean from a week ago beside a p95 from the last five hundred requests —
+        and an operator comparing them would be comparing nothing.
+      */
+      meanMs: mean(all),
       p50Ms: quantile(all, 0.5),
       p95Ms: quantile(all, 0.95),
       slowest,
@@ -208,6 +217,18 @@ function quantile(values: number[], q: number): number | null {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
 }
 
+/**
+ * `null` for an empty sample, for the same reason `quantile` is.
+ *
+ * Rounded to a whole millisecond: a mean of `12.833333333333334` implies a
+ * precision the sample does not have, and it is the figure most likely to end
+ * up pasted into a report.
+ */
+function mean(values: number[]): number | null {
+  if (!values.length) return null;
+  return Math.round(sum(values) / values.length);
+}
+
 function jobsFor(
   rows: { name: string; status: string; durationMs: number | null }[],
   names: readonly string[],
@@ -218,10 +239,22 @@ function jobsFor(
     .filter((ms): ms is number => typeof ms === "number");
 
   return {
+    /*
+      What the sample saw, not what the table holds.
+
+      `modules()` reads at most 5'000 job rows, so on a busy installation this
+      is a floor rather than a count — which is the honest figure to report
+      beside three status counts drawn from the same rows. A separate
+      `COUNT(*)` would be exact and would disagree with them.
+    */
+    total: mine.length,
     queued: mine.filter((row) => row.status === "QUEUED").length,
     running: mine.filter((row) => row.status === "RUNNING").length,
     // The one an operator is paged for: a job that has exhausted its retries.
     dead: mine.filter((row) => row.status === "DEAD").length,
+    // Both, and for the reason `api.meanMs` gives: the mean is the comparable
+    // figure and the median is the one that survives a single pathological run.
+    meanDurationMs: mean(durations),
     p50DurationMs: quantile(durations, 0.5),
   };
 }
