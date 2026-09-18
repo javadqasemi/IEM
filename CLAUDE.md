@@ -109,7 +109,19 @@ npm run lint         # eslint; 0 errors is the bar, warnings are a backlog
 npm run e2e          # Playwright: 3 widths x 2 themes, every screen, + axe
 npm run e2e:report   # the HTML report from the last run
 npm run verify:all   # verify + e2e, for a release
+
+# The two cross-cutting suites, runnable on their own. Both are `--project=desktop`
+# only: neither says anything different at a phone width, and both are slow.
+npm run e2e:security # the role x verb x resource matrix, against the live API
+npm run e2e:budgets  # the performance budgets, with the measurements printed
 ```
+
+**Both need a seed that ordinary development does not.** `e2e:security` needs
+the six role accounts (`SEED_TEST_USERS=true` plus `SEED_TEST_PASSWORD`, both in
+`server/.env`), and `e2e:budgets` is only meaningful with rows —
+`SEED_LOAD_PROJECTS=500 npm run server:seed` creates them. Each **skips with a
+message** rather than failing when its data is absent, because a red suite on a
+machine that has not opted in is one people learn to ignore.
 
 **`e2e` is deliberately *not* in `verify`.** `verify` is the pre-commit gate: no
 servers, no database, a few seconds. Folding the browser pass in would make it
@@ -358,6 +370,24 @@ sends `application/octet-stream` + `nosniff` + `Content-Length` and **no** `Cont
 **A DTO type may be named in `repository.ts` and `mapper.ts` and nowhere else.** That rule is what
 makes the mapper a seam rather than a decoration, and `src/architecture.test.ts` enforces it along
 with feature isolation, the `index.ts` boundary and the direction of every layer arrow.
+
+**A performance budget measured through the test harness measures the harness.**
+`e2e/budgets.ts` holds the numbers; the *method* is most of what makes them a regression test. The
+navigation budget first read 155 ms against a limit of 100 — driven from the test process with
+`page.evaluate` and `expect(locator).toBeVisible()`, which costs two CDP round-trips plus `expect`'s
+own retry interval and cannot resolve faster than that however quickly the page renders. Timed
+*inside* the page with `performance.now()` and a `MutationObserver`, the same navigation is **40 ms**.
+Raising the budget to 200 would have written 115 ms of overhead into the contract, where no
+regression under that size could ever be seen again. The API budgets are measured against the live
+API for the same reason: first paint in dev — unminified, uncached, cold transform — is an order of
+magnitude off any number worth setting, so it is deliberately not budgeted.
+
+**A budget over two rows proves reachability, not speed.** Every query is fast over two rows,
+including the ones that will not be fast over two thousand — so `budgets.spec.ts` prints the row
+count it measured against on every run and refuses to claim anything about scale below 100.
+`SEED_LOAD_PROJECTS=500` is what makes the list queries work for their living. The N+1 check is the
+one a wall-clock budget cannot make: it compares `perPage=1` against `perPage=50` and asserts the
+*slope*, because a query per row is invisible at a small page size against a local database.
 
 **The Gewerk colours are a closed set of six.** `disc-heat` `disc-air` `disc-water` `disc-power`
 `disc-energy` `disc-model`, declared in `admin.css` for both themes and checked by

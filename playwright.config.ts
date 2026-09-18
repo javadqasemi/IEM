@@ -22,6 +22,16 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
 
 export default defineConfig({
   testDir: "./e2e",
+  /**
+   * Only `*.spec.ts`, so `fixtures.ts` and `budgets.ts` are libraries.
+   *
+   * Playwright's default is every `.ts` under `testDir`, which would load both
+   * as test files and report "no tests found" for each — two permanent
+   * non-failures in the output that a reader has to learn to ignore. Stating
+   * the pattern is cheaper than that, and it is what lets a spec have a module
+   * beside it.
+   */
+  testMatch: /.*\.spec\.ts$/,
   // Generous: the first navigation to a lazy route compiles a chunk in dev.
   timeout: 45_000,
   expect: { timeout: 10_000 },

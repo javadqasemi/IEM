@@ -661,6 +661,81 @@ async function seedDomain() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Load data — opt-in, for the performance budgets                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Synthetic projects, so a budget measures something.
+ *
+ * **`SEED_LOAD_PROJECTS=<n>`, default off.** A response-time budget taken
+ * against the two demo projects proves the endpoint is reachable and nothing
+ * else: every query is fast over two rows, including the ones that will not be
+ * fast over two thousand. An N+1 in the list's `select` costs two extra
+ * round-trips at this size and five hundred at a realistic one, and only the
+ * second is visible.
+ *
+ * The rows are marked by their number (`P-9xxx-…`) so they are identifiable and
+ * removable, and they are spread across the seeded customers, buildings,
+ * managers and statuses — a thousand identical rows would let Postgres answer
+ * from one page of one index and flatter every figure.
+ *
+ * They are **not** given members, disciplines or milestones. The detail budget
+ * is measured against a real project (`P-2026-001`, which has all three); these
+ * exist to make the *list* query work for its living.
+ */
+async function seedLoadProjects() {
+  const requested = Number(process.env.SEED_LOAD_PROJECTS ?? 0);
+  if (!Number.isFinite(requested) || requested <= 0) return;
+
+  const year = 9000;
+  const existing = await prisma.project.count({ where: { number: { startsWith: `P-${year}-` } } });
+  if (existing >= requested) {
+    console.log(`  → ${existing} Lastdaten-Projekte vorhanden`);
+    return;
+  }
+
+  const customers = await prisma.customer.findMany({ select: { id: true } });
+  const buildings = await prisma.building.findMany({ select: { id: true } });
+  const managers = await prisma.employee.findMany({ select: { id: true } });
+  const offices = await prisma.office.findMany({ select: { id: true } });
+  if (!customers.length || !managers.length) {
+    console.log("  ! Lastdaten übersprungen — Stammdaten fehlen");
+    return;
+  }
+
+  const statuses = ["PLANNED", "ACTIVE", "ON_HOLD", "COMPLETED", "ARCHIVED"] as const;
+  const priorities = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const;
+  const phases = ["P31", "P32", "P41", "P51", "P52", null] as const;
+
+  const rows = [];
+  for (let i = existing; i < requested; i++) {
+    const start = new Date(2024, i % 12, ((i * 7) % 27) + 1);
+    rows.push({
+      number: `P-${year}-${String(i + 1).padStart(5, "0")}`,
+      name: `Lastdaten ${i + 1} — ${["Sanierung", "Neubau", "Umbau", "Erweiterung"][i % 4]}`,
+      status: statuses[i % statuses.length],
+      priority: priorities[i % priorities.length],
+      currentPhase: phases[i % phases.length],
+      customerId: customers[i % customers.length].id,
+      buildingId: buildings.length ? buildings[i % buildings.length].id : null,
+      managerId: managers[i % managers.length].id,
+      officeId: offices.length ? offices[i % offices.length].id : null,
+      startDate: start,
+      plannedEndDate: new Date(start.getTime() + (200 + (i % 500)) * 86_400_000),
+      contractValue: new Prisma.Decimal(((i % 40) * 125_000 + 80_000).toFixed(2)),
+      budgetHours: 200 + (i % 60) * 40,
+      progressPercent: i % 101,
+      description: `Synthetischer Datensatz für die Performance-Budgets (${i + 1}).`,
+    });
+  }
+
+  // `createMany` in one statement: five hundred `create` calls is five hundred
+  // round-trips, and this runs on every machine that measures a budget.
+  await prisma.project.createMany({ data: rows, skipDuplicates: true });
+  console.log(`  ✓ ${rows.length} Lastdaten-Projekte (insgesamt ${requested})`);
+}
+
+/* ------------------------------------------------------------------ */
 /* Test accounts — opt-in, and never on by default                      */
 /* ------------------------------------------------------------------ */
 
@@ -804,6 +879,7 @@ async function main() {
   await seedContent(adminId);
   await seedFirstSnapshot(adminId);
   await seedDomain();
+  await seedLoadProjects();
   await seedTestUsers();
   console.log("\nFertig.");
 }
