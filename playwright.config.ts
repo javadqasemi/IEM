@@ -39,7 +39,12 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
  * check that the shell hides what a role cannot reach — which is also not a
  * width-dependent question.
  */
-const API_ONLY = [/security\.spec\.ts/, /versioning\.spec\.ts/, /budgets\.spec\.ts/];
+const API_ONLY = [
+  /security\.spec\.ts/,
+  /versioning\.spec\.ts/,
+  /budgets\.spec\.ts/,
+  /metrics\.spec\.ts/,
+];
 
 export default defineConfig({
   testDir: "./e2e",

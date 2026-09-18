@@ -264,6 +264,74 @@ describe("the layers, on the server", () => {
   });
 });
 
+describe("every module reports metrics", () => {
+  /**
+   * The firm's rule before Wave 2: *"Ab jetzt würde ich keine Module mehr ohne
+   * Metriken akzeptieren."*
+   *
+   * Enforced here rather than reviewed, because the failure is the quietest one
+   * in this file: a module with no `*.metrics.ts` does not break, does not warn
+   * and does not appear in `/metrics/modules` — it is simply absent from the
+   * report, and absent looks exactly like idle.
+   *
+   * **"Ab jetzt" is the whole shape of this test.** Eleven feature folders
+   * predate the rule and failing them all would make it a wall on its first
+   * run. They are named below with what each is waiting for, and — as with
+   * `KNOWN_CONTROLLER_PRISMA` and `KNOWN_UNENFORCED` — **the list may only
+   * shrink**: adding a metrics source to a listed module fails the test until
+   * its line is removed, so the exemption cannot outlive the debt.
+   */
+  const WITHOUT_METRICS: Record<string, string> = {
+    applications:
+      "Wave 3. Has records, events and a purge job, so it is the cheapest one to migrate.",
+    audit: "Infrastructure wearing a feature's folder name — it is the table the others report against.",
+    buildings: "Read-only master-data slice; owed metrics when the Buildings module is built.",
+    content: "Predates the rule. Snapshot and entry counts exist on the dashboard already.",
+    customers: "Read-only master-data slice; owed metrics when the Customers module is built.",
+    dashboard: "Reads across eight tables and owns none. A module with no records of its own.",
+    disciplines: "Read-only master-data slice; owed metrics when the Disciplines module is built.",
+    employees: "Read-only master-data slice; owed metrics when the Employees module is built.",
+    settings: "Routes only; the service is infrastructure in `core/settings`.",
+    users: "Predates the rule. Sign-in events are audited; record counts are not reported.",
+  };
+
+  it.each(featureDirs)("%s", (dir) => {
+    const files = readdirSync(join(SRC, dir));
+    const metrics = files.find((f) => f.endsWith(".metrics.ts"));
+
+    if (dir in WITHOUT_METRICS) {
+      expect(metrics, `${dir}/ now has metrics — remove it from WITHOUT_METRICS`).toBeUndefined();
+      return;
+    }
+
+    expect(metrics, `${dir}/ declares no *.metrics.ts`).toBeTruthy();
+
+    /*
+      Declaring it is not enough: the class registers itself in `onModuleInit`,
+      so Nest has to construct it, so the module has to list it as a provider.
+      A file nothing provides is a module that silently reports nothing — which
+      is the exact failure this test exists for, one step further along.
+    */
+    const className = /export class (\w+)/.exec(read(join(SRC, dir, metrics!)))?.[1];
+    const moduleFile = files.find((f) => f.endsWith(".module.ts"))!;
+    const module = code(join(SRC, dir, moduleFile));
+    expect(className, `${dir}/${metrics} exports no class`).toBeTruthy();
+    expect(module, `${dir}/${moduleFile} does not provide ${className}`).toContain(className!);
+  });
+
+  it("names no folder that does not exist", () => {
+    for (const dir of Object.keys(WITHOUT_METRICS)) {
+      expect(featureDirs, `${dir} is listed but is not a feature folder`).toContain(dir);
+    }
+  });
+
+  it("covers at least one module", () => {
+    // Guards against the list quietly growing to cover everything.
+    const covered = featureDirs.filter((dir) => !(dir in WITHOUT_METRICS));
+    expect(covered.length).toBeGreaterThan(0);
+  });
+});
+
 describe("every route is behind a permission", () => {
   /**
    * `JwtAuthGuard` is global and denies by default, so a route without

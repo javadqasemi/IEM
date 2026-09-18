@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { currentActor, currentContext, correlationId } from "../context/request-context";
+import { MetricsService } from "../metrics/metrics.service";
 import type {
   DomainEvent,
   DomainEventName,
@@ -46,6 +47,15 @@ export type EventHandler = (event: DomainEvent) => void | Promise<void>;
 export class EventBus {
   private readonly logger = new Logger(EventBus.name);
   private readonly handlers = new Map<DomainEventName | "*", EventHandler[]>();
+
+  /**
+   * The bus counts what it dispatches, so no module counts its own events.
+   *
+   * The same argument as the audit listener one line further down: a figure a
+   * module has to remember to report is a figure that is wrong in the modules
+   * that forgot.
+   */
+  constructor(private readonly metrics: MetricsService) {}
 
   /**
    * Subscribes to one event, or to `"*"` for all of them.
@@ -124,6 +134,17 @@ export class EventBus {
 
   private async dispatch(events: DomainEvent[]): Promise<void> {
     for (const event of events) {
+      /*
+        Counted here, at dispatch, and not in `publish`.
+
+        `publish` queues; the request may still fail, and a discarded event
+        describes something that did not happen. "Wie viele ProjectUpdated gab
+        es heute" has to mean committed ones, or the figure disagrees with the
+        audit log built from the same events — and an operator comparing two
+        numbers that should match is an operator losing an afternoon.
+      */
+      this.metrics.recordEvent(event.name);
+
       const listeners = [
         ...(this.handlers.get(event.name) ?? []),
         ...(this.handlers.get("*") ?? []),

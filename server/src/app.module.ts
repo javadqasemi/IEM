@@ -7,6 +7,7 @@ import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { CommonModule } from "./common/common.module";
 import { CoreModule } from "./core/core.module";
 import { EventFlushInterceptor } from "./core/context/request-context.interceptor";
+import { MetricsInterceptor } from "./core/metrics/metrics.interceptor";
 import { RequestContextMiddleware } from "./core/context/request-context.middleware";
 import { SharedThrottlerStorage } from "./common/throttler.storage";
 import { AllExceptionsFilter, EnvelopeInterceptor } from "./common/http";
@@ -134,6 +135,16 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
      */
     { provide: APP_INTERCEPTOR, useClass: EventFlushInterceptor },
     { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
+    /**
+     * Last, therefore **innermost**.
+     *
+     * Nest runs interceptors outside-in on the way in and inside-out on the way
+     * out, so the timer starts closest to the handler and stops closest to it:
+     * what is measured is the handler and its serialisation, not the envelope
+     * and the event flush wrapped around them. That is the number a slow query
+     * shows up in.
+     */
+    { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
   ],
 })
 export class AppModule implements NestModule {

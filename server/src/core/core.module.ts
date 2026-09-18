@@ -6,6 +6,8 @@ import { JobRunner } from "./jobs/job.runner";
 import { ListPreferenceController } from "./list/list-preference.controller";
 import { JobService } from "./jobs/job.service";
 import { VersioningService } from "./versioning/versioning.service";
+import { MetricsService } from "./metrics/metrics.service";
+import { MetricsController } from "./metrics/metrics.controller";
 
 /**
  * The cross-cutting infrastructure every feature module depends on.
@@ -26,8 +28,8 @@ import { VersioningService } from "./versioning/versioning.service";
 @Global()
 @Module({
   imports: [CommonModule],
-  controllers: [ListPreferenceController],
-  providers: [EventBus, AuditListener, JobService, JobRunner, VersioningService],
-  exports: [EventBus, JobService, VersioningService],
+  controllers: [ListPreferenceController, MetricsController],
+  providers: [EventBus, AuditListener, JobService, JobRunner, VersioningService, MetricsService],
+  exports: [EventBus, JobService, VersioningService, MetricsService],
 })
 export class CoreModule {}

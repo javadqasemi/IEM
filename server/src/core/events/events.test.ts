@@ -6,6 +6,7 @@ import {
   type DomainEventName,
 } from "./catalogue";
 import { EventBus } from "./event-bus";
+import { MetricsService } from "../metrics/metrics.service";
 import { newContext, runWithContext } from "../context/request-context";
 
 /**
@@ -60,9 +61,20 @@ describe("the catalogue", () => {
   });
 });
 
+/**
+ * A metrics service the bus can count into, with no database behind it.
+ *
+ * The bus counts what it dispatches so that no module has to remember to —
+ * which means it now needs one. Constructing the real service with a `null`
+ * Prisma is enough: `recordEvent` touches nothing but a `Map`, and the
+ * alternative — a hand-written stub — would stop matching the real one the
+ * first time its signature changed.
+ */
+const metrics = () => new MetricsService(null as never);
+
 describe("events are queued until the request succeeds", () => {
   it("does not deliver inside the request", async () => {
-    const bus = new EventBus();
+    const bus = new EventBus(metrics());
     const seen: DomainEvent[] = [];
     bus.on("ProjectCreated", (e) => void seen.push(e));
 
@@ -82,7 +94,7 @@ describe("events are queued until the request succeeds", () => {
   it("delivers immediately when there is no request", async () => {
     // A cron tick or a job: the caller is responsible for publishing after its
     // own transaction, and there is no request end to wait for.
-    const bus = new EventBus();
+    const bus = new EventBus(metrics());
     const seen: DomainEvent[] = [];
     bus.on("RetentionPurged", (e) => void seen.push(e));
 
@@ -96,7 +108,7 @@ describe("events are queued until the request succeeds", () => {
   });
 
   it("throws away what a failed request queued", async () => {
-    const bus = new EventBus();
+    const bus = new EventBus(metrics());
     const seen: DomainEvent[] = [];
     bus.on("*", (e) => void seen.push(e));
 
@@ -112,7 +124,7 @@ describe("events are queued until the request succeeds", () => {
   });
 
   it("lets a handler publish without appending to the array being drained", async () => {
-    const bus = new EventBus();
+    const bus = new EventBus(metrics());
     const order: string[] = [];
     bus.on("ProjectCreated", () => {
       order.push("first");
@@ -137,7 +149,7 @@ describe("events are queued until the request succeeds", () => {
 
 describe("a listener never fails its publisher", () => {
   it("logs a rejecting handler and runs the others", async () => {
-    const bus = new EventBus();
+    const bus = new EventBus(metrics());
     const errors = vi.spyOn(
       (bus as unknown as { logger: { error: (m: string) => void } }).logger,
       "error",
@@ -165,7 +177,7 @@ describe("a listener never fails its publisher", () => {
 
 describe("what an event carries", () => {
   it("takes the actor and the correlation id from the context", async () => {
-    const bus = new EventBus();
+    const bus = new EventBus(metrics());
     let captured: DomainEvent | null = null;
     bus.on("*", (e) => void (captured = e));
 
@@ -194,7 +206,7 @@ describe("what an event carries", () => {
   it("lets a caller name a different actor", async () => {
     // A scheduled publish is not attributable to whoever scheduled it: the
     // decision and its effect are different moments.
-    const bus = new EventBus();
+    const bus = new EventBus(metrics());
     let captured: DomainEvent | null = null;
     bus.on("*", (e) => void (captured = e));
 
@@ -212,7 +224,7 @@ describe("what an event carries", () => {
   it("mints a correlation id outside a request rather than leaving it empty", () => {
     // Rows with no correlation id cannot be grouped; a minted one groups the
     // tick, which is the truthful answer.
-    const bus = new EventBus();
+    const bus = new EventBus(metrics());
     let captured: DomainEvent | null = null;
     bus.on("*", (e) => void (captured = e));
     bus.publish("RetentionPurged", {
