@@ -138,4 +138,67 @@ export const RESOURCES: ResourceDef[] = [
     retry: "Fehlgeschlagene Aufgabe erneut ausführen",
     cancel: "Wartende Aufgabe abbrechen",
   }),
+
+  /* ===================================================================
+     The operational domain — Wave 1
+     =================================================================== */
+
+  /**
+   * The reference module.
+   *
+   * Two things here are worth the reader's attention, because both are
+   * choices the other eighteen modules will copy.
+   *
+   * **`readAll` is separate from `read`.** `permissions.md` writes the
+   * row-level rule as `◐` — a Projektleiter sees the projects they manage or
+   * are a member of, not the firm's whole book. Expressing that as a *second*
+   * permission rather than as a role check keeps the rule in the catalogue,
+   * where it is grantable, auditable and visible in the role editor, instead
+   * of inside a service where nobody can see who has it. `ProjectScope` reads
+   * exactly this key.
+   *
+   * **`archive` is not `delete`.** A project with time entries or invoices
+   * against it is refused deletion outright; archiving is the operation that
+   * actually exists for finished work, and giving it its own permission is
+   * what lets a Projektleiter close their own project without being able to
+   * remove one.
+   */
+  resource("project", "Projekte", "Projekte", {
+    read: "Eigene Projekte ansehen",
+    readAll: "Alle Projekte der Firma ansehen",
+    create: "Projekte anlegen",
+    update: "Projektdaten bearbeiten",
+    delete: "Projekte löschen",
+    archive: "Projekte abschliessen und archivieren",
+    manageTeam: "Projektteam zusammenstellen",
+    manageDisciplines: "Gewerke und deren Budget festlegen",
+    manageMilestones: "Meilensteine planen und abnehmen",
+    export: "Projektlisten exportieren",
+  }),
+
+  /**
+   * The Wave 1 master data, read-only for now — and that is the whole
+   * declaration, deliberately.
+   *
+   * Each of these becomes a module with its own create/update/delete
+   * (roadmap Wave 1 modules 1–3, Wave 3 module 18). Declaring those actions
+   * *now* would put eight more keys in the role editor that grant nothing,
+   * which is the twelve-dead-permissions problem F6 was built to end. A
+   * resource grows when its routes do.
+   */
+  resource("customer", "Kunden", "Stammdaten", {
+    read: "Kunden ansehen",
+  }),
+
+  resource("building", "Gebäude", "Stammdaten", {
+    read: "Gebäude ansehen",
+  }),
+
+  resource("employee", "Mitarbeitende", "Stammdaten", {
+    read: "Mitarbeitende ansehen",
+  }),
+
+  resource("discipline", "Gewerke", "Stammdaten", {
+    read: "Gewerke ansehen",
+  }),
 ];

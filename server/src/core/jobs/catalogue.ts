@@ -23,6 +23,14 @@ export type JobPayloads = {
   "content.publishScheduled": Record<string, never>;
   /** Deletes applications past their retention date, files included. */
   "applications.purgeExpired": Record<string, never>;
+  /**
+   * Recomputes every live project's `progressPercent` and `health`.
+   *
+   * The nightly half of "derived, but stored" — two of the inputs are the
+   * current date, so a project nobody touches still changes. See
+   * `projects.reconcile.ts`.
+   */
+  "projects.reconcileDerived": Record<string, never>;
 
   /* ---- Named by the firm ------------------------------------------- */
   "export.csv": { resource: string; filter: Record<string, unknown>; requestedBy: string };
@@ -51,6 +59,7 @@ export type JobName = keyof JobPayloads;
 export const JOB_NAMES = [
   "content.publishScheduled",
   "applications.purgeExpired",
+  "projects.reconcileDerived",
   "export.csv",
   "pdf.render",
   "bim.import",

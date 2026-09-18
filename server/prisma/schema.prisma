@@ -77,6 +77,12 @@ model User {
   notifications     Notification[]
   listPreferences   ListPreference[]
 
+  /// The person behind the login, when there is one. Optional in both
+  /// directions: an engineer exists before their account and after it is
+  /// revoked, and a login may belong to nobody on the payroll — see the note
+  /// on `Employee`.
+  employee          Employee?
+
   @@index([status])
   @@index([deletedAt])
 }
@@ -671,4 +677,587 @@ model Job {
   @@index([status, runAfter])
   @@index([name, status])
   @@index([correlationId])
+}
+
+
+// =====================================================================
+// The operational domain — Wave 1
+// =====================================================================
+//
+// Everything above this line is the CMS: content, media, users, the job
+// queue. Everything below is the business the firm actually runs, and the
+// two halves share only `User`.
+//
+// The premise, from `docs/system-audit.md` §0: there was no operational
+// domain model at all. A Swiss engineering office plans, delivers and bills
+// against *projects* — and a project is not a row with a name. It has a
+// Bauherrschaft, an object, a responsible engineer, a set of Gewerke each
+// with its own budget and lead, a team, and SIA phases it is contracted to
+// deliver. Each of those is a table here because each is something the firm
+// asks questions about.
+//
+// This is the Wave 1 slice (`docs/roadmap.md` §3). `Customer`, `Building`,
+// `Employee` and `Discipline` are deliberately *minimal* — enough to create
+// a real project against, no more. The full CRM comes back in Wave 3 and the
+// full building model (floors, systems, rooms, loads) in Wave 2. What is
+// here is not a stub with the fields guessed; it is the subset of the
+// documented model that `Project` requires as data.
+
+/// Shared across the domain. `URGENT` is deliberately above `HIGH` rather
+/// than a separate flag: two parallel scales get used inconsistently.
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+/// SIA 112 phase codes, the vocabulary the firm already plans in.
+///
+/// An enum *and*, later, an entity — see `docs/data-model.md` §1.1. The enum
+/// is the vocabulary (`P41` means Bauprojekt everywhere); `ProjectPhase`
+/// (Wave 1 module 5) is the instance of one phase on one project, with its
+/// dates, its fee and its sign-off. `Project.currentPhase` below holds the
+/// vocabulary only, and says so.
+enum SiaPhase {
+  P31 // Vorprojekt
+  P32 // Bauprojekt
+  P33 // Bewilligungsverfahren
+  P41 // Ausschreibung
+  P51 // Ausführungsprojekt
+  P52 // Ausführung
+  P53 // Inbetriebnahme / Abschluss
+}
+
+// ---------------------------------------------------------------------
+// The firm
+// ---------------------------------------------------------------------
+
+/// Thun and Bern. **Not tenancy** — see architecture §7.8: every office sees
+/// every project, and `officeId` answers "who looks after this", not "who
+/// may see it". Making it a tenant boundary later is a policy change, not a
+/// schema one, which is the reason it is a nullable link rather than a
+/// required scope on every query.
+model Office {
+  id             String  @id @default(cuid())
+  name           String
+  address        String?
+  zip            String?
+  city           String?
+  phone          String?
+  isHeadquarters Boolean @default(false)
+
+  employees Employee[]
+  projects  Project[]
+  buildings Building[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+/// A self-referencing tree. The audit's fourth known gap was that no
+/// Department entity existed and the closest thing was a hardcoded option
+/// list on the team content type; this closes it.
+model Department {
+  id       String  @id @default(cuid())
+  code     String  @unique
+  name     String
+  parentId String?
+  parent   Department?  @relation("DepartmentTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Department[] @relation("DepartmentTree")
+
+  /// The head of department. `SetNull`, like every actor link: a departed
+  /// employee must not cascade away the department.
+  headId String?
+  head   Employee? @relation("DepartmentHead", fields: [headId], references: [id], onDelete: SetNull)
+
+  employees Employee[] @relation("DepartmentMembers")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([parentId])
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  APPRENTICE
+  TEMPORARY
+  CONTRACTOR
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  LEFT
+}
+
+/// The person.
+///
+/// Three things in this system look like "a person" and none of them is the
+/// same thing: `User` is a **login**, `Employee` is a **person the firm
+/// employs**, and the `team` content type is a **public portrait** on the
+/// website. They have different lifecycles — an engineer exists before their
+/// account and after it is revoked, and half the firm never appears on the
+/// site. `userId` is the optional bridge, and it is nullable in both
+/// directions on purpose.
+model Employee {
+  id              String  @id @default(cuid())
+  personnelNumber String  @unique
+  firstName       String
+  lastName        String
+  email           String  @unique
+  phone           String?
+  mobile          String?
+  position        String?
+
+  employmentType  EmploymentType @default(FULL_TIME)
+  /// 1–100. A Pensum, not an FTE decimal — the firm writes "80%".
+  workloadPercent Int            @default(100)
+  /// Personal data. Readable only with `employee.compensation`, which is a
+  /// permission separate from `employee.read`; the mapper drops it when the
+  /// caller lacks it rather than the query omitting it, so there is one
+  /// place to check.
+  hourlyRate      Decimal?       @db.Decimal(12, 2)
+
+  hireDate DateTime
+  exitDate DateTime?
+  status   EmployeeStatus @default(ACTIVE)
+
+  departmentId String?
+  department   Department? @relation("DepartmentMembers", fields: [departmentId], references: [id], onDelete: SetNull)
+  officeId     String?
+  office       Office?     @relation(fields: [officeId], references: [id], onDelete: SetNull)
+
+  /// The line manager. Self-referencing; the service rejects a cycle,
+  /// because the database cannot.
+  managerId String?
+  manager   Employee?  @relation("EmployeeLine", fields: [managerId], references: [id], onDelete: SetNull)
+  reports   Employee[] @relation("EmployeeLine")
+
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  headOf              Department[]         @relation("DepartmentHead")
+  disciplinesLed      Discipline[]         @relation("DisciplineManager")
+  projectsManaged     Project[]            @relation("ProjectManager")
+  memberships         ProjectMember[]
+  projectDisciplines  ProjectDiscipline[]  @relation("ProjectDisciplineLead")
+  customersOwned      Customer[]           @relation("CustomerOwner")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([status, lastName])
+  @@index([departmentId])
+  @@index([officeId])
+}
+
+/// Master data for a Gewerk: Heizung, Lüftung, Sanitär, Elektro…
+///
+/// **Deliberately not an enum**, and it is the correction with the widest
+/// consequences in the model (`docs/data-model.md` §3.4). A Gewerk has a
+/// Fachbereichsleiter, a fee share, its own deliverables and its own budget.
+/// An enum can hold none of that, and almost every later entity — drawings,
+/// issues, time entries, budgets — is scoped by discipline.
+model Discipline {
+  id   String @id @default(cuid())
+  code String @unique
+  name String
+
+  /// The Fachbereichsleiter — who owns this Gewerk across the firm. This is
+  /// the difference between a lookup table and an org chart: *who do I ask
+  /// about Lüftung* should be answerable without already knowing.
+  managerId String?
+  manager   Employee? @relation("DisciplineManager", fields: [managerId], references: [id], onDelete: SetNull)
+
+  /// **A token name, not a hex literal.** The drawings, the Gantt, the
+  /// Kanban and the 3D scene all resolve it, so a Lüftung run is the same
+  /// colour everywhere — and a literal here would be the one colour in the
+  /// system that cannot answer to dark mode.
+  defaultColour String @default("disc-neutral")
+
+  /// The share of a typical fee this Gewerk carries, 0–1. What makes a new
+  /// project's budget breakdown a proposal rather than an empty form.
+  defaultBudgetShare Decimal? @db.Decimal(5, 4)
+  defaultHourlyRate  Decimal? @db.Decimal(12, 2)
+
+  order  Int     @default(0)
+  active Boolean @default(true)
+
+  projectDisciplines ProjectDiscipline[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([active, order])
+}
+
+// ---------------------------------------------------------------------
+// The commercial side, and the object
+// ---------------------------------------------------------------------
+
+enum CustomerType {
+  COMPANY
+  PUBLIC_BODY
+  PRIVATE
+}
+
+enum CustomerStatus {
+  LEAD
+  ACTIVE
+  DORMANT
+  ARCHIVED
+}
+
+/// Company or private client. The Wave 1 slice: enough to be a
+/// Bauherrschaft. The full CRM — contacts, activity history, offers — is
+/// Wave 3 module 18.
+model Customer {
+  id        String         @id @default(cuid())
+  number    String         @unique
+  name      String
+  legalName String?
+  /// `CHE-###.###.###` when present.
+  vatNumber String?
+  type      CustomerType   @default(COMPANY)
+  status    CustomerStatus @default(ACTIVE)
+
+  address String?
+  zip     String?
+  city    String?
+  country String  @default("CH")
+
+  phone   String?
+  email   String?
+  website String?
+  notes   String?
+
+  /// The account manager.
+  ownerId String?
+  owner   Employee? @relation("CustomerOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  buildings          Building[]
+  projects           Project[] @relation("ProjectCustomer")
+  projectsAsArchitect Project[] @relation("ProjectArchitect")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([status, name])
+}
+
+enum BuildingUsage {
+  WOHNBAU
+  BUERO
+  INDUSTRIE
+  GEWERBE
+  SCHULE
+  SPITAL
+  SPORT
+  KULTUR
+  LANDWIRTSCHAFT
+  ANDERE
+}
+
+enum ConstructionType {
+  NEUBAU
+  UMBAU
+  SANIERUNG
+  ERWEITERUNG
+}
+
+enum EnergyStandard {
+  MINERGIE
+  MINERGIE_P
+  MINERGIE_A
+  GEAK_A
+  GEAK_B
+  GEAK_C
+  GEAK_D
+  GEAK_E
+  GEAK_F
+  GEAK_G
+  KEINER
+}
+
+/// The physical object, and the thing the firm's work is actually about.
+///
+/// **It is its own entity, not an address field on the project**, and the
+/// reason is the second commission: a building outlives any one project, and
+/// the refurbishment ten years after the Neubau should inherit its areas,
+/// its EGID and its systems. That inheritance is most of the value of having
+/// this table at all.
+///
+/// Wave 1 slice: the core identity and the SIA 416 figures. Floors,
+/// BuildingSystems, Rooms and RoomLoads are Wave 2 module 6.
+model Building {
+  id     String @id @default(cuid())
+  number String @unique
+  name   String
+
+  /// The Bauherrschaft. Required — a building with no owner is a landmark.
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  address String?
+  zip     String?
+  city    String?
+  country String  @default("CH")
+
+  parcelNumber String?
+  /// The federal building identifier, eight digits.
+  egid         String?
+  /// LV95 E/N.
+  coordinates  Json?
+
+  usage            BuildingUsage?
+  constructionType ConstructionType?
+  energyStandard   EnergyStandard?
+
+  yearBuilt             Int?
+  yearRenovated         Int?
+  floorCount            Int?
+  undergroundFloorCount Int?
+
+  /// SIA 416: Energiebezugsfläche, Geschossfläche, Gebäudevolumen.
+  heatedArea Decimal? @db.Decimal(12, 2)
+  grossArea  Decimal? @db.Decimal(12, 2)
+  volume     Decimal? @db.Decimal(12, 2)
+
+  officeId String?
+  office   Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
+
+  projects Project[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([customerId])
+  @@index([city, name])
+}
+
+// ---------------------------------------------------------------------
+// The project
+// ---------------------------------------------------------------------
+
+/// `PLANNED → ACTIVE → (ON_HOLD ↔ ACTIVE) → COMPLETED → ARCHIVED`, with
+/// `CANCELLED` reachable from the three live states. The transitions are
+/// enforced in `projects.rules.ts`, not here: Postgres can reject a typo but
+/// not a sequence.
+enum ProjectStatus {
+  PLANNED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+  CANCELLED
+}
+
+/// Derived, never typed — see `Project.health`.
+enum ProjectHealth {
+  GREEN
+  AMBER
+  RED
+}
+
+/// The centre of the system.
+model Project {
+  id     String @id @default(cuid())
+  /// `P-2026-014`. Allocated on create from the year and a per-year counter.
+  number String @unique
+  name   String
+
+  status   ProjectStatus @default(PLANNED)
+  priority Priority      @default(MEDIUM)
+
+  /// **Derived and denormalised, for list filtering only.** The truth is the
+  /// one `ProjectPhase` row that is `ACTIVE` (Wave 1 module 5). Kept here so
+  /// "all projects in Ausführung" is an indexed scan rather than a join, and
+  /// recomputed whenever a phase changes — never typed by a user.
+  currentPhase SiaPhase?
+
+  /// **Derived, stored for sorting.** Budget burn against progress against
+  /// deadline proximity — `deriveHealth` in `projects.rules.ts` is the only
+  /// writer. A stored number that should have been a computed one goes
+  /// stale, which is the same discipline as the site's `{token}`
+  /// placeholders, so both this and `progressPercent` are recomputed on
+  /// write *and* reconciled nightly, and a test asserts the two agree.
+  health ProjectHealth @default(GREEN)
+  /// 0–100, derived from milestone completion.
+  progressPercent Int @default(0)
+
+  /// Required. An engineering project without a Bauherrschaft is not a
+  /// project — no `onDelete`, so the database refuses to remove a customer
+  /// that still has one.
+  customerId String
+  customer   Customer @relation("ProjectCustomer", fields: [customerId], references: [id])
+
+  /// The architect is another company, hence a second link to `Customer`
+  /// rather than a field. `SetNull` because a project survives the practice
+  /// that designed it.
+  architectId String?
+  architect   Customer? @relation("ProjectArchitect", fields: [architectId], references: [id], onDelete: SetNull)
+
+  buildingId String?
+  building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+
+  /// The responsible engineer. Required *as data* — `ACTIVE` is refused
+  /// without one — but `SetNull` at the database, because a manager leaving
+  /// must not cascade away the project. The two rules are not in conflict:
+  /// one is a lifecycle rule, the other is a referential one.
+  managerId String?
+  manager   Employee? @relation("ProjectManager", fields: [managerId], references: [id], onDelete: SetNull)
+
+  officeId String?
+  office   Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
+
+  startDate       DateTime?
+  plannedEndDate  DateTime?
+  actualEndDate   DateTime?
+
+  contractValue Decimal? @db.Decimal(12, 2)
+  currency      String   @default("CHF")
+  budgetHours   Int?
+
+  description String?
+  notes       String?
+
+  members     ProjectMember[]
+  disciplines ProjectDiscipline[]
+  milestones  Milestone[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  archivedAt  DateTime?
+  createdById String?
+  updatedById String?
+
+  /// The list contract's default sort and its three commonest filters.
+  @@index([status, updatedAt])
+  @@index([customerId])
+  @@index([managerId])
+  @@index([health, plannedEndDate])
+}
+
+enum ProjectMemberRole {
+  MANAGER
+  ENGINEER
+  DRAFTSMAN
+  CONSULTANT
+  APPRENTICE
+}
+
+/// Who is on the project, in what role, for what period.
+///
+/// The composite unique includes `from`, not just the pair: the same
+/// engineer legitimately rejoins a project after a year on something else,
+/// and a unique on `(projectId, employeeId)` would force that second stint
+/// to overwrite the first and lose the history.
+model ProjectMember {
+  id         String  @id @default(cuid())
+  projectId  String
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  role              ProjectMemberRole @default(ENGINEER)
+  /// The share of this person's Pensum planned on this project, 1–100.
+  allocationPercent Int               @default(100)
+  from              DateTime
+  to                DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([projectId, employeeId, from])
+  @@index([employeeId])
+}
+
+enum ProjectDisciplineStatus {
+  PLANNED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  NOT_IN_SCOPE
+}
+
+/// The scope of one Gewerk on one project.
+///
+/// This is the table that lets the system answer what an engineering office
+/// actually asks: *what is the Lüftung budget on Guglera and who owns it*,
+/// *how many Sanitär hours are open across all projects*, *which projects
+/// have no Elektro lead*. The enum the first draft used answers none of
+/// them.
+model ProjectDiscipline {
+  id           String  @id @default(cuid())
+  projectId    String
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  disciplineId String
+  discipline   Discipline @relation(fields: [disciplineId], references: [id])
+
+  leadEngineerId String?
+  leadEngineer   Employee? @relation("ProjectDisciplineLead", fields: [leadEngineerId], references: [id], onDelete: SetNull)
+
+  status ProjectDisciplineStatus @default(PLANNED)
+
+  /// Percent of the project fee, 0–100. The sum across a project may exceed
+  /// 100 only with `feeShareOverride` — subcontracted scope legitimately
+  /// does, and refusing it outright would make the honest case impossible.
+  feeShare         Decimal? @db.Decimal(5, 2)
+  feeShareOverride Boolean  @default(false)
+
+  budgetHours Int?
+  budgetCost  Decimal? @db.Decimal(12, 2)
+  /// Overrides `Discipline.defaultHourlyRate` for this project.
+  hourlyRate  Decimal? @db.Decimal(12, 2)
+  scopeNote   String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([projectId, disciplineId])
+  @@index([disciplineId, status])
+}
+
+enum MilestoneStatus {
+  OPEN
+  AT_RISK
+  MET
+  MISSED
+  WAIVED
+}
+
+/// A dated commitment on a project. `progressPercent` is computed from these.
+model Milestone {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name    String
+  dueDate DateTime
+  metAt   DateTime?
+  status  MilestoneStatus @default(OPEN)
+  phase   SiaPhase?
+
+  /// What connects Planning to Finance: meeting such a milestone raises
+  /// `MilestoneReached`, and Finance may create an invoice draft from it.
+  isBillingTrigger Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([projectId, dueDate])
+  @@index([status, dueDate])
 }

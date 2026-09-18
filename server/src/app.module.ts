@@ -26,6 +26,12 @@ import { ApplicationsModule } from "./applications/applications.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { TasksModule } from "./tasks/tasks.module";
 
+import { ProjectsModule } from "./projects/projects.module";
+import { CustomersModule } from "./customers/customers.module";
+import { BuildingsModule } from "./buildings/buildings.module";
+import { EmployeesModule } from "./employees/employees.module";
+import { DisciplinesModule } from "./disciplines/disciplines.module";
+
 /**
  * The application root.
  *
@@ -96,8 +102,13 @@ import { TasksModule } from "./tasks/tasks.module";
      */
     ApplicationsModule,
     AuditModule,
+    BuildingsModule,
     ContentModule,
+    CustomersModule,
     DashboardModule,
+    DisciplinesModule,
+    EmployeesModule,
+    ProjectsModule,
     RbacModule,
     SettingsRoutesModule,
     TasksModule,

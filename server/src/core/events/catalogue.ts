@@ -85,9 +85,28 @@ export type DomainEvents = {
 
   /* ---- Projects (Wave 1) ------------------------------------------ */
   ProjectCreated: { number: string; name: string; customerId: string };
+  /**
+   * The field write, deliberately separate from `ProjectStatusChanged`.
+   *
+   * The distinction this file opens with, made concrete: a status change is a
+   * *state transition* that other modules react to, and editing the notes is
+   * a field write that only the audit log cares about. Both are audited —
+   * `before`/`after` on the envelope carry the diff — but a workflow rule can
+   * trigger on the transition without also firing every time somebody fixes a
+   * typo in the description.
+   */
+  ProjectUpdated: { number: string; fields: string[] };
   ProjectStatusChanged: { number: string; from: string; to: string };
   ProjectArchived: { number: string };
+  ProjectDeleted: { number: string; name: string };
   ProjectMemberAdded: { projectId: string; employeeId: string; role: string };
+  ProjectMemberRemoved: { projectId: string; employeeId: string };
+  ProjectDisciplineScoped: { projectId: string; code: string; status: string };
+
+  /* ---- Milestones -------------------------------------------------- */
+  /** `isBillingTrigger` is what Finance listens for — `data-model.md` §3.10. */
+  MilestoneReached: { projectId: string; name: string; isBillingTrigger: boolean };
+  MilestoneMissed: { projectId: string; name: string; dueDate: string };
 
   /* ---- SIA phases -------------------------------------------------- */
   PhaseApproved: { projectId: string; phase: string; decidedBy: string };
@@ -172,9 +191,15 @@ export const DOMAIN_EVENT_NAMES = [
   "ApplicationStatusChanged",
   "ApplicationDeleted",
   "ProjectCreated",
+  "ProjectUpdated",
   "ProjectStatusChanged",
   "ProjectArchived",
+  "ProjectDeleted",
   "ProjectMemberAdded",
+  "ProjectMemberRemoved",
+  "ProjectDisciplineScoped",
+  "MilestoneReached",
+  "MilestoneMissed",
   "PhaseApproved",
   "PhaseSkipped",
   "DeliverableReleased",
