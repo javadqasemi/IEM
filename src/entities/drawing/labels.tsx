@@ -103,6 +103,48 @@ export function RevisionBadge({
   );
 }
 
+/**
+ * What is **out there**, which is a different fact from what has been drawn.
+ *
+ * Its own component rather than a `RevisionBadge` with another flag, because
+ * the empty case is a different sentence: no `currentRevision` means nobody has
+ * drawn the plan yet, while no `issuedRevision` means it has been drawn and
+ * **not sent** — one is work not started, the other is work not delivered, and
+ * "noch keine" for both would merge them.
+ *
+ * When the issued letter is behind the current one the badge says so in the
+ * same breath, because that pairing *is* the answer to "welche Pläne müssen neu
+ * ausgegeben werden" — a reader scanning the column should not have to compare
+ * it against the column two to the left.
+ */
+export function IssuedRevisionBadge({
+  issued,
+  current,
+}: {
+  issued: string | null;
+  current: string | null;
+}) {
+  if (!issued) {
+    return <span className="text-[12px] text-muted">nicht ausgegeben</span>;
+  }
+  // `energy` when it is the current one, matching `ISSUED` in the status tones
+  // above; `bronze` when it is behind, matching `WITHDRAWN` — both are "somebody
+  // has to do something", and neither is an error worth colouring red.
+  const behind = current !== null && current !== issued;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Badge tone={behind ? "bronze" : "energy"} className="font-mono">
+        Rev. {issued}
+      </Badge>
+      {behind ? (
+        <span className="text-[12px] text-muted" title={`Intern bereits Rev. ${current}`}>
+          veraltet
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 const REVISION_REASON_LABELS: Record<RevisionReason, string> = {
   ERSTAUSGABE: "Erstausgabe",
   KUNDENWUNSCH: "Kundenwunsch",

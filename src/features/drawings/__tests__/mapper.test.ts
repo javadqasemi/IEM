@@ -40,6 +40,7 @@ function drawingDto(over: Partial<DrawingDto> = {}): DrawingDto {
     phase: "P51",
     status: "RELEASED",
     currentRevision: "C",
+    issuedRevision: "B",
     version: 4,
     createdAt: "2026-08-01T08:00:00.000Z",
     updatedAt: null,
@@ -102,6 +103,23 @@ describe("toDrawing", () => {
   it("passes the current revision through rather than deriving it", () => {
     expect(toDrawing(drawingDto({ currentRevision: "AB" })).currentRevision).toBe("AB");
     expect(toDrawing(drawingDto({ currentRevision: null })).currentRevision).toBeNull();
+  });
+
+  /**
+   * The issued revision is the one figure on this row that **cannot** be
+   * derived here at all: a list row carries no transmittals, and deriving it
+   * from `revisions` on the detail would answer which revisions exist rather
+   * than which one was sent.
+   */
+  it("keeps the issued revision separate from the current one", () => {
+    const drawing = toDrawing(drawingDto({ currentRevision: "D", issuedRevision: "B" }));
+    expect(drawing.currentRevision).toBe("D");
+    expect(drawing.issuedRevision).toBe("B");
+  });
+
+  it("carries a plan that has never been issued as null, not as its current revision", () => {
+    const drawing = toDrawing(drawingDto({ currentRevision: "A", issuedRevision: null }));
+    expect(drawing.issuedRevision).toBeNull();
   });
 
   it("flattens the Gewerk's token name to `colour`", () => {

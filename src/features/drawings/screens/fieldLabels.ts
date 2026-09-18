@@ -21,4 +21,5 @@ export const FIELD_LABELS: Record<string, string> = {
   checkedById: "Geprüft von",
   approvedById: "Freigegeben von",
   currentRevision: "Revision",
+  issuedRevision: "Ausgegebene Revision",
 };

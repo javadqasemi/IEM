@@ -46,6 +46,7 @@ const API_ONLY = [
   /metrics\.spec\.ts/,
   /tasks\.spec\.ts/,
   /meetings\.spec\.ts/,
+  /drawings\.spec\.ts/,
 ];
 
 /**
@@ -69,7 +70,7 @@ const API_ONLY = [
  * width-dependent, and `screens.spec.ts` already photographs `/sitzungen` and
  * `/entscheide` at all three widths in both themes and runs axe over them.
  */
-const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/];
+const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/, /drawings-ui\.spec\.ts/];
 
 /** What the two narrower projects skip. */
 const RUN_ONCE = [...API_ONLY, ...SIGNS_IN_TWICE];

@@ -36,6 +36,7 @@ import { DrawingsRepository } from "./drawings.repository";
 import {
   formatTransmittalNumber,
   nextDrawingRevision,
+  nextIssuedRevision,
   nextTransmittalSequence,
   priorIssueWarnings,
   refuseDrawingNumber,
@@ -523,6 +524,20 @@ export class DrawingsService {
 
     const employeeId = await this.employeeId(user);
 
+    // What each plan's `issuedRevision` becomes. Grouped by drawing rather than
+    // mapped over `revisions`, because one Planversand may carry two revisions
+    // of the same plan and only the newer of them is "what is out there".
+    const issued = drawingIds.map((drawingId) => {
+      const mine = revisions.filter((r) => r.drawingId === drawingId);
+      return {
+        drawingId,
+        issuedRevision: nextIssuedRevision(
+          mine[0]?.drawing.issuedRevision ?? null,
+          mine.map((r) => r.revision),
+        ),
+      };
+    });
+
     const row = await this.repo.transaction(async (tx) => {
       const created = await this.repo.createTransmittal(
         toTransmittalCreateData(dto, number, employeeId, user.id),
@@ -541,7 +556,7 @@ export class DrawingsService {
         tx,
       );
 
-      await this.repo.markIssued(drawingIds, user.id, tx);
+      await this.repo.markIssued(issued, user.id, tx);
       return created;
     });
 

@@ -62,10 +62,13 @@ import type {
  * | open `string` | closed union | a `switch` with no case for a value the server already sends |
  * | `null` date | `null` | `new Date(null)` is 1 January 1970, silently |
  *
- * **`revision` and `currentRevision` are passed through, never derived.** `C`
- * is allocated by the server — skipping `I` and `O`, which is a rule this side
- * does not know — and a second derivation here is the one that goes wrong the
- * first time somebody enters a label by hand.
+ * **`revision`, `currentRevision` and `issuedRevision` are passed through,
+ * never derived.** `C` is allocated by the server — skipping `I` and `O`, which
+ * is a rule this side does not know — and a second derivation here is the one
+ * that goes wrong the first time somebody enters a label by hand.
+ * `issuedRevision` could not be derived here in any case: a list row carries no
+ * transmittals, and deriving it from `revisions` on the detail would answer a
+ * different question — which revisions exist, not which one was sent.
  */
 
 function toDate(iso: string): Date;
@@ -117,6 +120,7 @@ export function toDrawing(dto: DrawingDto): Drawing {
     phase: dto.phase === null ? null : narrow<SiaPhase>(dto.phase, SIA_PHASES, "P51", "SIA-Phase"),
     status: narrow<DrawingStatus>(dto.status, DRAWING_STATUSES, "WIP", "Planstatus"),
     currentRevision: dto.currentRevision,
+    issuedRevision: dto.issuedRevision,
     version: dto.version,
     createdAt: toDate(dto.createdAt),
     updatedAt: toDate(dto.updatedAt),

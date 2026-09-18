@@ -1321,6 +1321,31 @@ async function seedDrawings(
         },
       });
     }
+
+    /**
+     * What `markIssued` would have written, because this seed does not go
+     * through it.
+     *
+     * The service sets `issuedRevision` inside the Planversand transaction;
+     * seeding the `Transmittal` row directly bypasses that one writer, and a
+     * plan left at `status: ISSUED` with `issuedRevision: null` would be the
+     * exact inconsistency the column exists to make impossible — the register
+     * would read *"nicht ausgegeben"* beside the badge saying *"Ausgegeben"*.
+     *
+     * Deliberately **not** set in the drawing loop above beside
+     * `currentRevision`: there it would be a literal that happens to agree with
+     * the transmittal, and the first person to change which revision is sent
+     * would leave the two disagreeing with nothing to notice. Here it is
+     * derived from the send, which is what the running system does.
+     *
+     * Outside the `if (!existing)`, so re-seeding an older database repairs the
+     * column rather than skipping it.
+     */
+    await prisma.drawing.updateMany({
+      where: { projectId: guglera.id, number: "4723-HZG-EG-101" },
+      data: { issuedRevision: "C" },
+    });
+
     transmittals = 1;
   }
 

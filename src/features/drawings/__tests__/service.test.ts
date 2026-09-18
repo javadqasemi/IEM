@@ -47,6 +47,7 @@ function drawing(over: Partial<Drawing> = {}): Drawing {
     phase: "P51",
     status: "WIP",
     currentRevision: "A",
+    issuedRevision: null,
     version: 1,
     createdAt: null,
     updatedAt: null,

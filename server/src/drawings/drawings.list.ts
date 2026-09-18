@@ -27,7 +27,16 @@ import type { ListSpec } from "../core/list/list.spec-types";
  * shuffle a drawing register every time somebody fixed a title.
  */
 export const DRAWING_LIST: ListSpec = {
-  sortable: ["number", "title", "status", "type", "currentRevision", "updatedAt", "createdAt"],
+  sortable: [
+    "number",
+    "title",
+    "status",
+    "type",
+    "currentRevision",
+    "issuedRevision",
+    "updatedAt",
+    "createdAt",
+  ],
 
   filterable: {
     status: { kind: "enum", values: Object.values(DrawingStatus) },
@@ -55,6 +64,19 @@ export const DRAWING_LIST: ListSpec = {
     approvedById: { kind: "string" },
 
     currentRevision: { kind: "string" },
+
+    /**
+     * What is *out there*, as opposed to what the office is drawing.
+     *
+     * A `string` filter rather than an enum for the same reason
+     * `currentRevision` is one: a plan set may start at `C`, so the set of
+     * labels is not closed. Filtering it to a letter answers *"welche Pläne
+     * sind bei den Unternehmern auf Rev. B"*, and sorting on it beside
+     * `currentRevision` is how the register shows the plans whose two columns
+     * disagree — the ones that need reissuing.
+     */
+    issuedRevision: { kind: "string" },
+
     updatedAt: { kind: "date" },
     createdAt: { kind: "date" },
   },

@@ -9,6 +9,7 @@ import {
   hasAmbiguousLetter,
   isOlderRevision,
   nextDrawingRevision,
+  nextIssuedRevision,
   nextTransmittalSequence,
   priorIssueWarnings,
   refuseDrawingNumber,
@@ -459,6 +460,49 @@ describe("isOlderRevision", () => {
   it("treats anything unparseable as not older, suppressing rather than inventing", () => {
     expect(isOlderRevision("00", "A")).toBe(false);
     expect(isOlderRevision("A", "1")).toBe(false);
+  });
+});
+
+describe("nextIssuedRevision", () => {
+  it("is the sent revision when nothing was ever issued", () => {
+    expect(nextIssuedRevision(null, ["A"])).toBe("A");
+  });
+
+  it("advances when a newer revision goes out", () => {
+    expect(nextIssuedRevision("B", ["C"])).toBe("C");
+  });
+
+  it("does not move backwards when an older revision is re-issued", () => {
+    // The real case: somebody asks for the drawing they built from, or a
+    // recipient is added late. `C` is still the newest thing out there.
+    expect(nextIssuedRevision("C", ["A"])).toBe("C");
+  });
+
+  it("is unchanged when the same revision goes out again", () => {
+    expect(nextIssuedRevision("C", ["C"])).toBe("C");
+  });
+
+  it("takes the newest when one Planversand carries two revisions of a plan", () => {
+    expect(nextIssuedRevision(null, ["A", "C", "B"])).toBe("C");
+    expect(nextIssuedRevision("B", ["A", "D"])).toBe("D");
+  });
+
+  it("compares by value past Z, not as a string", () => {
+    // The whole reason this delegates to `isOlderRevision` rather than using
+    // `>`: "AA" < "B" as a string, so a naive comparison would leave a plan
+    // issued at AA reading as issued at B.
+    expect(nextIssuedRevision("Z", ["AA"])).toBe("AA");
+    expect(nextIssuedRevision("AA", ["B"])).toBe("AA");
+  });
+
+  it("stays null when nothing is sent", () => {
+    expect(nextIssuedRevision(null, [])).toBeNull();
+    expect(nextIssuedRevision("C", [])).toBe("C");
+  });
+
+  it("leaves an unparseable stored label alone rather than replacing it silently", () => {
+    // `isOlderRevision` treats it as not-older, so the stored value survives.
+    expect(nextIssuedRevision("00", ["A"])).toBe("00");
   });
 });
 

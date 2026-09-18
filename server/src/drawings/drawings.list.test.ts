@@ -77,6 +77,19 @@ describe("DRAWING_LIST", () => {
     expect(buildOrderBy(params, DRAWING_LIST)).toEqual({ currentRevision: "desc" });
   });
 
+  /**
+   * Both revisions are sortable and filterable, and that pair is the whole
+   * justification for storing `issuedRevision` rather than deriving it from the
+   * transmittals: a list cannot sort or filter on a figure it has to join for.
+   */
+  it("sorts and filters by the issued revision, not only the current one", () => {
+    const sorted = parseListQuery({ sort: "issuedRevision:desc" }, DRAWING_LIST);
+    expect(buildOrderBy(sorted, DRAWING_LIST)).toEqual({ issuedRevision: "desc" });
+    expect(() =>
+      parseListQuery({ "filter[issuedRevision]": "eq:B" }, DRAWING_LIST),
+    ).not.toThrow();
+  });
+
   it("refuses a sort field that is not listed", () => {
     expect(() => parseListQuery({ sort: "checksum:asc" }, DRAWING_LIST)).toThrow();
   });

@@ -108,6 +108,18 @@ export type Drawing = {
    * wrong when a revision is inserted.
    */
   currentRevision: string | null;
+  /**
+   * The newest revision that has actually been issued, `null` until the first
+   * Planversand.
+   *
+   * Beside `currentRevision` rather than instead of it, because the two answer
+   * different questions: that one is what the office is drawing, this one is
+   * what the Bauherr and the Unternehmer are holding. They differ exactly when
+   * a plan has been revised since it went out, which is the set of plans that
+   * need reissuing — so a register that shows only one of them cannot show that
+   * set at all.
+   */
+  issuedRevision: string | null;
   version: number;
   createdAt: Date | null;
   updatedAt: Date | null;

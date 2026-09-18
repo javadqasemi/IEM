@@ -368,6 +368,34 @@ export function isOlderRevision(a: string, b: string): boolean {
 }
 
 /**
+ * What `Drawing.issuedRevision` becomes when these revisions go out.
+ *
+ * **It never moves backwards**, and that is the rule rather than a defence.
+ * Re-issuing an older revision is a real act — somebody asks for the drawing
+ * they built from, or a recipient is added late to a send that already
+ * happened — but it does not make the older one *the* issued revision. The
+ * column answers "what is the newest thing out there", and the newest thing
+ * out there does not become older because a copy of it was posted again.
+ * The Transmittal keeps the full truth; this is the index into it.
+ *
+ * Takes the whole list rather than one label because one Planversand may carry
+ * two revisions of the same plan — `@@unique([transmittalId, drawingRevisionId])`
+ * constrains the pairing, not the drawing — and then the highest wins.
+ *
+ * `current` is `null` before the first send, which is the only case that
+ * returns something unparseable unchanged: an unreadable label stored by an
+ * older version of this code should not be replaced silently, and
+ * `isOlderRevision` already treats it as not-older.
+ */
+export function nextIssuedRevision(current: string | null, sending: readonly string[]): string | null {
+  let newest = current;
+  for (const revision of sending) {
+    if (newest === null || isOlderRevision(newest, revision)) newest = revision;
+  }
+  return newest;
+}
+
+/**
  * `PV-2026-0007`, allocated from the maximum already issued.
  *
  * From the maximum rather than from a count, for the reason project and decision

@@ -2057,6 +2057,26 @@ model Drawing {
   /// exactly one method, like `Project.progressPercent`.
   currentRevision String?
 
+  /// The newest revision that has actually **left the building**, `null` until
+  /// the first Planversand. Not a duplicate of `currentRevision` but the other
+  /// half of the question: that one is what the office is drawing, this one is
+  /// what the Bauherr and the Unternehmer are holding, and they are the same
+  /// letter only between a send and the next revision.
+  ///
+  /// Without it the row loses the fact entirely — a plan issued at `C` and then
+  /// revised reads `currentRevision: "D"`, `status: WIP`, and nothing says `C`
+  /// is on a building site. The fact survived only in the `Transmittal`, so
+  /// *"welche Revision ist draussen"* meant querying the sends and *"welche
+  /// Pläne müssen neu ausgegeben werden"* could not be a list query at all.
+  ///
+  /// Stored rather than derived because the register sorts and filters on it —
+  /// the same justification `Project.progressPercent` has and the one
+  /// `Task.isOverdue` failed. It needs no nightly reconciler, which is where it
+  /// parts company with `progressPercent`: that one drifts because two of its
+  /// inputs are the current date, whereas this one's inputs are append-only.
+  /// A Transmittal cannot be edited or deleted, so nothing can change behind it.
+  issuedRevision String?
+
   /// Gezeichnet / geprüft / freigegeben — three different people's authority in
   /// an engineering office, which is why they are three columns and four
   /// permissions rather than one `approvedById`.

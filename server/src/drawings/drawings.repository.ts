@@ -229,7 +229,11 @@ export class DrawingsRepository {
         releasedAt: true,
         supersededAt: true,
         drawingId: true,
-        drawing: { select: { id: true, number: true, status: true, projectId: true } },
+        // `issuedRevision` comes along because `markIssued` may only advance it,
+        // never move it backwards — deciding that needs the letter already there.
+        drawing: {
+          select: { id: true, number: true, status: true, projectId: true, issuedRevision: true },
+        },
       },
     });
   }
@@ -369,12 +373,41 @@ export class DrawingsRepository {
     });
   }
 
-  /** Moves every plan in a transmittal to `ISSUED`, in the same transaction. */
-  markIssued(drawingIds: readonly string[], userId: string | null, tx: PrismaTx = this.prisma) {
-    return tx.drawing.updateMany({
-      where: { id: { in: [...drawingIds] }, status: { not: DrawingStatus.WITHDRAWN } },
-      data: { status: DrawingStatus.ISSUED, updatedById: userId },
-    });
+  /**
+   * Moves every plan in a transmittal to `ISSUED` and records **which revision**
+   * went out, in the same transaction.
+   *
+   * One statement per plan rather than one `updateMany` for all of them, and
+   * that is forced rather than preferred: `issuedRevision` differs per drawing,
+   * and `updateMany` writes one `data` object to every matched row. Sending
+   * three plans at revisions `C`, `A` and `F` through a single `updateMany`
+   * would stamp all three with whichever letter the caller happened to put in
+   * the object — a wrong revision in a register whose whole purpose is to say
+   * what a contractor holds.
+   *
+   * The `WITHDRAWN` guard stays on each one, so a plan withdrawn between the
+   * rule check and the write is skipped exactly as before; `updateMany` is kept
+   * per row rather than `update` so a skipped plan is a count of zero instead of
+   * an exception that would roll the whole Planversand back.
+   */
+  async markIssued(
+    issued: readonly { drawingId: string; issuedRevision: string | null }[],
+    userId: string | null,
+    tx: PrismaTx = this.prisma,
+  ) {
+    let count = 0;
+    for (const plan of issued) {
+      const result = await tx.drawing.updateMany({
+        where: { id: plan.drawingId, status: { not: DrawingStatus.WITHDRAWN } },
+        data: {
+          status: DrawingStatus.ISSUED,
+          issuedRevision: plan.issuedRevision,
+          updatedById: userId,
+        },
+      });
+      count += result.count;
+    }
+    return { count };
   }
 
   acknowledge(recipientId: string, at: Date, tx: PrismaTx = this.prisma) {

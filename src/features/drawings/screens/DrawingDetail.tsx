@@ -5,6 +5,7 @@ import {
   DRAWING_STATUS_OPTIONS,
   DrawingStatusBadge,
   RevisionBadge,
+  IssuedRevisionBadge,
   drawingStatusLabel,
   drawingTypeLabel,
   formatLabel,
@@ -91,6 +92,18 @@ export function DrawingDetail({ drawingId }: { drawingId: string }) {
               {record.number}
             </Badge>
             <RevisionBadge revision={record.currentRevision} />
+            {/*
+              Only once something has been issued. Before that, "nicht
+              ausgegeben" beside a plan still being drawn states the obvious and
+              costs a reader a glance; the register's column carries it for the
+              rows where the absence is the point.
+            */}
+            {record.issuedRevision ? (
+              <IssuedRevisionBadge
+                issued={record.issuedRevision}
+                current={record.currentRevision}
+              />
+            ) : null}
             <DrawingStatusBadge status={record.status} />
             {record.readOnly ? <Badge tone="bronze">Schreibgeschützt</Badge> : null}
             {can("drawing.update") && !record.readOnly ? <EditButton drawing={record} /> : null}

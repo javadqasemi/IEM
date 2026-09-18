@@ -266,7 +266,21 @@ function PlanRow({
   onToggle: (revisionId: string, on: boolean) => void;
 }) {
   const [revisionId, setRevisionId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  /**
+   * What the reader just clicked, before the round-trip that confirms it.
+   *
+   * The first tick has to fetch the plan's detail to learn its newest
+   * revision's id — a list row carries the revision *letter*, not the id. So
+   * without this the checkbox sat unchanged for the length of a request and the
+   * click read as having done nothing. Playwright reported it as **"clicking
+   * the checkbox did not change its state"**, which is exactly what a person
+   * sees.
+   *
+   * The optimistic flag is dropped as soon as `revisionId` is known, after
+   * which the shared `Set` is the single source of truth — so a failed fetch
+   * cannot leave a row ticked that is not in the selection.
+   */
+  const [pending, setPending] = useState<boolean | null>(null);
 
   // Only what a list row knows. The server re-checks everything.
   const refusal = refuseSelection(plan, {
@@ -275,7 +289,7 @@ function PlanRow({
   });
 
   const id = `plan-${plan.id}`;
-  const on = revisionId !== null && checked.has(revisionId);
+  const on = revisionId !== null ? checked.has(revisionId) : (pending ?? false);
 
   async function toggle(next: boolean) {
     if (refusal) return;
@@ -284,15 +298,20 @@ function PlanRow({
       // The list row has no revision id, so the first tick fetches the detail.
       // One request per plan somebody actually selects, rather than a join on
       // every row of the register.
-      setLoading(true);
+      setPending(next);
       try {
         const detail = await drawingRepository.get(plan.id);
         const newest = detail.revisions[0];
-        if (!newest) return;
+        if (!newest) {
+          setPending(null);
+          return;
+        }
         setRevisionId(newest.id);
         onToggle(newest.id, next);
-      } finally {
-        setLoading(false);
+      } catch {
+        // Back to unticked: a row that stayed checked after a failed lookup
+        // would be one the reader believes is in the Planversand.
+        setPending(null);
       }
       return;
     }
@@ -305,7 +324,10 @@ function PlanRow({
         id={id}
         type="checkbox"
         checked={on}
-        disabled={Boolean(refusal) || loading}
+        // Disabled only by a refusal, never by the in-flight lookup: greying a
+        // control out at the instant it is clicked is the other way to make a
+        // click read as having done nothing.
+        disabled={Boolean(refusal)}
         onChange={(event) => void toggle(event.target.checked)}
         className="h-4 w-4 shrink-0 rounded border-line-strong text-accent disabled:cursor-not-allowed"
       />

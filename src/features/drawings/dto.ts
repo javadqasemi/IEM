@@ -28,6 +28,7 @@ export type DrawingDto = {
   phase: string | null;
   status: string;
   currentRevision: string | null;
+  issuedRevision: string | null;
   version: number;
   createdAt: string | null;
   updatedAt: string | null;

@@ -57,7 +57,7 @@ permissions and the tests, not a folder with the same names in it.
 | F4 | `core/router` with `parent`, derived breadcrumbs, and route-published actions |
 | F5 | `useForm`, `EntityForm`, and an unsaved-changes guard that covers a hash change |
 | F6 | `rbac/resources.ts` → generated catalogue, with a two-way agreement test |
-| F7 | `core/events` — a named catalogue of 55 events, not a string bus |
+| F7 | `core/events` — a named catalogue, not a string bus. `DOMAIN_EVENT_NAMES` is the count |
 | F8 | Audit derived from those events, with a `correlationId` per request |
 | F9 | `Combobox`, `EntityPicker`, `DatePicker`, `DateRangePicker`, `Drawer`, `FilterBar` |
 | F10 | `core/jobs` — a `Job` table, a poller, retries with capped backoff |
@@ -65,7 +65,7 @@ permissions and the tests, not a folder with the same names in it.
 | F12 | A Nest module per feature; `app.module.ts` lists modules and nothing else |
 | W1·4 | **Projects** — ten tables, the five layers on both sides, ten events, row-level scope, fourteen tabs |
 | F13 | **Versionierung** — `EntityVersion`, the optimistic lock, and both revision schemes |
-| F14 | `core/metrics` — six operational figures per module, and a module that declares itself |
+| F14 | `core/metrics` — records in four states, latency with its percentiles, error rate, events, audit and jobs, per module, and a module that declares itself |
 | W2·1 | **Aufgaben** — four tables, ten events, a board, row-level *write* scope, and the first embedded project tab |
 | W2·2 | **Sitzungen und Entscheide** — six tables, twelve events, a protocol that closes on approval, and a decision register that outlives it |
 | W2·3 | **Pläne und Planversand** — five tables, eleven events, `I` and `O` skipped, and a reissue that names who holds the old revision |
@@ -85,7 +85,7 @@ paid for once rather than per module. A module declares a `ModuleMetricsSource` 
 a record count, a route prefix, and the events, jobs and audit resources it owns — and everything
 else (latency, p50/p95, error rate, job durations) is measured centrally by `MetricsInterceptor`
 and the event bus. `GET /metrics/modules` is the report, behind `system.health`.
-`architecture.test.ts` fails a feature folder that has no `*.metrics.ts`, with the eleven folders
+`architecture.test.ts` fails a feature folder that has no `*.metrics.ts`, with the ten folders
 that predate the rule on a shrink-only list.
 
 **The rule the firm set, and it holds for every layer:** one fully tested reference
@@ -131,6 +131,7 @@ time a shape has been *adopted* rather than invented — which is what stops it 
 | A rule a permission cannot express | **A draftsman may not check their own work.** The question is not what the caller holds but whose name is already in the other column, so `refuseFourEyes` is a rule and not a key. What is deliberately *not* enforced — releasing a plan you checked — is the other half: `docs/permissions.md` names only the first pair, and a rule stricter than the firm's practice is one the firm stops using the system over |
 | The catalogue settled a rule before the service asked it | `DrawingReleased`, `DrawingIssued` and `DrawingWithdrawn` were declared during **F7**, before the module existed, and the module was built to them. `DrawingWithdrawn.reason` is a non-nullable `string`, which turned out to mean a plan cannot be withdrawn without saying why — the payload decided it. A `RevisionReleased` invented here would have been a second name for one fact, and `drawings.metrics.test.ts` asserts against exactly that |
 | A warning that is not a refusal | Reissuing a revised plan is the **normal case**, so refusing it would make the correct action impossible. But whoever holds revision B while C goes out is the one who builds the wrong thing, so `priorIssueWarnings` names them, the warnings come back *beside* the created transmittal, and the dialog becomes a report rather than closing. A toast would put them where nobody reads them |
+| A stored figure that needs no reconciler | `issuedRevision` beside `currentRevision` — what is *out there* against what the office is drawing. Stored because the register sorts and filters on the pair, which is the `progressPercent` test and the one `isOverdue` failed; **not** reconciled nightly, which is where it parts company with `progressPercent`: that one drifts because two of its inputs are the current date, whereas a Transmittal can be neither edited nor deleted, so this column's inputs are append-only. One writer, `markIssued`, inside the Planversand transaction — and one `updateMany` per plan rather than one for all of them, because the letter differs per drawing and a single `data` object would stamp the same wrong revision on every row. It never moves backwards: re-issuing an older revision is a real act that does not make it the newest thing out there |
 
 ## Commands
 
@@ -313,7 +314,7 @@ whether the live document and the next one would differ.
 `src/content/schema.ts` is shared ground: the site and the server depend on the same shapes.
 
 **On the server, a change to a record is announced, not logged.** `EventBus.publish` from
-`core/events` raises one of the 45 named events in `core/events/catalogue.ts`; `AuditListener`
+`core/events` raises one of the named events in `core/events/catalogue.ts`; `AuditListener`
 turns it into the audit row, and notifications, reporting and the workflow engine will read the
 same event without the module knowing they exist. Events are queued on the request context and
 flushed when the request succeeds, so a listener never sees an uncommitted row and a failed request
@@ -429,6 +430,15 @@ decides. Re-tone the component or add a `tone` prop instead of fighting it from 
 element lands at its *static position*, and inside a `<button>` that is affected by the user
 agent's `text-align: center` (Tailwind preflight does not reset it). This is what misplaced the
 `Toggle` knob.
+
+**PowerShell's backtick is its escape character, and it eats commit messages.** A message
+containing `` `refuseProtocolEdit` `` arrives as `efuseProtocolEdit`, and `` `tasks.rules.ts` `` as a
+literal tab followed by `asks.rules.ts` — `` `r `` is a carriage return and `` `t `` is a tab. Commit
+`55abde5` is damaged in history this way and cannot be read as written. Backticks are unavoidable
+here, because the messages in this repository name files and functions. **Write the message to a
+file and use `git commit -F <file>`**, which passes no text through the shell at all; a
+single-quoted here-string (`@'…'@`) also works but is one stray `@"` away from the same bug. Afterwards
+`git log -1 --format=%B` is worth a glance — a tab in the output is the tell.
 
 **`tsc` has `noEmit: true` for a reason.** Without it TypeScript writes a `.js` beside every source
 file, Vite resolves `.js` before `.tsx`, and the dev server serves stale output. If edits appear to
@@ -731,12 +741,14 @@ string, and adding a module would mean editing the table as well as `screens/tab
 
 Documented in the audit performed on this repo, still open:
 
-- 12 permissions in the catalogue are enforced on no route. **They are now a list rather than a
-  paragraph**: `KNOWN_UNENFORCED` in `server/src/rbac/permissions.agreement.test.ts`, one line each
-  with what it is waiting for. A thirteenth fails the build, and so does an entry that has started
+- **14 permissions in the catalogue are enforced on no route**, and they are a list rather than a
+  paragraph: `KNOWN_UNENFORCED` in `server/src/rbac/permissions.agreement.test.ts`, one line each
+  with what it is waiting for. A new one fails the build, and so does an entry that has started
   being enforced and was left on the list. (The audit said twelve; the test found a thirteenth on
   its first run and it was a false positive — `settings.secrets` is checked inside the handler
-  rather than by a decorator, which is the documented `◐` pattern.)
+  rather than by a decorator, which is the documented `◐` pattern. `job.read`, `job.retry` and
+  `job.cancel` were added with `core/jobs` and have no routes yet.) **The prose in that file still
+  says "a thirteenth entry fails the build" and is one behind** — the list is what counts.
 - `ContentEntry.scheduledAt` is read and cleared by the publish job but set by nothing — no
   endpoint, no UI. Scheduled publishing is half built.
 - The `Notification` and `Redirect` Prisma models have tables and no implementation at all.
@@ -758,7 +770,7 @@ Opened by Wave 2 module 1, and each is a deliberate stop rather than an oversigh
 - **`Comment` is polymorphic and only Tasks writes it.** The table takes `entity`/`entityId`, so
   Meetings and Drawings call it through their own repositories when they arrive. Editing a comment
   is not implemented — `editedAt` is a column nothing sets.
-- **Eleven feature folders report no metrics.** `WITHOUT_METRICS` in
+- **Ten feature folders report no metrics.** `WITHOUT_METRICS` in
   `server/src/architecture.test.ts`, one line each with what it is waiting for, and the list may
   only shrink.
 

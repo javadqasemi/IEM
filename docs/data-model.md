@@ -723,10 +723,26 @@ date, and which revision someone received is a liability question.
 | `format` | enum | `A0` `A1` `A2` `A3` `A4` `SONDER` |
 | `phase` | SiaPhase? | which phase it belongs to |
 | `status` | enum | see below |
-| `currentRevision` | String | `—`, `A`, `B`, … or `00`, `01` |
+| `currentRevision` | String | `—`, `A`, `B`, … or `00`, `01` — what the office is drawing |
+| `issuedRevision` | String? | the newest revision actually sent; `null` until the first Planversand |
 | `drawnById`, `checkedById?`, `approvedById?` | → Employee | gezeichnet / geprüft / freigegeben |
 
 Composite unique on `(projectId, number)`.
+
+**The two revisions are two facts, not a value and a copy of it.** `currentRevision`
+is what the office is drawing; `issuedRevision` is what the Bauherr and the
+Unternehmer are holding. They agree between a Planversand and the next revision,
+and the plans where they disagree are exactly the plans that need reissuing —
+so the register sorts and filters on both, and that pair is the only reason
+`issuedRevision` is stored rather than joined for.
+
+It is written in one place, `markIssued`, inside the Planversand transaction,
+and **never moves backwards**: re-issuing an older revision is a real act, but
+it does not make that revision the newest thing out there. It needs no nightly
+reconciler, which is where it parts company with `Project.progressPercent` —
+that one drifts because two of its inputs are the current date, whereas a
+Transmittal can be neither edited nor deleted, so nothing can change behind
+this column.
 
 **DrawingRoom** — `drawingId` `roomId`. A plan covers many rooms and a room
 appears on many plans, so the link is a join and not a column. It is populated

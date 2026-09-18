@@ -6,6 +6,7 @@ import {
   DRAWING_TYPE_OPTIONS,
   DrawingStatusBadge,
   RevisionBadge,
+  IssuedRevisionBadge,
   drawingTypeLabel,
   formatLabel,
   type Drawing,
@@ -114,6 +115,17 @@ export function DrawingList() {
       className: "w-32",
       sortField: "currentRevision",
       render: (r) => <RevisionBadge revision={r.currentRevision} />,
+    },
+    {
+      // Beside the internal revision rather than instead of it: the pair is the
+      // information. Two columns showing the same letter means the plan set on
+      // site matches the office; two showing different letters is the list of
+      // plans somebody has to reissue, and that list has no other home.
+      key: "issued",
+      header: "Ausgegeben",
+      className: "w-40",
+      sortField: "issuedRevision",
+      render: (r) => <IssuedRevisionBadge issued={r.issuedRevision} current={r.currentRevision} />,
     },
     {
       key: "status",

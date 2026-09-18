@@ -39,6 +39,7 @@ export {
 export {
   DrawingStatusBadge,
   RevisionBadge,
+  IssuedRevisionBadge,
   PurposeBadge,
   AcknowledgementBadge,
   drawingTypeLabel,
