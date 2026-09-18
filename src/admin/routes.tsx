@@ -1,5 +1,6 @@
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { ApplicationsRoute } from "@/features/applications";
+import { ProjectDetailRoute, ProjectsRoute } from "@/features/projects";
 import { match } from "@/core/router";
 
 /**
@@ -159,6 +160,47 @@ export const ROUTES: Route[] = [
     component: ApplicationsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
     label: "Bewerbungen",
   },
+  /**
+   * The project view, and the reason it needs two patterns plus a bare one.
+   *
+   * The tab is in the URL — `/projekte/:id/gewerke` is a link somebody sends a
+   * colleague — so the three-segment form has to be tried before the two, and
+   * both before the list. `match()` is exact-length, so this is reading order
+   * rather than correctness; the order still matters to whoever adds the next
+   * one.
+   *
+   * Both detail patterns point at the same component and the screen reads the
+   * trailing segment itself. A route per tab would be fourteen entries that
+   * differ in one string, and adding a module would mean editing this table as
+   * well as the tab list — two places to forget.
+   */
+  {
+    pattern: "/projekte/:id/:tab",
+    permissions: ["project.read"],
+    component: ProjectDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    props: ({ id }) => ({ projectId: id }),
+    label: "Projekt",
+    parent: "/projekte",
+  },
+  {
+    pattern: "/projekte/:id",
+    permissions: ["project.read"],
+    component: ProjectDetailRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    props: ({ id }) => ({ projectId: id }),
+    label: "Projekt",
+    parent: "/projekte",
+  },
+  {
+    pattern: "/projekte",
+    permissions: ["project.read"],
+    // Like `/bewerbungen`: the component comes from the feature's own `lazy()`
+    // boundary rather than from `page()`, because the shell statically imports
+    // the same `index.ts` for the rail's badge. See the note in
+    // `features/projects/index.ts`.
+    component: ProjectsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "Projekte",
+  },
+
   {
     pattern: "/benutzer",
     permissions: ["user.read"],

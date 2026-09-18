@@ -2,6 +2,7 @@ import { Suspense, useMemo } from "react";
 import { Button, EmptyState, Skeleton, Spinner } from "@/shared/ui/primitives";
 import { ErrorBoundary } from "@/shared/ui/feedback";
 import { useNewApplicationCount } from "@/features/applications";
+import { useActiveProjectCount } from "@/features/projects";
 import { api } from "./lib/api";
 import { useAuth } from "@/core/auth";
 import { RouteMetaProvider, buildTrail, useRoute, useScrollReset, type Crumb } from "@/core/router";
@@ -36,6 +37,9 @@ export function App() {
   // count comes through the feature's public surface rather than off the shared
   // `api` object. It shares a cache entry with the list screen's filter chips.
   const newApplications = useNewApplicationCount(Boolean(user));
+  // Live projects — `ACTIVE` plus `ON_HOLD`, not all of them. A badge that only
+  // ever grows stops being read.
+  const liveProjects = useActiveProjectCount(Boolean(user));
 
   /**
    * The content types the menu's Website groups are made of.
@@ -60,9 +64,10 @@ export function App() {
         badges: {
           reviews: reviews.data?.length,
           applications: newApplications,
+          projects: liveProjects,
         },
       }),
-    [types.data, reviews.data, newApplications, canAny],
+    [types.data, reviews.data, newApplications, liveProjects, canAny],
   );
 
   /**

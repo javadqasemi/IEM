@@ -517,21 +517,40 @@ Projekte  ›  4723 Guglera  ›  Budget
 ### 4.4.1 The project is the container, not the owner
 
 Set by the firm, and it resolves a tension the tab strip above would otherwise
-hide. A project's detail screen shows fourteen things, and seven of them belong
-to *other modules*:
+hide. A project's detail screen shows fourteen things, and **eight of them
+belong to *other modules*** — as built:
 
 ```
 /projekte/:id/…
-  übersicht  team  kunde  gebaeude  gewerke  phasen  termine  verlauf
-  ─────────────── the project module owns these ───────────────
-  aufgaben  sitzungen  dokumente  plaene  bim  finanzen  berichte
-  ─────────── embedded from the module that owns them ──────────
+  uebersicht  team  gewerke  termine  kunde  gebaeude
+  ───────────── the project module owns these six ─────────────
+  phasen  aufgaben  sitzungen  dokumente  plaene  bim  finanzen  aktivitaet
+  ────────── embedded from the module that owns them ──────────
 ```
+
+The split moved by two from the draft above it, and in the honest direction:
+`phasen` is Wave 1 module 5 and `aktivitaet` is the audit log filtered by
+project. Both looked like the project's own until it was time to write them, and
+neither is — a phase has a fee, deliverables and a client sign-off, and the
+activity feed is the audit module's data with a `resourceId` on it.
+
+The list is **data**, in `features/projects/screens/tabs.ts`, rather than a
+`switch` in the detail screen: replacing a placeholder with a real screen is
+then a one-line change, and the roadmap and the navigation cannot disagree about
+what is coming.
 
 **The distinction is ownership, not placement.** `features/projects` does not
 fetch tasks, does not know a task's statuses and does not import
 `features/tasks` — that would be the mesh `features/README.md` forbids. The tab
 renders a **widget** the owning feature exports, scoped by `projectId`:
+
+**Two of the six it owns are the clearest case of the rule**, and they are worth
+naming because they look like exceptions and are not. `kunde` and `gebaeude`
+show the project's *link* to those records — the Bauherrschaft's name and
+number, the object's SIA 416 figures — and then a `ModulePlaceholder` for the
+module that will own the rest. Neither record is the project's data: a customer
+exists before the project and outlives it, and a building outlives every project
+on it, which is the whole reason it is an entity and not an address field.
 
 ```
 widgets/project-tabs/TasksTab.tsx   →  imports features/tasks' public surface

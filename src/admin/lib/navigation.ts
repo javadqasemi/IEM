@@ -60,6 +60,14 @@ export const ICONS = {
   edit: "M11.8 3.2l3 3L7.3 13.7l-3.6.6.6-3.6zM10.3 4.7l3 3",
   star: "M9 3.2l1.8 3.7 4 .6-2.9 2.8.7 4L9 12.4l-3.6 1.9.7-4L3.2 7.5l4-.6z",
   clock: "M9 14.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11ZM9 6v3.2l2.2 1.3",
+  /**
+   * Projects: a building on a base line.
+   *
+   * Drawn on the same 18×18 grid and the same 1.4 stroke as the rest, because
+   * one icon from a different set is the one that looks wrong at 16px — and
+   * the rail is where every set mismatch is visible side by side.
+   */
+  projects: "M4 14.5V4.5h6v10M10 8h4v6.5M2.5 14.5h13M6 7h2M6 9.5h2M12 10.5h.8",
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -232,7 +240,11 @@ const GROUP_OF: Record<string, string> = {
  * they lead; "Medien" and "Bewerbungen" are stores you visit when you need
  * something from them, so they sit with the administrative rows.
  */
-function operationalSections(badges: { reviews?: number; applications?: number }): NavSection[] {
+function operationalSections(badges: {
+  reviews?: number;
+  applications?: number;
+  projects?: number;
+}): NavSection[] {
   return [
     {
       id: "overview",
@@ -241,6 +253,32 @@ function operationalSections(badges: { reviews?: number; applications?: number }
       zone: "work",
       to: "/",
       permissions: ["system.health", "content.read"],
+      items: [],
+    },
+    {
+      /**
+       * The first row of the operational platform, and it leads the zone for a
+       * reason: at IEM the project *is* the work. Tasks, meetings, drawings,
+       * time and invoices are all reached through one, which is what makes the
+       * project view a container rather than one module among nineteen.
+       *
+       * `exact: false` — the default — because `/projekte/:id/gewerke` should
+       * light this row. That is the opposite of "Website bearbeiten", which
+       * needs `exact` precisely because it is the parent of other
+       * destinations that have rails of their own.
+       *
+       * The badge counts live projects (`ACTIVE` + `ON_HOLD`), not all of
+       * them: a number that only ever grows stops being read. It shares a
+       * cache entry with the list screen's filter chips, so it costs no extra
+       * request.
+       */
+      id: "projects",
+      label: "Projekte",
+      icon: "projects",
+      zone: "work",
+      to: "/projekte",
+      permissions: ["project.read"],
+      badge: badges.projects,
       items: [],
     },
     {
@@ -366,7 +404,7 @@ export function buildNavigation({
   /** From `api.contentTypes()`. Pass an empty array before it resolves. */
   types: ContentTypeRow[];
   canAny: (permissions: string[]) => boolean;
-  badges?: { reviews?: number; applications?: number };
+  badges?: { reviews?: number; applications?: number; projects?: number };
 }): NavSection[] {
   // Sorted into rail order here rather than in the rail, so that everything
   // reading this list agrees: `flattenNavigation` feeds search in the same

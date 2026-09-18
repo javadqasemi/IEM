@@ -18,6 +18,62 @@ export function formatNumber(n: number): string {
   return n.toLocaleString("de-CH");
 }
 
+/**
+ * An amount, from the **string** the API sends.
+ *
+ * It takes a string and never a number, and that is the whole point: the
+ * server sends `"1450000.00"` precisely so that nothing between the column and
+ * this line does float arithmetic on Rappen. Parsing it here is safe because
+ * this is the last step before the pixels — the value is formatted and
+ * discarded, never added to anything.
+ *
+ * `1'450'000.00 CHF`, with the apostrophe separator the firm writes and the
+ * currency after the number, which is the Swiss convention.
+ */
+export function formatMoney(value: string | null | undefined, currency = "CHF"): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return value;
+  return `${amount.toLocaleString("de-CH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${currency}`;
+}
+
+/** `1'450'000` — the same amount without the Rappen, for a dense table cell. */
+export function formatMoneyShort(value: string | null | undefined, currency = "CHF"): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return value;
+  return `${Math.round(amount).toLocaleString("de-CH")} ${currency}`;
+}
+
+/**
+ * `<input type="date">` ⇄ `Date`, in **local** time, both ways.
+ *
+ * The pair exists because the obvious implementations are both wrong in the
+ * same direction. `new Date("2026-03-01")` parses as *UTC* midnight, and
+ * `.toISOString().slice(0, 10)` formats from UTC — so a date typed in Zürich
+ * round-trips back a day for most of the year, and the day it lands on is a
+ * contracted deadline. Constructing with `(y, m, d)` and reading with
+ * `getFullYear()` keeps both ends in the reader's own day.
+ *
+ * `""` is "no date" in a date input, and `null` is "no date" in the domain.
+ * Mapping one to the other here is what stops every form doing it slightly
+ * differently.
+ */
+export function parseDateInput(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+export function toDateInput(value: Date | null | undefined): string {
+  if (!value) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;

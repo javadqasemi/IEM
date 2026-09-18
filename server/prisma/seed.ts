@@ -411,14 +411,14 @@ async function seedDomain() {
     theme.
   */
   const disciplineSeed = [
-    { code: "HZG", name: "Heizung", colour: "disc-heizung", share: 0.22, manager: "MA-001" },
-    { code: "LFT", name: "Lüftung", colour: "disc-lueftung", share: 0.26, manager: "MA-001" },
-    { code: "KLT", name: "Klima und Kälte", colour: "disc-kaelte", share: 0.12, manager: "MA-002" },
-    { code: "SAN", name: "Sanitär", colour: "disc-sanitaer", share: 0.16, manager: "MA-003" },
-    { code: "ELT", name: "Elektro", colour: "disc-elektro", share: 0.14, manager: "MA-004" },
-    { code: "ENE", name: "Energie", colour: "disc-energie", share: 0.04, manager: null },
-    { code: "MSR", name: "MSRL", colour: "disc-neutral", share: 0.04, manager: null },
-    { code: "BIM", name: "BIM und Koordination", colour: "disc-neutral", share: 0.02, manager: "MA-005" },
+    { code: "HZG", name: "Heizung", colour: "disc-heat", share: 0.22, manager: "MA-001" },
+    { code: "LFT", name: "Lüftung", colour: "disc-air", share: 0.26, manager: "MA-001" },
+    { code: "KLT", name: "Klima und Kälte", colour: "disc-air", share: 0.12, manager: "MA-002" },
+    { code: "SAN", name: "Sanitär", colour: "disc-water", share: 0.16, manager: "MA-003" },
+    { code: "ELT", name: "Elektro", colour: "disc-power", share: 0.14, manager: "MA-004" },
+    { code: "ENE", name: "Energie", colour: "disc-energy", share: 0.04, manager: null },
+    { code: "MSR", name: "MSRL", colour: "disc-power", share: 0.04, manager: null },
+    { code: "BIM", name: "BIM und Koordination", colour: "disc-model", share: 0.02, manager: "MA-005" },
   ];
 
   const disciplines = await Promise.all(
@@ -584,6 +584,16 @@ async function seedDomain() {
         feeShare: discipline.defaultBudgetShare
           ? new Prisma.Decimal((Number(discipline.defaultBudgetShare) * 100).toFixed(2))
           : null,
+        /*
+          Set explicitly, although it is `false` by default.
+
+          An upsert's `update` half only writes the fields it names, so a field
+          the seed owns and omits keeps whatever it drifted to — which is how a
+          "Freigabe > 100%" badge survived a reseed that had just reset the
+          share it applied to. A seed that reconciles has to name every field
+          it is responsible for, including the ones whose value is the default.
+        */
+        feeShareOverride: false,
         budgetHours: Math.round((seed.budgetHours * Number(discipline.defaultBudgetShare ?? 0))),
         hourlyRate: discipline.defaultHourlyRate,
       };

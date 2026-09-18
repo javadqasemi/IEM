@@ -25,9 +25,16 @@ what may go in them, and `src/architecture.test.ts` enforces the four that matte
 | `docs/permissions.md` | The RBAC catalogue and the role × module × action matrix, including the row-level `◐` rules |
 | `docs/roadmap.md` | Build order, complexity, dependencies, database and API impact, and the definition of done per module |
 
-**None of the business modules is implemented, and the architecture says not to start one until the
-Foundation stages are done.** As of 18 September 2026, **the twelve Foundation stages are done** and
-Wave 1 — the Project module as the reference standard — is what comes next:
+As of 18 September 2026 the **twelve Foundation stages are done**, and so is
+**Wave 1 module 4 — Projects, the reference standard**. The four modules it needs as data
+(Customer, Building, Employee, Discipline) ship as **read-only slices**: the subset
+`docs/data-model.md` documents that a real project requires, no more, each in the folder its own
+module will grow into.
+
+**The rule the firm set is that no second business module starts until Projects meets all ten rows
+of the gate in `docs/roadmap.md` → Wave 1.** It does. The next module derives from this shape
+rather than inventing one — and *deriving* means the five layers, the list spec, the events, the
+permissions and the tests, not a folder with the same names in it.
 
 | Done | |
 | --- | --- |
@@ -42,12 +49,21 @@ Wave 1 — the Project module as the reference standard — is what comes next:
 | F10 | `core/jobs` — a `Job` table, a poller, retries with capped backoff |
 | F11 | `core/list` — one paginate/filter/sort/search contract, plus saved views, columns, export, bulk |
 | F12 | A Nest module per feature; `app.module.ts` lists modules and nothing else |
+| W1·4 | **Projects** — ten tables, the five layers on both sides, ten events, row-level scope, fourteen tabs |
 
 **The rule the firm set, and it holds for every layer:** one fully tested reference
-implementation before the pattern is copied. `features/applications/` is that reference on the
-client and `ApplicationsService` is it for events — the other eight endpoint groups stay on the
-shared `api` object and the other services keep their hand-written audit calls until each is
-migrated deliberately.
+implementation before the pattern is copied. `features/applications/` was that reference for the
+five layers and `features/projects/` is it for a *business* module — the other eight endpoint
+groups stay on the shared `api` object and the other services keep their hand-written audit calls
+until each is migrated deliberately.
+
+**Two things to copy from Projects, and one not to.** Copy the layer split
+(`dto → repository → mapper → service → hooks → screens`, and on the server
+`rules → repository → mapper → service → controller`) and the *rules file*, which is pure and
+therefore the only part that can be tested exhaustively. Do **not** copy the four read-only
+master-data slices as a pattern: they are thin because their own modules are not built yet, and a
+module that ships without a `service.ts` because Projects' customers did is a module that has
+skipped its domain rules rather than found it had none.
 
 ## Commands
 
@@ -343,6 +359,36 @@ sends `application/octet-stream` + `nosniff` + `Content-Length` and **no** `Cont
 makes the mapper a seam rather than a decoration, and `src/architecture.test.ts` enforces it along
 with feature isolation, the `index.ts` boundary and the direction of every layer arrow.
 
+**The Gewerk colours are a closed set of six.** `disc-heat` `disc-air` `disc-water` `disc-power`
+`disc-energy` `disc-model`, declared in `admin.css` for both themes and checked by
+`theme.contrast.test.ts`. `Discipline.defaultColour` holds one of those **token names**, never a hex
+literal — a Lüftung run has to be the same colour on a plan, in a schedule and in the 3D scene, and
+a literal would be the one colour in the system that cannot answer to dark mode. A seventh name
+does not fail: `disciplineColour()` returns `currentColor` and the dot renders in the text colour,
+which is visible in both themes and wrong enough to notice. The seed once carried invented names
+(`disc-heizung`) and every dot went grey with nothing reporting it.
+
+**A derived figure is written by exactly one method, and reconciled nightly.** `progressPercent`
+and `health` are stored on `Project` so a list can sort by them, which means they can go stale.
+`ProjectsService.recompute` is the only writer, every route that can move them calls it, and
+`ProjectsReconciler` runs it at 02:00 over every live project — **because two of the inputs are the
+current date**, so a project nobody touches still changes. The seed deliberately does *not* set
+either: a seeded derived value would hide a reconciler that had stopped working.
+
+**A Nest DI mistake cannot be caught by a test in this toolchain.** Vitest transforms with esbuild,
+which does not emit `emitDecoratorMetadata` — so `design:paramtypes` is `undefined` and
+`Test.createTestingModule({imports:[AppModule]}).compile()` fails on every provider regardless. F12
+broke the application twice this way (`ApplicationsModule` missing `MediaModule`, `UsersModule`
+missing `AuthModule` and `MailModule`) with all 355 server tests passing. **`node dist/main.js` after
+`npm run server:build` is the check**, and `nest start --watch` is not: it buffers bootstrap output,
+so an `UnknownDependenciesException` looks like silence.
+
+**An audit row that reads the wrong shape does not fail — it lies.** `toAuditSnapshot` takes the
+manager as `managerId` *or* `manager.id`, because `findForRules` selects the column and the detail
+select carries the relation. The first version read only the column, so every `before` had the
+manager and every `after` did not, and every edit was recorded as removing them. Nothing threw. It
+was found by reading a real row, and the guard is now a test rather than a type.
+
 **A folder under `server/src/` is either infrastructure or a feature, never both.** `audit/` and
 `settings/` were both, and it was invisible from either half: each held a controller belonging to
 one feature *and* a service every other feature injects. So `ApplicationsService` imported
@@ -407,9 +453,29 @@ declares the permissions that open it and `App.tsx` shows a "no access" screen i
 one it cannot fill. That is still a courtesy — the server's 403 is what stops the data, and the rail
 hiding what a user cannot reach is a third courtesy on top.
 
+**Row-level visibility is a `where` fragment, never a filter over results.** `project.read` opens
+the module; `project.readAll` is the separate grant that widens it from "the projects I manage or
+sit on" to the firm's whole book. Expressing that as a second *permission* keeps the rule in the
+catalogue, where it is grantable and auditable, instead of inside a service where nobody can ask who
+has it. `projects.scope.ts` builds the predicate, the repository takes it as an argument and
+**defaults to the narrow case**, so a query that forgets it returns the caller's own projects rather
+than everyone's. Filtering after the fetch would give a page of eleven rows out of twenty-five, a
+total that counts rows nobody can open, and a leak in any query that forgot the post-filter.
+
+One asymmetry, because assuming otherwise is reasonable and wrong: the scope narrows **reads**.
+Writes are guarded by `project.update` and friends, which are firm-wide — somebody with
+`project.update` may edit any project they can *reach*, and reach is what the scope narrows.
+
 `permissions.agreement.test.ts` compares the catalogue against every guard in the tree, in both
 directions, and counts a `permissions.has(...)` check inside a handler as enforcement — those are
 the row- and field-level `◐` rules in `docs/permissions.md` §4, and `settings.secrets` is one.
+
+**The dashboard's URLs are German, and a project's tab is one of them.**
+`/projekte/:id/gewerke` — the tab lives in the route, not in `useState`, so it is a link somebody
+sends a colleague and a place a reload returns to. `routes.tsx` therefore carries *two* detail
+patterns pointing at one component (`/projekte/:id/:tab` before `/projekte/:id`), and the screen
+reads the trailing segment itself; a route per tab would be fourteen entries differing in one
+string, and adding a module would mean editing the table as well as `screens/tabs.ts`.
 
 ## Known gaps
 

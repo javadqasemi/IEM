@@ -879,7 +879,14 @@ model Discipline {
   /// Kanban and the 3D scene all resolve it, so a Lüftung run is the same
   /// colour everywhere — and a literal here would be the one colour in the
   /// system that cannot answer to dark mode.
-  defaultColour String @default("disc-neutral")
+  ///
+  /// It is also a **closed set of six**: `disc-heat` `disc-air` `disc-water`
+  /// `disc-power` `disc-energy` `disc-model`, declared in `admin.css` for both
+  /// themes and checked for contrast by `theme.contrast.test.ts`. The same
+  /// rule the public site's `src/content/schema.ts` already states, and for the
+  /// same reason — a seventh name would resolve to nothing and render as a
+  /// transparent dot rather than failing.
+  defaultColour String @default("disc-model")
 
   /// The share of a typical fee this Gewerk carries, 0–1. What makes a new
   /// project's budget breakdown a proposal rather than an empty form.

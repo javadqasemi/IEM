@@ -149,13 +149,17 @@ that survives: **`Project.customerId`, a building and a manager are required
 responsible person is not a project — so a minimal Customer and Building slice
 and the Employee table ship **inside** this wave, not as preceding CRM modules.
 
-| # | Module | Size | Depends on | Reuses | DB impact | API impact |
-| --- | --- | :-: | --- | --- | --- | --- |
-| 1 | **Customer + Building (minimal)** | S | F2–F12 | DataTable, EntityForm, EntityPicker | `Customer`, `Building` core fields only | `/customers`, `/buildings` CRUD + search |
-| 2 | **Employees** | M | F2–F12 | + PropertyList, FileList | `Employee`, `Department`, `Office`, `Skill`, `Certificate` | `/employees`, `/departments` |
-| 3 | **Disciplines** | S | Employees | DataTable | `Discipline` master data | `/disciplines` |
-| 4 | **Projects** | L | 1–3 | + DetailTabs, StatCard, ProgressRing, Timeline, Wizard | `Project`, `ProjectMember`, `ProjectDiscipline`, `Milestone` | `/projects` + sub-resources |
-| 5 | **SIA phases & deliverables** | M | Projects, Disciplines | + Timeline, Checklist | `ProjectPhase`, `Deliverable`, `PhaseApproval` | `/projects/:id/phases` |
+| # | Module | Size | DB impact | API impact | State |
+| --- | --- | :-: | --- | --- | --- |
+| 1 | **Customer + Building (minimal)** | S | `Customer`, `Building` core fields only | `/customers`, `/buildings` | **Read-only slice done.** Enough to create a real project against; CRUD and the full CRM are Wave 3 module 18 |
+| 2 | **Employees** | M | `Employee`, `Department`, `Office`, `Skill`, `Certificate` | `/employees`, `/departments` | **Read-only slice done.** Skills, certificates, the compensation route and the `LEFT` lifecycle are owed |
+| 3 | **Disciplines** | S | `Discipline` master data | `/disciplines` | **Done.** Eight rows, read-only; an editor is owed |
+| 4 | **Projects** | L | `Project`, `ProjectMember`, `ProjectDiscipline`, `Milestone` | `/projects` + sub-resources | **Done — the reference standard.** The gate below |
+| 5 | **SIA phases & deliverables** | M | `ProjectPhase`, `Deliverable`, `PhaseApproval` | `/projects/:id/phases` | Not started. Its tab exists and says so |
+
+The `Reuses` column is gone: every one of these now reuses the whole of
+`shared/ui`, and listing four components per row said less than the sentence
+does. What each module still owes is more useful and is in `State`.
 
 **Deviation 1 — Employees precedes Disciplines**, where the review has
 Disciplines first. `Discipline.managerId` is the Fachbereichsleiter and it was
@@ -182,29 +186,45 @@ list with a customer attached.
 #### Projects is the reference standard, and that is a gate
 
 Set by the firm. No second business module starts until Projects satisfies all
-ten, and the list is the definition of done in §5 made specific to it:
+ten, and the list is the definition of done in §5 made specific to it.
 
-| | |
+**All ten are met.** The gate is open, and the next module derives from this
+shape rather than inventing one:
+
+| | Met by |
 | --- | --- |
-| Entities, migration, seed | `Project`, `ProjectMember`, `ProjectDiscipline`, `Milestone` |
-| Permissions | declared in `resources.ts`, guarded, row-level rules tested |
-| Audit | derived from events, never a hand-written `audit.record` |
-| Events | every transition in the catalogue, raised after commit |
-| API | the full list contract, export, bulk |
-| Repository / mapper / service | all three, with the DTO boundary enforced |
-| UI | list, detail with tabs, create, edit — only shared components |
-| Tests | domain rules, mapper both ways, DTO whitelist, the list contract |
-| E2E | both themes, three widths, axe clean, the primary workflow |
+| Entities, migration, seed | `Project`, `ProjectMember`, `ProjectDiscipline`, `Milestone`, plus the four Wave 1 slices they require as data |
+| Permissions | `project.*` in `resources.ts`, guarded on every route, `readAll`/`archive` split, row-level rules tested in `projects.scope.test.ts` |
+| Audit | derived from events. The module calls `AuditService` nowhere |
+| Events | ten in the catalogue, queued until the request commits |
+| API | the full list contract, CSV export, bulk |
+| Repository / mapper / service | all three, both halves of the DTO boundary enforced by `architecture.test.ts` |
+| UI | list, detail with fourteen tabs, create, the four editors — only shared components |
+| Tests | 99 on the server, 58 on the client: rules, mapper both ways, DTO whitelist, list spec, scope |
+| E2E | `projects.spec.ts` plus `/projekte` in `SCREENS`; both themes, three widths, axe clean |
 | Documentation | the non-obvious decisions, in the code |
 
-**It is a container, not an owner** — architecture §4.4.1. Seven of its fourteen
-tabs are other modules' screens, embedded through `widgets/` and scoped by
-`projectId`. `features/projects` imports none of them, and the tabs whose module
-does not exist yet render `ModulePlaceholder` rather than nothing (§4.4.2).
+**It is a container, not an owner** — architecture §4.4.1. **Eight of its
+fourteen tabs are other modules**, scoped by `projectId` and embedded in this
+view; `features/projects` imports none of them, and each renders
+`ModulePlaceholder` rather than nothing (§4.4.2). The six it owns are the
+overview, the team, the Gewerke, the milestones, and the two records it points
+at.
 
 The honest consequence: **Projects is not one module's worth of work.** It is
-the shell, the eight tabs it owns, and a widget seam for the seven it does not.
-Sizing it `L` was right for the module and wrong for the milestone.
+the shell, the six tabs it owns, and a placeholder seam for the eight it does
+not. Sizing it `L` was right for the module and wrong for the milestone.
+
+Two things the build changed from what this document assumed, both worth
+recording rather than quietly correcting:
+
+- **The eight embedded tabs are declared as data** (`features/projects/screens/tabs.ts`),
+  not written out in the detail screen. Replacing one with a real screen is a
+  one-line change, and the roadmap and the navigation cannot disagree about what
+  is coming.
+- **`SIA-Phasen` is one of the placeholders.** Module 5 below is a separate
+  entry in this table and is not done; the tab that will hold it exists, says
+  so, and carries its wave.
 
 ### Wave 2 — the building, and the working day
 

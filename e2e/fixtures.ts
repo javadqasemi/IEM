@@ -350,6 +350,18 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
    * rendered perfectly. The eyebrow appears once and at every width.
    */
   { path: "/", name: "dashboard", heading: /Guten (Morgen|Tag|Abend)/i },
+  /**
+   * The description, not the word "Projekte".
+   *
+   * `.first()` on `/Projekte/i` would resolve to the **rail row**, which is
+   * visible on every screen — so the assertion would pass whatever the page
+   * rendered. The same trap the dashboard entry above documents, in a different
+   * shape: a heading is only a useful assertion when it appears once.
+   *
+   * The project *detail* is not here, because its path needs an id from the
+   * database. `projects.spec.ts` covers it and walks its tabs.
+   */
+  { path: "/projekte", name: "projects", heading: /Zustand und Fortschritt werden berechnet/i },
   { path: "/inhalte", name: "content-index", heading: /Website|Inhalte/i },
   { path: "/inhalte/projects", name: "content-list-projects", heading: /Referenz/i },
   { path: "/inhalte/team", name: "content-list-team", heading: /Team/i },

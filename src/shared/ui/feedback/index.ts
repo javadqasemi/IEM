@@ -7,3 +7,9 @@
  */
 export { ToastProvider, useToast, type Toast, type ToastKind } from "./toast";
 export { ErrorBoundary, RootErrorBoundary } from "./ErrorBoundary";
+/**
+ * `ModulePlaceholder` is feedback rather than a primitive: it tells the reader
+ * something about the *state of the application*, which is what this family is
+ * for. A primitive assumes nothing, and this one assumes there is a module.
+ */
+export { ModulePlaceholder, type ModuleStatus } from "./ModulePlaceholder";
