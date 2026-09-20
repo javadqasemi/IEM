@@ -10,12 +10,13 @@ import {
 /**
  * The 401 path, which is the whole of "why did the dashboard sign me out".
  *
- * Every case here is a failure that reached a user. Three of them are the same
- * mistake from different sides: **a refresh that could not be sent was treated
- * as a refresh that was refused**, so a server restart, a laptop changing
- * network and a 502 from a proxy each ended a session that was never in
- * question — and ended it expensively, because the access token is dropped and
- * cannot come back without a password.
+ * Every case here is a failure that reached a user. Four of them are the same
+ * mistake from different sides: **a refresh that said nothing about the session
+ * was treated as a refresh that refused it**, so a server restart, a laptop
+ * changing network, a 502 from a proxy and — found last, and the only one where
+ * the server did reply — a 429 from the rate limiter each ended a session that
+ * was never in question, and ended it expensively, because the access token is
+ * dropped and cannot come back without a password.
  *
  * What this file cannot see is the cross-tab lock: `navigator.locks` does not
  * exist under `environment: "node"`, so `withRefreshLock` takes its documented
@@ -52,6 +53,9 @@ function replyWith(...replies: (() => Response | Promise<Response>)[]) {
 const unauthorised = () => json({ statusCode: 401, code: "unauthorized", message: "Nicht angemeldet." }, 401);
 const renewed = () => json({ data: { accessToken: "token-2", expiresIn: 900 } });
 const ok = () => json({ data: { fine: true } });
+/** What `ThrottlerGuard` sends, before the controller has seen the cookie. */
+const throttled = () =>
+  json({ statusCode: 429, code: "too_many_requests", message: "ThrottlerException: Too Many Requests" }, 429);
 
 const refreshCalls = () => calls.filter((c) => c.url.includes("/auth/refresh")).length;
 
@@ -149,6 +153,40 @@ describe("a refresh that never got an answer", () => {
     replyWith(() => {
       throw new TypeError("Failed to fetch");
     });
+
+    await expect(refreshSession()).resolves.toBe("offline");
+  });
+
+  /**
+   * The fourth side of the same mistake, found after the other three were
+   * fixed — and the only one where the server *answered* and still said
+   * nothing about the session.
+   *
+   * `POST /auth/refresh` is throttled at sixty a minute per IP. `ThrottlerGuard`
+   * runs before the controller, so a rate-limited refresh never reaches
+   * `AuthService`: the cookie is not examined, nothing is revoked, no audit row
+   * is written, and the presented token stays live. A 429 is therefore "ask
+   * again in a moment", not "this session is finished" — but it is neither a
+   * 5xx nor a thrown `fetch`, so it fell through to `rejected` and signed the
+   * user out of a session that was still perfectly good.
+   *
+   * It is reachable rather than theoretical. The limit is **per IP** and this
+   * firm sits behind one office address, so the budget is shared by everybody
+   * in the building and every tab spends one when it boots. The e2e suite
+   * reaches it reliably: measured against the database it averages 16 refreshes
+   * a minute and peaks at 62, and the two minutes that crossed sixty are
+   * exactly the two runs that failed — once in `navigation.spec.ts`, once in
+   * `project-edit.spec.ts`, both as a screenshot of the login form.
+   */
+  it("does not end the session when the refresh is rate-limited", async () => {
+    replyWith(unauthorised, throttled);
+
+    await expect(request("/projects")).rejects.toBeInstanceOf(ApiError);
+    expect(handled).toBe(0);
+  });
+
+  it("reports a 429 as offline, because the throttler never read the cookie", async () => {
+    replyWith(throttled);
 
     await expect(refreshSession()).resolves.toBe("offline");
   });

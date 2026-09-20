@@ -177,8 +177,26 @@ export async function refreshSession(): Promise<RefreshOutcome> {
           restart into everybody being signed out — and the sign-out is the
           expensive half, because the access token in memory is then gone and
           the session cannot come back by itself.
+
+          **A 429 is the same kind of non-answer, and it was missed when the
+          5xx case was fixed.** `ThrottlerGuard` runs before the controller, so
+          a rate-limited refresh never reaches `AuthService` and the cookie is
+          never examined: nothing is revoked, no audit row is written, and the
+          presented token stays live. Reading that as "the server refused this
+          session" signs the user out of a session that is still perfectly
+          valid — the precise failure the three-valued outcome above exists to
+          prevent, arriving through the one status code it did not cover.
+
+          It is reachable in production rather than only under test. The limit
+          is 60/minute **per IP** and this firm sits behind one office address,
+          so the budget is shared by everybody in the building — and every tab
+          refreshes when it boots. A Monday morning is enough. It was found by
+          the e2e suite, where a burst of page loads tripped it and two
+          navigation tests failed as `Hauptnavigation not found` over a
+          screenshot of the login form, with the database showing the token
+          still unrevoked.
         */
-        if (res.status >= 500) return "offline";
+        if (res.status >= 500 || res.status === 429) return "offline";
         if (!res.ok) return "rejected";
         const body = (await res.json()) as { data: { accessToken: string } };
         accessToken = body.data.accessToken;

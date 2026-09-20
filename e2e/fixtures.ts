@@ -170,6 +170,80 @@ export async function spendLogin(): Promise<void> {
   }
 }
 
+/* ================================================================== */
+/* The refresh budget                                                  */
+/* ================================================================== */
+
+/**
+ * `/auth/refresh` allows **sixty a minute per IP**, and the suite lives just
+ * over the line.
+ *
+ * ---
+ *
+ * **This is the sign-in budget's lesson arriving through a second door, and
+ * it took two full runs to see because it moves.** Run one failed two
+ * `navigation.spec.ts` tests; run two passed navigation and failed two
+ * `project-edit.spec.ts` tests instead. Same shape both times — one test
+ * timing out waiting for a screen, the next failing instantly in the worker
+ * fixture, then recovery — which reads as an unrelated flake in whichever spec
+ * happened to be running.
+ *
+ * It is not unrelated. **Every `page.goto` reboots the SPA, and every boot
+ * refreshes**, because the access token lives in memory and does not survive a
+ * reload. The `page` fixture boots once per test on top of whatever the test
+ * itself navigates to, so the suite's refresh rate tracks how browser-heavy
+ * the current stretch is rather than anything a human would produce.
+ *
+ * Measured against the database rather than guessed: over 102 minutes the rate
+ * averaged **16.3/minute** and peaked at **62** — two minutes out of the
+ * hundred crossed 60, and those are exactly the two runs that failed. The
+ * suite is not far over the limit; it grazes it.
+ *
+ * **So the ceiling is low and the cost is near zero.** Pacing at 45 leaves the
+ * 98% of minutes that never approach it completely untouched and flattens the
+ * spikes that do. The alternative — raising the server's limit — is the repair
+ * CLAUDE.md forbids by name three times over, and it would trade a real
+ * control against a browser that reloads faster than any person.
+ *
+ * Fifteen of headroom below the server's sixty, because this budget sees only
+ * the refreshes the *browser context* makes. `auth.spec.ts` posts to
+ * `/auth/refresh` directly from API contexts — deliberately, including the ones
+ * meant to be refused — and those spend the same bucket unseen from here.
+ */
+const REFRESH_WINDOW_MS = 60_000;
+const REFRESH_CEILING = 45;
+
+/** Timestamps of the refreshes this worker's browser has made, newest last. */
+const refreshAttempts: number[] = [];
+
+/**
+ * Reserves one refresh, waiting if the window is already full.
+ *
+ * Deliberately the same shape as `spendLogin` rather than a shared generic:
+ * the two differ in what they are budgeting and in *why* the headroom is the
+ * size it is, and folding them together would put one comment in front of two
+ * different arguments.
+ *
+ * Unlike `spendLogin` this is not called by the specs. It is installed as a
+ * route handler on the shared browser context, so it paces every refresh the
+ * application decides to make — which is the point, because no spec knows when
+ * a boot is going to ask for one.
+ */
+async function spendRefresh(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    while (refreshAttempts.length && now - refreshAttempts[0] >= REFRESH_WINDOW_MS) {
+      refreshAttempts.shift();
+    }
+    if (refreshAttempts.length < REFRESH_CEILING) {
+      refreshAttempts.push(now);
+      return;
+    }
+    const waitMs = REFRESH_WINDOW_MS - (now - refreshAttempts[0]) + 250;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
 /**
  * One API sign-in per account, shared by every spec in the worker.
  *
@@ -302,6 +376,23 @@ export const test = base.extend<
   workerContext: [
     async ({ browser }, use) => {
       const context = await browser.newContext();
+
+      /*
+        Paced before anything in this context can boot.
+
+        Registered on the context rather than per page, because the thing
+        being budgeted is made by the *application* on every SPA boot and no
+        spec is in a position to reserve it first — which is what makes this
+        different from `spendLogin`, where the caller always knows.
+
+        `route.continue()` re-issues the request Playwright is holding, cookies
+        and all, so the only thing this changes is *when* it leaves.
+      */
+      await context.route("**/api/v1/auth/refresh", async (route) => {
+        await spendRefresh();
+        await route.continue();
+      });
+
       const page = await context.newPage();
 
       /*
