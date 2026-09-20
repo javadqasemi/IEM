@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ApiError } from "@/core/api";
 import type { FieldErrors } from "./types";
 
@@ -133,11 +133,28 @@ export function useForm<T extends object>({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // The clean state. A ref rather than state: changing it must not re-render,
-  // and it is only ever read during a comparison.
-  const baseline = useRef(canonical(initial));
+  /**
+   * The clean state — **state, not a ref**, and that distinction was a bug.
+   *
+   * A ref is the obvious choice: changing the baseline must not re-render, and
+   * it is only ever read during a comparison. But `dirty` is a `useMemo` over
+   * `[values]`, and a ref is invisible to a dependency array — so moving the
+   * baseline on a successful save did not recompute it. The memo went on
+   * returning `true` until the *next* keystroke.
+   *
+   * For a form in a dialog that closes on save, nothing shows: the component
+   * unmounts before anyone reads `dirty` again. For a form that **stays open**
+   * — a settings section, which is the first of those in this codebase — the
+   * save bar kept saying "Ungespeicherte Änderungen" over a record that had
+   * just been written, the unsaved-changes guard fired on the way out of a
+   * screen with nothing outstanding, and a re-seed gated on `!dirty` never
+   * ran. The comment on `submit` below already claimed this worked.
+   *
+   * As state it costs one extra render per save, which is the correct price.
+   */
+  const [baseline, setBaseline] = useState(() => canonical(initial));
 
-  const dirty = useMemo(() => canonical(values) !== baseline.current, [values]);
+  const dirty = useMemo(() => canonical(values) !== baseline, [values, baseline]);
 
   const set = useCallback(<K extends keyof T>(name: K, value: T[K]) => {
     setValues((previous) => ({ ...previous, [name]: value }));
@@ -152,7 +169,7 @@ export function useForm<T extends object>({
   const reset = useCallback(
     (next?: T) => {
       const seed = next ?? initial;
-      baseline.current = canonical(seed);
+      setBaseline(canonical(seed));
       setValues(seed);
       setErrors({});
       setError(null);
@@ -168,8 +185,11 @@ export function useForm<T extends object>({
     if (result.ok) {
       // The saved values are the new clean state. Without this a form stays
       // "dirty" after a successful save and the unsaved-changes guard fires on
-      // the way out of a screen that has nothing outstanding.
-      baseline.current = canonical(values);
+      // the way out of a screen that has nothing outstanding — which is what
+      // happened anyway while the baseline was a ref, because `dirty` is a
+      // memo and a ref is invisible to a dependency array. See the note on
+      // `baseline`.
+      setBaseline(canonical(values));
     }
     setSubmitting(false);
     return result.ok;

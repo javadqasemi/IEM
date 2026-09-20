@@ -506,18 +506,97 @@ function operationalSections(badges: {
         { id: "roles", to: "/rollen", label: "Rollen", permissions: ["role.read"] },
       ],
     },
+    /**
+     * Unternehmen — its own group, above System rather than inside it.
+     *
+     * "Wie heissen wir, wo sind wir, was steht im Handelsregister" and "wie
+     * kommt Post raus, wie lange gilt eine Sitzung" are two different
+     * questions asked by two different people, and they were one
+     * alphabetically-ordered list of cards before. The rail row leads to the
+     * company; the operational half stays under System, and both open the
+     * same workspace at a different section.
+     *
+     * Each entry stands on the permission the *server* checks for that
+     * section, not on `settings.read`: somebody who may read the organisation
+     * and not the settings store sees three rows here and none under System,
+     * which is the correct menu for them rather than a shorter version of
+     * somebody else's.
+     */
+    {
+      id: "company",
+      label: "Unternehmen",
+      icon: "company",
+      zone: "admin",
+      permissions: ["organisation.read", "office.read"],
+      items: [
+        {
+          id: "company-general",
+          to: "/einstellungen/unternehmen",
+          label: "Allgemein",
+          permissions: ["organisation.read"],
+        },
+        {
+          id: "company-legal",
+          to: "/einstellungen/rechtliches",
+          label: "Recht und Identität",
+          permissions: ["organisation.read"],
+        },
+        {
+          id: "company-offices",
+          to: "/einstellungen/standorte",
+          label: "Standorte",
+          permissions: ["office.read"],
+        },
+        {
+          id: "company-contact",
+          to: "/einstellungen/kontakt",
+          label: "Kontakt",
+          permissions: ["organisation.read"],
+        },
+        {
+          id: "company-website",
+          to: "/einstellungen/website",
+          label: "Website-Vorgaben",
+          permissions: ["organisation.read"],
+        },
+      ],
+    },
     {
       id: "system",
       label: "System",
       icon: "settings",
       zone: "admin",
-      permissions: ["settings.read", "audit.read"],
+      permissions: ["settings.read", "audit.read", "system.health"],
       items: [
         {
           id: "settings",
-          to: "/einstellungen",
-          label: "Einstellungen",
+          to: "/einstellungen/email",
+          label: "E-Mail",
           permissions: ["settings.read"],
+        },
+        {
+          id: "settings-applications",
+          to: "/einstellungen/bewerbungen",
+          label: "Bewerbungen",
+          permissions: ["settings.read"],
+        },
+        {
+          id: "settings-workflow",
+          to: "/einstellungen/freigabe",
+          label: "Freigabe",
+          permissions: ["settings.read"],
+        },
+        {
+          id: "settings-security",
+          to: "/einstellungen/sicherheit",
+          label: "Sicherheit",
+          permissions: ["settings.read"],
+        },
+        {
+          id: "settings-system",
+          to: "/einstellungen/system",
+          label: "System",
+          permissions: ["system.health"],
         },
         { id: "audit", to: "/audit", label: "Audit-Log", permissions: ["audit.read"] },
       ],

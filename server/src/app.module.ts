@@ -19,6 +19,8 @@ import { MediaModule } from "./media/media.module";
 
 import { SettingsModule } from "./core/settings/settings.module";
 import { SettingsRoutesModule } from "./settings/settings.controller.module";
+import { OrganisationModule } from "./core/organisation/organisation.module";
+import { OrganisationRoutesModule } from "./organisation/organisation.module";
 import { ContentModule } from "./content/content.module";
 import { UsersModule } from "./users/users.module";
 import { RbacModule } from "./rbac/rbac.module";
@@ -87,6 +89,10 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     // so it is documentation rather than a requirement — but the graph is what
     // the reader is trying to reconstruct, and this is the shape of it.
     SettingsModule,
+    // Beside `SettingsModule` and for the same reason: both are infrastructure
+    // that features read rather than features themselves, and `MailService`
+    // below injects each of them.
+    OrganisationModule,
     MailModule,
     AuthModule,
     MediaModule,
@@ -114,6 +120,7 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     EmployeesModule,
     MeetingsModule,
     DrawingsModule,
+    OrganisationRoutesModule,
     ProjectsModule,
     RbacModule,
     SchedulerModule,

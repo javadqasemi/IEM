@@ -76,12 +76,14 @@ model User {
   settingsChanged   Setting[]
   notifications     Notification[]
   listPreferences   ListPreference[]
+  organisationEdits Organisation[]
+  officeEdits       Office[]          @relation("OfficeUpdatedBy")
 
   /// The person behind the login, when there is one. Optional in both
   /// directions: an engineer exists before their account and after it is
   /// revoked, and a login may belong to nobody on the payroll — see the note
   /// on `Employee`.
-  employee          Employee?
+  employee Employee?
 
   @@index([status])
   @@index([deletedAt])
@@ -284,8 +286,8 @@ model ContentVersion {
   authorId  String?
   createdAt DateTime      @default(now())
 
-  entry  ContentEntry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
-  author User?           @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  entry   ContentEntry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  author  User?           @relation(fields: [authorId], references: [id], onDelete: SetNull)
   reviews ReviewRequest[]
 
   @@unique([entryId, version])
@@ -369,33 +371,33 @@ model MediaFolder {
 }
 
 model MediaAsset {
-  id           String    @id @default(cuid())
-  folderId     String?
-  filename     String
-  originalName String
-  mimeType     String
-  size         Int
-  width        Int?
-  height       Int?
+  id            String    @id @default(cuid())
+  folderId      String?
+  filename      String
+  originalName  String
+  mimeType      String
+  size          Int
+  width         Int?
+  height        Int?
   /// SHA-256 of the bytes. Lets an upload of an identical file be recognised
   /// instead of silently duplicating it.
-  checksum     String
+  checksum      String
   /// Alt text. Deliberately not optional in the UI for images — see the alt
   /// policy in docs/ARCHITECTURE.md; empty string is a valid, *deliberate*
   /// value meaning
   /// decorative, which is different from nobody having thought about it.
-  alt          String    @default("")
-  altDecorative Boolean  @default(false)
-  caption      String?
-  copyright    String?
-  tags         String[]  @default([])
+  alt           String    @default("")
+  altDecorative Boolean   @default(false)
+  caption       String?
+  copyright     String?
+  tags          String[]  @default([])
   /// Key in the storage adapter — a path on disk or an object key in S3.
-  storageKey   String
-  version      Int       @default(1)
-  uploadedById String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  storageKey    String
+  version       Int       @default(1)
+  uploadedById  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
 
   folder     MediaFolder?        @relation(fields: [folderId], references: [id], onDelete: SetNull)
   uploadedBy User?               @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
@@ -477,18 +479,18 @@ enum AuditOutcome {
 /// the user record is gone, and a foreign key that has been set to null tells
 /// you an action happened but not who did it.
 model AuditLog {
-  id         String       @id @default(cuid())
-  actorId    String?
-  actorEmail String?
-  action     String
-  resource   String
-  resourceId String?
-  before     Json?
-  after      Json?
-  ip         String?
-  userAgent  String?
-  outcome    AuditOutcome @default(SUCCESS)
-  message    String?
+  id            String       @id @default(cuid())
+  actorId       String?
+  actorEmail    String?
+  action        String
+  resource      String
+  resourceId    String?
+  before        Json?
+  after         Json?
+  ip            String?
+  userAgent     String?
+  outcome       AuditOutcome @default(SUCCESS)
+  message       String?
   /// Ties every row one request produced together.
   ///
   /// A publish writes eight rows — entries, versions, a snapshot — and without
@@ -500,7 +502,7 @@ model AuditLog {
   /// and backfilling a correlation that was never recorded would be inventing
   /// one.
   correlationId String?
-  createdAt  DateTime     @default(now())
+  createdAt     DateTime     @default(now())
 
   actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
@@ -604,16 +606,16 @@ model ListPreference {
 }
 
 model Redirect {
-  id          String   @id @default(cuid())
-  from        String   @unique
-  to          String
-  statusCode  Int      @default(301)
-  enabled     Boolean  @default(true)
-  hits        Int      @default(0)
-  lastHitAt   DateTime?
-  note        String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String    @id @default(cuid())
+  from       String    @unique
+  to         String
+  statusCode Int       @default(301)
+  enabled    Boolean   @default(true)
+  hits       Int       @default(0)
+  lastHitAt  DateTime?
+  note       String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@index([enabled])
 }
@@ -640,35 +642,35 @@ enum JobStatus {
 /// asked for it, and **visible** — "the export never arrived" has to have an
 /// answer that is not a log file.
 model Job {
-  id        String    @id @default(cuid())
+  id      String    @id @default(cuid())
   /// The handler's name, from the registry in `core/jobs/catalogue.ts`.
-  name      String
-  payload   Json      @default("{}")
-  status    JobStatus @default(QUEUED)
+  name    String
+  payload Json      @default("{}")
+  status  JobStatus @default(QUEUED)
 
   /// When it may first run. Later than now for a scheduled or retried job.
-  runAfter  DateTime  @default(now())
-  attempts  Int       @default(0)
-  maxAttempts Int     @default(3)
+  runAfter    DateTime @default(now())
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
 
-  startedAt   DateTime?
-  finishedAt  DateTime?
+  startedAt  DateTime?
+  finishedAt DateTime?
   /// Milliseconds, so a job that got slower is visible before it times out.
-  durationMs  Int?
-  error       String?
+  durationMs Int?
+  error      String?
   /// The handler's own return value, for a job whose result is the point.
-  result      Json?
+  result     Json?
 
   /// Inherited from the request that enqueued it, so the job's audit rows
   /// group with the click that caused them.
   correlationId String?
   /// Denormalised: the actor may be deleted before the job runs.
-  actorId    String?
-  actorEmail String?
+  actorId       String?
+  actorEmail    String?
 
   /// Which worker has it. Set with the claim, so a stuck job names its holder.
-  lockedBy  String?
-  lockedAt  DateTime?
+  lockedBy String?
+  lockedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -678,7 +680,6 @@ model Job {
   @@index([name, status])
   @@index([correlationId])
 }
-
 
 // =====================================================================
 // The operational domain — Wave 1
@@ -738,14 +739,150 @@ enum SiaPhase {
 /// may see it". Making it a tenant boundary later is a policy change, not a
 /// schema one, which is the reason it is a nullable link rather than a
 /// required scope on every query.
+enum OrganisationStatus {
+  ACTIVE
+  DORMANT
+  LIQUIDATION
+}
+
+/// The firm itself.
+///
+/// **Exactly one row, and its id is the literal `org`.** A singleton as a table
+/// rather than as a settings group, because the alternative is what this model
+/// replaced: nine key/value rows holding the company's name, legal name and
+/// e-mail as untyped JSON, eight of which nothing read. A column can be typed,
+/// indexed, validated and versioned; a JSON blob under a string key cannot.
+///
+/// The id is a constant rather than a cuid so that every read is
+/// `findUnique({ where: { id: "org" } })` and every write an `upsert` on the
+/// same — which makes the row self-healing. A `findFirst()` against a table that
+/// should have one row is a query that silently starts returning the wrong one
+/// the day a second appears.
+///
+/// **This is the source of truth for company identity.** `Office` below holds
+/// the addresses, and the published website document derives its `offices` from
+/// that table rather than from a parallel content type — see
+/// `snapshot.builder.ts`. Anything the firm *says about itself* as editorial
+/// copy stays in the CMS; anything it *is* lives here.
+model Organisation {
+  id String @id @default("org")
+
+  // ---- General -----------------------------------------------------
+  name             String             @default("IEM AG")
+  shortName        String             @default("IEM")
+  description      String?
+  foundedYear      Int?
+  organisationType String             @default("Aktiengesellschaft")
+  defaultLocale    String             @default("de-CH")
+  defaultTimezone  String             @default("Europe/Zurich")
+  defaultCurrency  String             @default("CHF")
+  status           OrganisationStatus @default(ACTIVE)
+
+  // ---- Legal identity ----------------------------------------------
+  /// Full registered name, where it differs from the trading name.
+  legalName                  String?
+  legalForm                  String?
+  /// Swiss business identification number, `CHE-123.456.789`.
+  uid                        String?
+  /// The same number with the ` MWST` suffix when the firm is VAT-registered.
+  vatId                      String?
+  commercialRegister         String?
+  registerOffice             String?
+  legalStreet                String?
+  legalZip                   String?
+  legalCity                  String?
+  legalCountry               String  @default("CH")
+  /// Free text: an invoice address is frequently a department and a PO box
+  /// rather than a second structured address, and forcing it into columns
+  /// produces empty ones.
+  invoiceAddress             String?
+  legalContactName           String?
+  legalContactEmail          String?
+  /// The DSG/GDPR contact. Separate from the legal contact on purpose — at this
+  /// size they are usually the same person, and the day they are not, the
+  /// distinction is the one that matters.
+  dataProtectionContactName  String?
+  dataProtectionContactEmail String?
+  copyright                  String?
+  legalNotice                String?
+
+  // ---- Contact -----------------------------------------------------
+  mainEmail        String?
+  mainPhone        String?
+  recruitmentEmail String?
+  supportEmail     String?
+  billingEmail     String?
+  website          String?
+
+  // ---- Website defaults --------------------------------------------
+  /// `{seite} — IEM AG`. Fallback only; the `seo` content type still owns the
+  /// published title, and this fills in where it is blank.
+  seoTitlePattern String?
+  seoDescription  String?
+  ogImageUrl      String?
+  faviconUrl      String?
+
+  /// The optimistic lock. Same mechanism as `Project.version`: the number goes
+  /// into the `WHERE` of an `updateMany`, which is one statement and therefore
+  /// actually a lock.
+  version Int @default(1)
+
+  updatedById String?
+  updatedBy   User?   @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A branch office.
+///
+/// Master data **and** website content, which is the whole point: `Employee`,
+/// `Project` and `Building` point at a row here, and the published document's
+/// `offices` array is built from the same rows. Before this they were two
+/// unrelated stores and they had already drifted — the seed said Thun was at
+/// Bierigutstrasse 6 while the live site said Uttigenstrasse 49.
+///
+/// `isPublic` is what lets the two coexist without a second table: a registered
+/// office that nobody should visit is a real row that simply does not reach the
+/// site.
 model Office {
-  id             String  @id @default(cuid())
-  name           String
-  address        String?
-  zip            String?
-  city           String?
-  phone          String?
+  id   String @id @default(cuid())
+  name String
+  /// Printed opposite the city on the site — "Hauptsitz", "Zweigbüro".
+  kind String @default("Zweigbüro")
+
+  street  String?
+  zip     String?
+  city    String?
+  canton  String?
+  country String  @default("CH")
+
+  phone String?
+  email String?
+
+  latitude     Float?
+  longitude    Float?
+  mapsUrl      String?
+  /// Free text, one line per day. A structured opening-hours model is a week of
+  /// work for a firm whose two offices keep the same hours.
+  openingHours String?
+
+  /// Exactly one row should carry this; `organisation.rules.ts` enforces it.
   isHeadquarters Boolean @default(false)
+  /// Whether the office appears on the public website.
+  isPublic       Boolean @default(true)
+  /// Explicit order on the site and in the register. The headquarters is not
+  /// implicitly first: an office can be the registered seat and not the one a
+  /// visitor should be shown first.
+  position       Int     @default(0)
+
+  /// Archived is not deleted. An office that has closed still has employees and
+  /// projects pointing at it, and the history must keep resolving.
+  archivedAt DateTime?
+
+  version     Int     @default(1)
+  updatedById String?
+  updatedBy   User?   @relation("OfficeUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   employees Employee[]
   projects  Project[]
@@ -754,14 +891,17 @@ model Office {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+
+  @@index([deletedAt])
+  @@index([isPublic, position])
 }
 
 /// A self-referencing tree. The audit's fourth known gap was that no
 /// Department entity existed and the closest thing was a hardcoded option
 /// list on the team content type; this closes it.
 model Department {
-  id       String  @id @default(cuid())
-  code     String  @unique
+  id       String       @id @default(cuid())
+  code     String       @unique
   name     String
   parentId String?
   parent   Department?  @relation("DepartmentTree", fields: [parentId], references: [id], onDelete: SetNull)
@@ -841,26 +981,26 @@ model Employee {
   userId String? @unique
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  headOf              Department[]         @relation("DepartmentHead")
-  disciplinesLed      Discipline[]         @relation("DisciplineManager")
-  projectsManaged     Project[]            @relation("ProjectManager")
-  memberships         ProjectMember[]
-  projectDisciplines  ProjectDiscipline[]  @relation("ProjectDisciplineLead")
-  customersOwned      Customer[]           @relation("CustomerOwner")
-  tasksAssigned       Task[]               @relation("TaskAssignee")
-  meetingsOrganised   Meeting[]            @relation("MeetingOrganiser")
-  meetingAttendance   MeetingAttendee[]    @relation("MeetingAttendee")
-  meetingsPresented   MeetingAgendaItem[]  @relation("MeetingPresenter")
-  meetingItemsOwned   MeetingItem[]        @relation("MeetingResponsible")
-  meetingsApproved    MeetingApproval[]    @relation("MeetingApprover")
-  decisionsTaken      Decision[]           @relation("DecisionDecidedBy")
-  drawingsDrawn       Drawing[]            @relation("DrawingDrawnBy")
-  drawingsChecked     Drawing[]            @relation("DrawingCheckedBy")
-  drawingsApproved    Drawing[]            @relation("DrawingApprovedBy")
-  revisionsDrawn      DrawingRevision[]    @relation("RevisionDrawnBy")
-  revisionsChecked    DrawingRevision[]    @relation("RevisionCheckedBy")
-  revisionsApproved   DrawingRevision[]    @relation("RevisionApprovedBy")
-  transmittalsSent    Transmittal[]        @relation("TransmittalSentBy")
+  headOf               Department[]           @relation("DepartmentHead")
+  disciplinesLed       Discipline[]           @relation("DisciplineManager")
+  projectsManaged      Project[]              @relation("ProjectManager")
+  memberships          ProjectMember[]
+  projectDisciplines   ProjectDiscipline[]    @relation("ProjectDisciplineLead")
+  customersOwned       Customer[]             @relation("CustomerOwner")
+  tasksAssigned        Task[]                 @relation("TaskAssignee")
+  meetingsOrganised    Meeting[]              @relation("MeetingOrganiser")
+  meetingAttendance    MeetingAttendee[]      @relation("MeetingAttendee")
+  meetingsPresented    MeetingAgendaItem[]    @relation("MeetingPresenter")
+  meetingItemsOwned    MeetingItem[]          @relation("MeetingResponsible")
+  meetingsApproved     MeetingApproval[]      @relation("MeetingApprover")
+  decisionsTaken       Decision[]             @relation("DecisionDecidedBy")
+  drawingsDrawn        Drawing[]              @relation("DrawingDrawnBy")
+  drawingsChecked      Drawing[]              @relation("DrawingCheckedBy")
+  drawingsApproved     Drawing[]              @relation("DrawingApprovedBy")
+  revisionsDrawn       DrawingRevision[]      @relation("RevisionDrawnBy")
+  revisionsChecked     DrawingRevision[]      @relation("RevisionCheckedBy")
+  revisionsApproved    DrawingRevision[]      @relation("RevisionApprovedBy")
+  transmittalsSent     Transmittal[]          @relation("TransmittalSentBy")
   transmittalsReceived TransmittalRecipient[] @relation("TransmittalRecipient")
 
   createdAt DateTime  @default(now())
@@ -968,9 +1108,9 @@ model Customer {
   ownerId String?
   owner   Employee? @relation("CustomerOwner", fields: [ownerId], references: [id], onDelete: SetNull)
 
-  buildings          Building[]
-  projects           Project[] @relation("ProjectCustomer")
-  projectsAsArchitect Project[] @relation("ProjectArchitect")
+  buildings           Building[]
+  projects            Project[]  @relation("ProjectCustomer")
+  projectsAsArchitect Project[]  @relation("ProjectArchitect")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1117,9 +1257,9 @@ model Project {
   /// stale, which is the same discipline as the site's `{token}`
   /// placeholders, so both this and `progressPercent` are recomputed on
   /// write *and* reconciled nightly, and a test asserts the two agree.
-  health ProjectHealth @default(GREEN)
+  health          ProjectHealth @default(GREEN)
   /// 0–100, derived from milestone completion.
-  progressPercent Int @default(0)
+  progressPercent Int           @default(0)
 
   /// Required. An engineering project without a Bauherrschaft is not a
   /// project — no `onDelete`, so the database refuses to remove a customer
@@ -1146,9 +1286,9 @@ model Project {
   officeId String?
   office   Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
 
-  startDate       DateTime?
-  plannedEndDate  DateTime?
-  actualEndDate   DateTime?
+  startDate      DateTime?
+  plannedEndDate DateTime?
+  actualEndDate  DateTime?
 
   contractValue Decimal? @db.Decimal(12, 2)
   currency      String   @default("CHF")
@@ -1157,12 +1297,12 @@ model Project {
   description String?
   notes       String?
 
-  members     ProjectMember[]
-  disciplines ProjectDiscipline[]
-  milestones  Milestone[]
-  tasks       Task[]
-  meetings    Meeting[]
-  decisions   Decision[]
+  members      ProjectMember[]
+  disciplines  ProjectDiscipline[]
+  milestones   Milestone[]
+  tasks        Task[]
+  meetings     Meeting[]
+  decisions    Decision[]
   drawings     Drawing[]
   transmittals Transmittal[]
 
@@ -1181,7 +1321,7 @@ model Project {
   /// Counting rows could answer the first and never the second: the check has
   /// to be in the same statement as the write, or it is a race with extra
   /// steps.
-  version     Int       @default(1)
+  version Int @default(1)
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1239,15 +1379,15 @@ model EntityVersion {
 
   /// 1-based, and dense per record. The unique below is what makes a
   /// concurrent write collide rather than produce two v7s.
-  version  Int
-  scheme   RevisionScheme @default(NUMERIC)
+  version Int
+  scheme  RevisionScheme @default(NUMERIC)
   /// The rendered form — `v7`, `C`. Stored rather than derived so a history
   /// list needs no lookup table and an exported PDF cannot disagree with the
   /// screen.
-  label    String
+  label   String
 
   /// The record as the API returned it at this version.
-  data Json
+  data    Json
   /// Which fields the writer changed, for a history that reads as a sentence
   /// rather than as two JSON blobs side by side.
   changed String[]
@@ -1286,9 +1426,9 @@ enum ProjectMemberRole {
 /// and a unique on `(projectId, employeeId)` would force that second stint
 /// to overwrite the first and lose the history.
 model ProjectMember {
-  id         String  @id @default(cuid())
+  id         String   @id @default(cuid())
   projectId  String
-  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id])
 
@@ -1322,9 +1462,9 @@ enum ProjectDisciplineStatus {
 /// have no Elektro lead*. The enum the first draft used answers none of
 /// them.
 model ProjectDiscipline {
-  id           String  @id @default(cuid())
+  id           String     @id @default(cuid())
   projectId    String
-  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   disciplineId String
   discipline   Discipline @relation(fields: [disciplineId], references: [id])
 
@@ -1444,7 +1584,7 @@ model Task {
 
   /// Where `BLOCKED` came from, so unblocking returns the task rather than
   /// dropping it back to `TODO`. Null unless `status` is `BLOCKED`.
-  blockedFrom TaskStatus?
+  blockedFrom   TaskStatus?
   /// Why it is blocked. Free text, and the reason a blocked board column is
   /// readable at all.
   blockedReason String?
@@ -1494,8 +1634,8 @@ model Task {
   /// `tasks.rules.ts`, and cycle detection with it — a self-referencing tree is
   /// something the database cannot refuse.
   parentTaskId String?
-  parentTask   Task?  @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  subtasks     Task[] @relation("TaskSubtasks")
+  parentTask   Task?   @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks     Task[]  @relation("TaskSubtasks")
 
   /// Which Gewerk the work belongs to. Optional, because a firm-level task has
   /// none — but present, because "alle offenen Lüftungs-Aufgaben" is a question
@@ -1512,9 +1652,9 @@ model Task {
   /// notification nobody reads.
   overdueNotifiedAt DateTime?
 
-  dependsOn TaskDependency[] @relation("TaskSuccessor")
-  blocks    TaskDependency[] @relation("TaskPredecessor")
-  checklist ChecklistItem[]
+  dependsOn    TaskDependency[] @relation("TaskSuccessor")
+  blocks       TaskDependency[] @relation("TaskPredecessor")
+  checklist    ChecklistItem[]
   /// The protocol lines that created this task. Usually none or one; a task
   /// re-raised at a later Bausitzung legitimately has two.
   meetingItems MeetingItem[]
@@ -1550,8 +1690,8 @@ model TaskDependency {
   predecessorId String
   predecessor   Task   @relation("TaskPredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
   /// The one that waits.
-  successorId String
-  successor   Task   @relation("TaskSuccessor", fields: [successorId], references: [id], onDelete: Cascade)
+  successorId   String
+  successor     Task   @relation("TaskSuccessor", fields: [successorId], references: [id], onDelete: Cascade)
 
   type    TaskDependencyType @default(FS)
   /// Days between the two ends of the relation. Negative is legitimate: a lag
@@ -1762,11 +1902,11 @@ model Meeting {
   /// exists for.
   version Int @default(1)
 
-  attendees  MeetingAttendee[]
-  agenda     MeetingAgendaItem[]
-  items      MeetingItem[]
-  approvals  MeetingApproval[]
-  decisions  Decision[]
+  attendees MeetingAttendee[]
+  agenda    MeetingAgendaItem[]
+  items     MeetingItem[]
+  approvals MeetingApproval[]
+  decisions Decision[]
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -1949,7 +2089,7 @@ model Decision {
   /// decision still consumed its number and it is quoted in e-mails.
   number String
 
-  title String
+  title     String
   /// **Required.** The record exists to answer *why*, and a decision without a
   /// reason is the row nobody can act on two years later. Same principle as
   /// `DrawingRevision.changeNote`.
@@ -1963,16 +2103,16 @@ model Decision {
   /// Where it was taken. Nullable because a decision taken on site is still a
   /// decision — `decidedAt` may predate any minutes.
   meetingId String?
-  meeting   Meeting? @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  meeting   Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
   /// The protocol line that records it, from the other side of the `@unique`.
   item      MeetingItem? @relation("DecisionItem")
 
   type   DecisionType   @default(TECHNISCH)
   status DecisionStatus @default(ENTSCHIEDEN)
 
-  decidedAt   DateTime
-  decidedById String?
-  decidedBy   Employee? @relation("DecisionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt         DateTime
+  decidedById       String?
+  decidedBy         Employee? @relation("DecisionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
   /// When the Bauherrschaft decided it, as free text — see the note on
   /// `MeetingAttendee.externalName`. Becomes a `Contact` FK in Wave 3.
   decidedByExternal String?
@@ -2012,9 +2152,15 @@ model Decision {
   @@index([meetingId])
 }
 
-/* ==================================================================== */
-/* Pläne — Wave 2, module 3                                             */
-/* ==================================================================== */
+/**
+ * ====================================================================
+ */
+/**
+ * Pläne — Wave 2, module 3
+ */
+/**
+ * ====================================================================
+ */
 
 /// What a plan *is*, and it is deliberately not a Document.
 ///

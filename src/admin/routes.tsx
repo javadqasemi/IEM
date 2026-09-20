@@ -14,6 +14,7 @@ import {
   TransmittalDetailRoute,
   TransmittalsRoute,
 } from "@/features/drawings";
+import { SettingsRoute } from "@/features/organisation";
 import { match } from "@/core/router";
 
 /**
@@ -378,10 +379,38 @@ export const ROUTES: Route[] = [
     component: page(() => import("./pages/People"), "RolesPage"),
     label: "Rollen",
   },
+  /**
+   * Einstellungen — two patterns for one component, like `/projekte/:id`.
+   *
+   * The section is in the URL, so `/einstellungen/standorte` is a link
+   * somebody sends a colleague and a place a reload returns to, and the
+   * two-segment form has to be read before the one. A route per section would
+   * be eleven entries differing in one string, and adding a section would
+   * mean editing this table as well as `features/organisation/service.ts`.
+   *
+   * **All four keys, any one of which opens it**, because the eleven sections
+   * do not share a permission: Standorte is `office.read`, the company's
+   * record is `organisation.read`, the key/value groups are `settings.read`
+   * and the System panel is `system.health`. Listing only `settings.read`
+   * would shut somebody holding just `system.health` out of the page their
+   * own rail row points at — which is what `routes.test.ts` caught, by
+   * comparing the menu's keys against this table in both directions.
+   *
+   * `visibleSections` then narrows the sub-navigation to what each reader can
+   * actually open, and the server re-checks every section's own data
+   * regardless. Widening the route is a courtesy; it grants nothing.
+   */
+  {
+    pattern: "/einstellungen/:section",
+    permissions: ["settings.read", "organisation.read", "office.read", "system.health"],
+    component: SettingsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "Einstellungen",
+    parent: "/einstellungen",
+  },
   {
     pattern: "/einstellungen",
-    permissions: ["settings.read"],
-    component: page(() => import("./pages/Operations"), "SettingsPage"),
+    permissions: ["settings.read", "organisation.read", "office.read", "system.health"],
+    component: SettingsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
     label: "Einstellungen",
   },
   {

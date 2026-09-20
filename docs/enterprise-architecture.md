@@ -448,6 +448,22 @@ server/src/
     catalog.ts     PERMISSIONS, derived from resources.ts (W7)
 ```
 
+Two notes where the built tree has since diverged from this blueprint, so a
+reader does not look for a folder that is not there:
+
+- **There is no `modules/` level.** Feature folders sit directly under
+  `server/src/`, which is what `architecture.test.ts` enforces against.
+- **`company/` was built as `organisation/`, and it is split in two.** The
+  routes and their class-validator DTOs are in `server/src/organisation/`; the
+  service, repository, mapper and rules are in
+  `server/src/core/organisation/`, because `MailService` reads the company name
+  and `ContentService` reads the offices — two callers outside the feature, and
+  the rule is that such a service belongs in `core/` *before* the second
+  caller appears. `settings/` has the same split and is where the rule was
+  learned. The module classes are deliberately named differently
+  (`OrganisationRoutesModule` against `OrganisationModule`): Nest would accept
+  both in one import list and construct two different things.
+
 ---
 
 ## 4. Navigation blueprint (Phase 5)

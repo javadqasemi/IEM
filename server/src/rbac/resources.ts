@@ -117,6 +117,46 @@ export const RESOURCES: ResourceDef[] = [
     secrets: "Geheime Werte wie SMTP-Passwörter sehen und ändern",
   }),
 
+  /**
+   * The firm itself — and the reason `updateLegal` is not folded into `update`.
+   *
+   * Changing the main telephone number and changing the UID are both writes to
+   * one row, and they are not the same authority. The first is an office
+   * administrator's daily work; the second is what appears in the commercial
+   * register, on every invoice and in the Impressum, and getting it wrong is a
+   * legal problem rather than an inconvenience. The same argument that split
+   * `drawing.check` from `drawing.release` splits these.
+   *
+   * There is no `create` and no `delete`: the organisation is a singleton that
+   * is upserted into existence and never removed. A key for an operation that
+   * has no route would be one more dead permission in the role editor, which is
+   * the problem F6 was built to end.
+   */
+  resource("organisation", "Unternehmen", "Unternehmen", {
+    read: "Unternehmensangaben ansehen",
+    update: "Allgemeine Angaben, Kontakte und Website-Vorgaben ändern",
+    updateLegal: "Rechtliche Angaben ändern — UID, Handelsregister, MWST, Sitz",
+  }),
+
+  /**
+   * Standorte, and the one key that is not CRUD.
+   *
+   * **`archive` is separate from `delete`**, the same distinction Projects
+   * makes and for the same reason: an office that has closed still has
+   * employees, projects and buildings pointing at it, and its history has to
+   * keep resolving. Deleting one is only ever correct for a row created by
+   * mistake, and `organisation.rules.ts` refuses it outright once anything
+   * references it — so `delete` is the rarer permission and archiving is the
+   * operation that actually exists for a closed office.
+   */
+  resource("office", "Standorte", "Unternehmen", {
+    read: "Standorte ansehen",
+    create: "Standorte anlegen",
+    update: "Standortdaten bearbeiten",
+    archive: "Standorte archivieren und wiederherstellen",
+    delete: "Standorte löschen",
+  }),
+
   resource("seo", "SEO", "SEO", {
     read: "SEO-Einstellungen und Weiterleitungen ansehen",
     update: "Meta-Angaben, Weiterleitungen, robots.txt ändern",

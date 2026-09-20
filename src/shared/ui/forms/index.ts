@@ -18,6 +18,7 @@ export {
   type DateRange,
 } from "./DateRangePicker";
 export { Form, FormSection, FormActions } from "./Form";
+export { SaveBar } from "./SaveBar";
 export { EntityForm } from "./EntityForm";
 export { useForm, type FormState, type UseFormOptions } from "./useForm";
 export type { FieldDef, FieldErrors } from "./types";

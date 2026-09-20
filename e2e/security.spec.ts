@@ -56,6 +56,17 @@ const ACCOUNTS = {
   finance: { email: "fin@iem.test", label: "Finanzen" },
   hr: { email: "hr@iem.test", label: "HR" },
   guest: { email: "gast@iem.test", label: "Gast" },
+  /**
+   * The row the Unternehmen module needed and this matrix could not reach.
+   *
+   * `organisation.updateLegal` exists because changing the main telephone
+   * number and changing the UID are not the same authority — and
+   * `administrator` is the **only** role that holds one without the other.
+   * Every other account either has both (`management`, Super Admin) or
+   * neither, so the gate inside `OrganisationController.update` was
+   * unobservable: the six roles above all stop at the route guard first.
+   */
+  administrator: { email: "adm@iem.test", label: "Administrator" },
 } as const;
 
 type Who = keyof typeof ACCOUNTS;
@@ -172,6 +183,35 @@ test.describe("the permission matrix, by verb", () => {
     { who: "hr", method: "GET", path: "/customers", expect: 403 },
     { who: "guest", method: "GET", path: "/customers", expect: 403 },
     { who: "guest", method: "GET", path: "/employees", expect: 403 },
+
+    /*
+      Unternehmen und Standorte.
+
+      `organisation.read` and `office.read` are separate keys and separately
+      granted, so both are listed: a guard that checked one for both routes
+      would pass a single-key matrix and leak the other.
+
+      The engineer and the guest are the floor — neither holds either key —
+      and the administrator is the interesting row, because it reads and
+      writes the company but may not touch its legal identity. That cell is
+      below, with the writes.
+    */
+    { who: "superAdmin", method: "GET", path: "/organisation", expect: 200 },
+    { who: "management", method: "GET", path: "/organisation", expect: 200 },
+    { who: "administrator", method: "GET", path: "/organisation", expect: 200 },
+    { who: "engineer", method: "GET", path: "/organisation", expect: 403 },
+    { who: "guest", method: "GET", path: "/organisation", expect: 403 },
+
+    { who: "management", method: "GET", path: "/offices", expect: 200 },
+    { who: "administrator", method: "GET", path: "/offices", expect: 200 },
+    { who: "engineer", method: "GET", path: "/offices", expect: 403 },
+    { who: "guest", method: "GET", path: "/offices", expect: 403 },
+
+    // The read-only operational panel. `system.health`, not `settings.read` —
+    // reading the SMTP host and reading the database's latency are different
+    // questions, and the engineer holds the second without the first.
+    { who: "engineer", method: "GET", path: "/dashboard/system", expect: 200 },
+    { who: "guest", method: "GET", path: "/dashboard/system", expect: 403 },
   ];
 
   for (const cell of READS) {
@@ -220,6 +260,139 @@ test.describe("the permission matrix, by verb", () => {
       const response = await call(client, c.method, c.path, c.body);
       expect(response.status(), `${client.label} ${c.method} ${c.path}`).toBe(c.expect);
     }
+  });
+
+  /**
+   * The field-level `◐` on the organisation, which no route decorator can
+   * express.
+   *
+   * `@RequirePermissions` is AND across its arguments and cannot ask "only if
+   * the body touches these fields", so the gate is inside the handler —
+   * `docs/permissions.md` §4 calls this the `◐` pattern and
+   * `permissions.agreement.test.ts` counts it as enforcement. What *that*
+   * test cannot do is prove the gate fires, because it reads source text.
+   * This does, against the live API, with the one role that distinguishes the
+   * two permissions.
+   *
+   * The version is read first rather than assumed: the record carries an
+   * optimistic lock, and a stale `expectedVersion` answers **409 before the
+   * permission is ever consulted** — which would make every cell below pass
+   * for the wrong reason. That is the same trap the project writes above
+   * avoid by resolving a real id.
+   */
+  test("an administrator may write the company but not its legal identity", async () => {
+    const admin = await signIn("administrator");
+
+    const before = await admin.ctx.get(`${API}/organisation`);
+    expect(before.status()).toBe(200);
+    const body = (await before.json()) as {
+      data: { organisation: { version: number; mainPhone: string | null }; canEditLegal: boolean };
+    };
+
+    // The server's own answer travels with the record so the form can render
+    // the legal fields read-only rather than letting somebody fill them in
+    // and meet a 403 on save.
+    expect(body.data.canEditLegal, "administrator must not hold organisation.updateLegal").toBe(
+      false,
+    );
+
+    const version = body.data.organisation.version;
+
+    // A general field: allowed. Writing the value back unchanged would be a
+    // no-op the service short-circuits, so this sends a different one and
+    // restores it afterwards.
+    const general = await admin.ctx.patch(`${API}/organisation`, {
+      data: { expectedVersion: version, mainPhone: "+41 33 227 40 20" },
+    });
+    expect(general.status(), "administrator PATCH general field").toBe(200);
+
+    const now = (
+      (await (await admin.ctx.get(`${API}/organisation`)).json()) as {
+        data: { organisation: { version: number } };
+      }
+    ).data.organisation.version;
+
+    for (const field of ["uid", "commercialRegister", "copyright"]) {
+      const refused = await admin.ctx.patch(`${API}/organisation`, {
+        data: { expectedVersion: now, [field]: field === "uid" ? "CHE-107.625.851" : "x" },
+      });
+      expect(refused.status(), `administrator PATCH legal field ${field}`).toBe(403);
+    }
+
+    // And `office.delete`, which the same role is withheld for the same
+    // reason: removing a row that employees and projects point at is the
+    // Geschäftsleitung's call, not the person who maintains the system.
+    const offices = (
+      (await (await admin.ctx.get(`${API}/offices`)).json()) as { data: { id: string }[] }
+    ).data;
+    expect(offices.length, "der Seed muss Standorte angelegt haben").toBeGreaterThan(0);
+    const deletion = await admin.ctx.delete(`${API}/offices/${offices[0].id}`);
+    expect(deletion.status(), "administrator DELETE office").toBe(403);
+  });
+
+  /**
+   * The settings store refuses a value that would destroy data.
+   *
+   * `applications.retentionDays` feeds `retainUntil`, which the 03:00 purge
+   * deletes against — a `0` there removed every dossier received that day,
+   * files included, and a non-numeric value produced `new Date(NaN)` and took
+   * the public application form down with a 500. Neither was reachable
+   * through a bug; both were reachable through the settings form, because
+   * nothing validated the write.
+   *
+   * Against the live API rather than in a unit test, because that is the
+   * layer the guarantee is made at: `settings.rules.ts` is tested exhaustively
+   * on its own, and this proves it is actually wired into the endpoint.
+   */
+  test("the settings endpoint refuses a retention period that would delete dossiers", async () => {
+    const admin = await signIn("superAdmin");
+
+    for (const value of [0, -5, "bald", true]) {
+      const refused = await admin.ctx.patch(`${API}/settings`, {
+        data: { updates: [{ key: "applications.retentionDays", value }] },
+      });
+      expect(refused.status(), `retentionDays = ${JSON.stringify(value)}`).toBe(400);
+    }
+
+    // An unknown key is a 404 and not a 400: the caller's *value* is fine, the
+    // key is not, and reporting one as the other sends somebody to fix the
+    // wrong half.
+    const unknown = await admin.ctx.patch(`${API}/settings`, {
+      data: { updates: [{ key: "applications.nope", value: 1 }] },
+    });
+    expect(unknown.status()).toBe(404);
+
+    /*
+      All-or-nothing.
+
+      A settings form saves several fields at once, and a partial write leaves
+      the operator looking at a screen where some changes took and some did
+      not, with no indication which.
+    */
+    const mixed = await admin.ctx.patch(`${API}/settings`, {
+      data: {
+        updates: [
+          { key: "mail.smtpPort", value: 2525 },
+          { key: "mail.from", value: "kein-empfaenger" },
+        ],
+      },
+    });
+    expect(mixed.status(), "a batch with one bad value").toBe(400);
+
+    const after = (await (await admin.ctx.get(`${API}/settings`)).json()) as {
+      data: { group: string; settings: { key: string; value: unknown }[] }[];
+    };
+    const port = after.data
+      .flatMap((g) => g.settings)
+      .find((s) => s.key === "mail.smtpPort");
+    expect(port?.value, "the good half of a refused batch must not have been written").toBe(587);
+
+    // The valid one still goes through, or the assertions above would pass on
+    // an endpoint that refused everything.
+    const accepted = await admin.ctx.patch(`${API}/settings`, {
+      data: { updates: [{ key: "applications.retentionDays", value: 180 }] },
+    });
+    expect(accepted.status()).toBe(200);
   });
 });
 

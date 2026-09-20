@@ -72,8 +72,21 @@ const API_ONLY = [
  */
 const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/, /drawings-ui\.spec\.ts/, /auth\.spec\.ts/];
 
+/**
+ * Browser suites that run once for a **third** reason: they write.
+ *
+ * `organisation.spec.ts` edits the company record and tries to archive the
+ * headquarters. Each test restores what it changed, but running the same
+ * mutation three times against one database buys nothing — every assertion in
+ * it is about a request count, a persisted value or a refusal, and none of
+ * those is width-dependent. `screens.spec.ts` already photographs six of the
+ * workspace's sections at all three widths and runs axe over them, which is
+ * where the responsive question is actually answered.
+ */
+const MUTATES = [/organisation\.spec\.ts/];
+
 /** What the two narrower projects skip. */
-const RUN_ONCE = [...API_ONLY, ...SIGNS_IN_TWICE];
+const RUN_ONCE = [...API_ONLY, ...SIGNS_IN_TWICE, ...MUTATES];
 
 export default defineConfig({
   testDir: "./e2e",
@@ -87,8 +100,26 @@ export default defineConfig({
    * beside it.
    */
   testMatch: /.*\.spec\.ts$/,
-  // Generous: the first navigation to a lazy route compiles a chunk in dev.
-  timeout: 45_000,
+  /**
+   * Generous for two reasons, and the second is the one that sets the number.
+   *
+   * The first navigation to a lazy route compiles a chunk in dev, which is
+   * what 45 seconds used to cover.
+   *
+   * The second is the **login throttle ride-out**. `apiToken` and the browser
+   * `workerContext` both answer a 429 by waiting 61 seconds and trying once
+   * more — the remedy the repeated misdiagnosis in CLAUDE.md prescribes,
+   * because raising the limit would weaken a real control and dropping a role
+   * would shrink the security matrix. A 45-second budget cannot contain a
+   * 61-second wait, so the remedy could not complete: a spec calling `apiAs`
+   * in `beforeAll` reported `"beforeAll" hook timeout of 45000ms exceeded`
+   * while it was mid-sleep, which reads as a hung fixture.
+   *
+   * 90 seconds is the ride-out plus room to finish signing in. It costs a
+   * slower verdict on a genuinely hung test, and the alternative is a remedy
+   * that only works in the specs that happen to have their own timeout.
+   */
+  timeout: 90_000,
   expect: { timeout: 10_000 },
 
   /**

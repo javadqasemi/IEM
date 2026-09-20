@@ -243,18 +243,71 @@ export const test = base.extend<
     async ({ browser }, use) => {
       const context = await browser.newContext();
       const page = await context.newPage();
-      await page.goto("/admin.html#/");
-      await page.getByLabel(/E-Mail/i).fill(ADMIN_EMAIL);
-      await page.getByLabel(/Passwort/i).first().fill(ADMIN_PASSWORD);
-      await page.getByRole("button", { name: /^Anmelden$/ }).click();
-      await expect(page.getByRole("navigation", { name: "Hauptnavigation" })).toBeVisible({
-        timeout: 30_000,
-      });
+
+      /**
+       * Signs in, and **rides out the login throttle** rather than failing on
+       * it — the same remedy `apiToken` above applies to the API contexts,
+       * finally applied to the browser half as well.
+       *
+       * The limit is 10 sign-ins a minute and it is a real control worth
+       * keeping. The API suites share one token per account through
+       * `apiToken`, so the marginal cost of a role is one attempt — but the
+       * total across a full run sits close enough to ten that *adding a
+       * seventh account to the security matrix was enough to tip it*, and the
+       * failure landed here, in a `budgets.spec.ts` warm-up, as
+       * `element(s) not found` while the page showed the login form.
+       *
+       * That is the misdiagnosis CLAUDE.md records twice already: it reads as
+       * a broken shell and is a rate limit. The two wrong repairs are raising
+       * the limit (weakening a control to suit a test) and dropping a role
+       * (shrinking the matrix that is the point of the suite). Waiting is what
+       * a person does, it costs a minute once, and it only happens inside the
+       * window.
+       */
+      const attempt = async () => {
+        await page.goto("/admin.html#/");
+        await page.getByLabel(/E-Mail/i).fill(ADMIN_EMAIL);
+        await page.getByLabel(/Passwort/i).first().fill(ADMIN_PASSWORD);
+        await page.getByRole("button", { name: /^Anmelden$/ }).click();
+        return page
+          .getByRole("navigation", { name: "Hauptnavigation" })
+          .waitFor({ state: "visible", timeout: 30_000 })
+          .then(
+            () => true,
+            () => false,
+          );
+      };
+
+      if (!(await attempt())) {
+        // Only reached when the first try did not produce a shell. Sixty-one
+        // seconds, then exactly one more go — a second failure is a real one
+        // and `expect` below reports it with the screenshot.
+        await new Promise((resolve) => setTimeout(resolve, 61_000));
+        await attempt();
+      }
+
+      await expect(
+        page.getByRole("navigation", { name: "Hauptnavigation" }),
+        "Anmeldung im Worker-Kontext fehlgeschlagen — siehe den Screenshot: " +
+          "zeigt er das Anmeldeformular, war es die Ratenbegrenzung (10/min).",
+      ).toBeVisible({ timeout: 30_000 });
+
       await page.close();
       await use(context);
       await context.close();
     },
-    { scope: "worker" },
+    /**
+     * Two minutes, against the suite's 45 seconds.
+     *
+     * The ride-out above waits 61 seconds, which is longer than the default
+     * fixture timeout — so the first version "handled" the throttle by timing
+     * out in the middle of the wait, and reported `Fixture "workerContext"
+     * timeout of 45000ms exceeded` over a screenshot showing
+     * *ThrottlerException: Too Many Requests*. A remedy that cannot finish is
+     * not a remedy. It is only ever spent once per worker, and only inside
+     * the window.
+     */
+    { scope: "worker", timeout: 120_000 },
   ],
 
   /**
@@ -513,7 +566,48 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
   { path: "/bewerbungen", name: "applications", heading: /Bewerbung/i },
   { path: "/benutzer", name: "users", heading: /Benutzer/i },
   { path: "/rollen", name: "roles", heading: /Rollen/i },
-  { path: "/einstellungen", name: "settings", heading: /Einstellungen|System/i },
+  /**
+   * Einstellungen, and six of its eleven sections rather than one entry.
+   *
+   * The workspace renders through **five different paths** — the organisation
+   * form, the offices register, a key/value group, the not-built placeholder
+   * and the read-only system panel — and a sweep that visited only the default
+   * section would photograph one of them and prove nothing about the rest.
+   * Six entries cover all five, with `rechtliches` in as well because it is
+   * the widest form in the dashboard (seventeen fields, two columns) and
+   * therefore the likeliest to overflow at a phone width.
+   *
+   * The headings are each section's own **description**, not its title.
+   * `getByText(...).first()` matches the rail too, and "Standorte" and
+   * "System" are both rail rows — a title match would pass while the content
+   * column was empty, which is the one failure this sweep exists to catch.
+   */
+  {
+    path: "/einstellungen",
+    name: "settings",
+    heading: /Die Angaben zur Firma, ihre Standorte/i,
+  },
+  {
+    path: "/einstellungen/rechtliches",
+    name: "settings-legal",
+    heading: /Was im Handelsregister steht/i,
+  },
+  {
+    path: "/einstellungen/standorte",
+    name: "settings-offices",
+    heading: /im Kopf, im Kontaktfeld/i,
+  },
+  { path: "/einstellungen/email", name: "settings-mail", heading: /Versand prüfen/i },
+  {
+    path: "/einstellungen/benachrichtigungen",
+    name: "settings-notifications",
+    heading: /Benachrichtigungsmodul ist noch nicht gebaut/i,
+  },
+  {
+    path: "/einstellungen/system",
+    name: "settings-system",
+    heading: /Migrationsstand/i,
+  },
   { path: "/audit", name: "audit", heading: /Audit/i },
   { path: "/profil", name: "profile", heading: /Profil|Konto/i },
 ];

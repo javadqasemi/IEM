@@ -143,7 +143,127 @@ async function seedSettings() {
       },
     });
   }
+
+  /*
+    Report, never delete — the same rule `seedPermissions` follows.
+
+    Nine keys left `DEFAULT_SETTINGS` when the firm became an entity
+    (`company.*`, `brand.*`, two `site.*`), and the migration removes those
+    rows. This catches the *next* retirement, on a database the migration did
+    not run against: `SettingsService.list` now skips a row it has no
+    declaration for, so an orphan is invisible in the dashboard and would
+    otherwise sit unnoticed until somebody wondered where a value had gone.
+  */
+  const declared = new Set(DEFAULT_SETTINGS.map((s) => s.key));
+  const orphans = (await prisma.setting.findMany({ select: { key: true } })).filter(
+    (row) => !declared.has(row.key),
+  );
+  if (orphans.length) {
+    console.log(
+      `  ! ${orphans.length} Einstellung(en) in der Datenbank, aber nicht mehr im Katalog: ` +
+        `${orphans.map((o) => o.key).join(", ")} — werden im Dashboard nicht mehr angezeigt.`,
+    );
+  }
+
   console.log(`  ✓ ${DEFAULT_SETTINGS.length} Einstellungen`);
+}
+
+/**
+ * The firm itself, and its offices.
+ *
+ * **Both come from `src/content/defaults.ts`**, which is the copy checkable
+ * against iem.ch — and that is the whole repair. The `Office` rows used to be
+ * typed out here independently of the site's own `offices`, and the two had
+ * drifted: this file said Thun was at Bierigutstrasse 6, the published website
+ * said Uttigenstrasse 49. One of them was wrong and nothing could tell which.
+ *
+ * Idempotent in the way the rest of this file is: the organisation is upserted
+ * by its constant id and the offices by `city`, so re-running against a
+ * database an administrator has been using **adds what is missing and leaves
+ * the values alone**. The `update` branch is deliberately empty for the same
+ * reason `seedSettings` only refreshes metadata — a firm that has corrected
+ * its own address must not have the correction undone by a deploy.
+ */
+async function seedOrganisation() {
+  const facts = defaultContent.facts;
+
+  await prisma.organisation.upsert({
+    where: { id: "org" },
+    update: {},
+    create: {
+      id: "org",
+      name: "IEM AG",
+      shortName: "IEM",
+      description:
+        "Ingenieurbüro für Gebäudetechnik — Heizung, Lüftung, Klima, Kälte, Sanitär, " +
+        "Sprinkler und Elektro, mit Gesamtprojektleitung nach SIA.",
+      foundedYear: facts.founded,
+      organisationType: facts.legalForm,
+      legalName: "IEM AG",
+      legalForm: facts.legalForm,
+      // `facts.vatId` is published as `CHE-107.625.851 MWST`; the UID is the
+      // same number without the suffix. Split rather than duplicated — the two
+      // fields are checked against each other in `uidMismatchWarning`.
+      uid: facts.vatId.replace(/\s+(MWST|TVA|IVA)$/, ""),
+      vatId: facts.vatId,
+      mainEmail: defaultContent.contactEmail,
+      recruitmentEmail: defaultContent.contactEmail,
+      website: "https://www.iem.ch",
+      defaultLocale: "de-CH",
+      defaultTimezone: "Europe/Zurich",
+      defaultCurrency: "CHF",
+    },
+  });
+
+  /*
+    The site's `zip` is "PLZ und Ort" on one line — `3600 Thun` — because that
+    is how a Swiss address is printed. The table keeps the two apart so the
+    postcode can be searched and the city can be a filter, and
+    `toSiteOffice` puts them back together. Splitting on the first space is
+    safe for every Swiss postcode: they are four digits, always.
+  */
+  const offices = defaultContent.offices;
+  for (const [index, office] of offices.entries()) {
+    const [zip] = office.zip.split(" ");
+    const data = {
+      name: office.city,
+      kind: office.kind,
+      street: office.street,
+      zip,
+      city: office.city,
+      country: "CH",
+      phone: office.phone,
+      isHeadquarters: office.kind === "Hauptsitz",
+      isPublic: true,
+      position: index,
+    };
+    const existing = await prisma.office.findFirst({
+      where: { city: office.city, deletedAt: null },
+      select: { id: true },
+    });
+    if (!existing) {
+      await prisma.office.create({ data });
+      continue;
+    }
+
+    /*
+      A row this seed created is corrected in full; anything else is left alone.
+
+      The distinction is the id. Before the offices had an owner, `seedDomain`
+      typed its own addresses — `seed-office-thun` was given Bierigutstrasse 6
+      while the published site said Uttigenstrasse 49 — so those two rows hold
+      a value nobody chose and the checkable one should replace it. A row an
+      administrator created or edited has an ordinary cuid and keeps
+      everything; it gains only the columns the old stub could not hold.
+    */
+    const invented = existing.id.startsWith("seed-office-");
+    await prisma.office.update({
+      where: { id: existing.id },
+      data: invented ? data : { kind: data.kind, country: "CH", position: index },
+    });
+  }
+
+  console.log(`  ✓ Unternehmen und ${offices.length} Standorte`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -347,20 +467,21 @@ async function seedFirstSnapshot(authorId: string) {
  * reconciler that had stopped working.
  */
 async function seedDomain() {
-  const offices = await Promise.all(
-    [
-      { name: "Thun", address: "Bierigutstrasse 6", zip: "3608", city: "Thun", isHeadquarters: true },
-      { name: "Bern", address: "Belpstrasse 48", zip: "3007", city: "Bern", isHeadquarters: false },
-    ].map((office) =>
-      prisma.office.upsert({
-        // No unique on `name`, so find-then-create rather than a true upsert.
-        where: { id: office.name === "Thun" ? "seed-office-thun" : "seed-office-bern" },
-        create: { id: `seed-office-${office.name.toLowerCase()}`, ...office },
-        update: office,
-      }),
-    ),
-  );
-  const thun = offices[0];
+  /*
+    The offices are **read**, not written.
+
+    They used to be typed out here with addresses this file invented, in
+    parallel with the site's own `offices` content — two stores of the firm's
+    address, no relationship, and they had drifted. `seedOrganisation` now owns
+    them and takes its values from `src/content/defaults.ts`, which is the copy
+    checkable against iem.ch. This function is a consumer like any other.
+  */
+  const offices = await prisma.office.findMany({
+    where: { deletedAt: null },
+    orderBy: { position: "asc" },
+  });
+  const thun = offices.find((o) => o.isHeadquarters) ?? offices[0];
+  if (!thun) throw new Error("Kein Standort vorhanden — seedOrganisation() muss zuerst laufen.");
 
   const departments = await Promise.all(
     [
@@ -1771,6 +1892,27 @@ const TEST_USERS = [
     // No employee, no project permission at all. The floor of the matrix.
     personnelNumber: null,
   },
+  {
+    email: "adm@iem.test",
+    name: "Adrian Admin (Test)",
+    role: "administrator",
+    /**
+     * The row the Unternehmen module needs and the matrix could not reach.
+     *
+     * `organisation.updateLegal` exists because changing the main telephone
+     * number and changing the UID are not the same authority — and the only
+     * role that holds one without the other is `administrator`. Every account
+     * above it either has both (`management`, Super Admin) or neither, so the
+     * gate inside `OrganisationController.update` was the one rule in the
+     * module that no live test could observe: the six existing accounts all
+     * stop at the route guard before reaching it.
+     *
+     * No employee record, deliberately. An administrator maintains the system
+     * and is not on the payroll of any project — `permissions.catalog.ts`
+     * withholds `project.update` from the role for the same reason.
+     */
+    personnelNumber: null,
+  },
 ] as const;
 
 async function seedTestUsers() {
@@ -1831,6 +1973,11 @@ async function main() {
   await seedRoles();
   await seedContentTypes();
   await seedSettings();
+  // Before the content: `seedFirstSnapshot` builds a document whose `offices`
+  // come from the table this writes, and `seedDomain` reads the rows to put
+  // employees and projects on them. Order is load-bearing here, unlike the
+  // module list in `app.module.ts`.
+  await seedOrganisation();
   const adminId = await seedSuperAdmin();
   await seedContent(adminId);
   await seedFirstSnapshot(adminId);

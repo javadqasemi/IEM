@@ -17,6 +17,15 @@ Read them in this order before touching `src/app`, `src/core`, `src/entities`, `
 `src/shared`, `src/widgets` or `server/src/core` — their README files are the contracts that say
 what may go in them, and `src/architecture.test.ts` enforces the four that matter:
 
+Two further documents cover the **platform** rather than the business modules, and they are the
+current ones — `docs/system-audit.md` below predates the foundation and its §0 premise is no
+longer true:
+
+| Document | |
+| --- | --- |
+| `docs/CURRENT_APPLICATION_AUDIT.md` | 19 September 2026. What is actually here now, counted from the source: routes, models, permissions, CMS coverage, testing, security posture, and the three stores of company data that had already drifted |
+| `docs/ENTERPRISE_ROADMAP.md` | The remaining platform work as P0–P3, each with problem, impact, solution, dependencies and acceptance. Owns the *platform*; `docs/roadmap.md` still owns the business-module build order |
+
 | Document | |
 | --- | --- |
 | `docs/system-audit.md` | What is actually here. **§0 is the premise: there is no operational domain model.** |
@@ -69,6 +78,8 @@ permissions and the tests, not a folder with the same names in it.
 | W2·1 | **Aufgaben** — four tables, ten events, a board, row-level *write* scope, and the first embedded project tab |
 | W2·2 | **Sitzungen und Entscheide** — six tables, twelve events, a protocol that closes on approval, and a decision register that outlives it |
 | W2·3 | **Pläne und Planversand** — five tables, eleven events, `I` and `O` skipped, and a reissue that names who holds the old revision |
+| P0·1 | **Typed settings** — every setting declares a type and is validated on write; the one unclamped read is fixed |
+| P1·1 | **Unternehmen** — `Organisation` + a real `Office`, and the website's `offices` derived from the table |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -214,6 +225,26 @@ Three things about the Playwright suite that cost time to learn:
   `RUN_ONCE` in `playwright.config.ts` is the list of suites the narrower
   projects skip — `API_ONLY` plus anything that authenticates in a fixture — and
   the repair is always to run the suite once, never to raise the limit.
+
+  **It has happened a third time, by a route that running once does not
+  cover.** `security.spec.ts` was already `API_ONLY`, so it signs in once per
+  *run* — but adding a seventh role account to its matrix added one attempt to
+  a total already sitting close to ten, and the failure surfaced in a
+  `budgets.spec.ts` warm-up as `element(s) not found` over a screenshot of the
+  login page. Same misdiagnosis, third way in. `apiToken` had ridden out a 429
+  since the first occurrence; the *browser* `workerContext` had not, and now
+  does. **If the suite ever pauses 61 seconds at startup, that is this, and it
+  is working.** The lesson is narrower again: it is the total sign-ins per
+  minute that is budgeted, so adding an *account* costs as much as adding a
+  width.
+
+  And the ride-out needs room to finish. The global `timeout` in
+  `playwright.config.ts` is **90 s**, not the 45 s it was, because a
+  45-second budget cannot contain a 61-second wait: a spec calling `apiAs` in
+  a `beforeAll` reported *"beforeAll hook timeout of 45000ms exceeded"* while
+  it was mid-sleep, which reads as a hung fixture and is a remedy being cut
+  off. A per-spec timeout would have fixed the one spec that happened to
+  fail; the throttle can strike any of them.
 - **`channel: "chromium"`, not the headless shell.** The shell omits composited
   regions from `fullPage` screenshots at small viewports — an image renders
   correctly and photographs as a blank rectangle.
@@ -385,6 +416,40 @@ preserve key order, so a plain `JSON.stringify` comparison against a freshly bui
 almost every object as changed. `snapshot.builder.ts` sorts keys recursively before comparing; reuse
 that rather than writing a second comparison.
 
+**A setting is a typed declaration, not a JSON blob under a string key.** `SettingDef` in
+`core/settings/settings.service.ts` carries a `type`, `min`/`max`, `options` and `unit`, and
+`settings.rules.ts` validates every write against it. Before that nothing checked the shape
+anywhere — the controller's comment *claimed* the service did — and one unchecked value was a
+deletion deadline: `applications.retentionDays` fed `retainUntil`, so a `0` made the 03:00 purge
+delete every applicant dossier received that day and a non-numeric value produced
+`new Date(NaN)`, which Prisma rejects, taking the public application form down with a 500. Both
+were reachable from the settings form by a mistype. **The dashboard renders from the same
+declaration**, so a control is no longer inferred from whatever the value happens to be. Adding a
+setting without a type fails `settings.rules.test.ts`; adding an unbounded `number` fails it too.
+
+**Use `settings.number(key, fallback, min, max)`, never `value<number>()`, for anything
+arithmetic.** Validation stops a bad value being *stored*; the clamp stops one already in the
+table — from a release before the type existed, from a migration, or typed straight into the
+database — being *read*.
+
+**The firm is an entity, and `Office` is the website's Standorte.** `Organisation` is a singleton
+whose id is the literal `org`, upserted on first read so no caller needs a null branch. The
+published document's `offices` key is **injected into `buildSnapshot`** from the `Office` table
+rather than written by a content type — so the header telephone number, the contact band, the
+Standorte section and the `{telefonThun}` / `{standorte}` tokens all follow one source, and
+`phoneHref` is derived by `telHref()` instead of being a second field an editor retypes by hand.
+The `offices` content type is **retired**; the migration deletes its rows and the seed reports
+any that survive. Before this there were three stores of the firm's address and two of them
+already disagreed — the seed put Thun at Bierigutstrasse 6 while the live site said
+Uttigenstrasse 49.
+
+**`core/organisation` holds the service; `organisation/` holds the routes.** The same split
+`settings/` is named for, and forced by the same rule: `MailService` reads the company name and
+`ContentService` reads the offices, so the service has two callers outside its own feature and
+belongs in `core/` — *before* the second caller appears, not after. The class names differ on
+purpose (`OrganisationModule` in core, `OrganisationRoutesModule` in the feature), because Nest
+would happily accept both in one import list and construct two different things.
+
 **Adding a field to the site touches three files**: `src/content/schema.ts`,
 `src/content/defaults.ts`, and `server/src/content/content-types.ts`. `REQUIRED_KEYS` in
 `snapshot.builder.ts` is the backstop — an incomplete document fails the publish rather than
@@ -421,6 +486,28 @@ does not exist as far as the page is concerned. It applies to the draft preview 
 shows what publishing would produce. Note the interaction with `assertComplete`: hiding *every*
 entry of a required collection empties it and fails the publish. That is intended, and it is the
 same backstop that stands between a half-seeded database and a blank section.
+
+**A form that stays open after saving is a shape this dashboard did not have, and three
+pieces of shared infrastructure were wrong for it.** Every form before the settings
+workspace was a dialog that closes on save, so all three were invisible:
+
+- **`useForm`'s baseline is state, not a ref.** `dirty` is a `useMemo` over `[values]` and
+  a ref is invisible to a dependency array, so moving the baseline on a successful save did
+  not recompute it — the save bar went on saying *"Ungespeicherte Änderungen"* over a
+  written record and the unsaved-changes guard fired on a clean screen. The hook's own
+  comment already claimed this worked.
+- **`invalidate()` takes the invalidated key's data off screen.** It sets `updatedAt = 0`,
+  and `useQuery` gates `data` on `updatedAt > 0`, so `data` reads `null` between the
+  invalidate and the refetch landing — and a screen that renders a skeleton when there is
+  no data **unmounts**, losing everything the component held. `useQuery`'s comment promises
+  the opposite (*"a refetch over data already on screen is not a loading state"*) and that
+  promise holds for every key except the one being invalidated. Where a mutation's response
+  *is* the new state, `prime` it back in the same tick; otherwise invalidate narrowly.
+- **`SaveBar` carries no `onClick`.** `type="submit"` plus a handler is two submissions
+  from one click, and the second `PATCH` 409s against the first — a save that worked
+  reporting a conflict with itself. It must sit inside a `<Form>`; that is also what keeps
+  Enter working, since a form with no submit button does not submit implicitly once it has
+  more than one field.
 
 **`cn()` is plain `clsx`, with no tailwind-merge.** A `className` passed to a component is
 *appended*, so it cannot reliably override a `bg-` or `text-` in the base — stylesheet order
@@ -762,6 +849,17 @@ Writes are guarded by `project.update` and friends, which are firm-wide — some
 directions, and counts a `permissions.has(...)` check inside a handler as enforcement — those are
 the row- and field-level `◐` rules in `docs/permissions.md` §4, and `settings.secrets` is one.
 
+**`organisation.updateLegal` and `office.delete` are withheld from `administrator` on purpose.**
+Changing the main telephone number and changing the UID are both writes to one row and are not
+the same authority: the second is what appears in the commercial register, on every invoice and
+in the Impressum. The gate cannot be a route decorator — `@RequirePermissions` is AND and cannot
+ask "only if the body touches these fields" — so it is a `permissions.has` inside
+`OrganisationController.update`, which is the documented `◐` pattern and which
+`permissions.agreement.test.ts` counts as enforcement. `canEditLegal` travels back with the
+record so the form renders those fields read-only rather than letting somebody fill them in and
+meet a 403 on save. The seed's `adm@iem.test` exists for this row alone: every other test account
+holds both keys or neither, so the gate was unobservable until `administrator` was added.
+
 **The dashboard's URLs are German, and a project's tab is one of them.**
 `/projekte/:id/gewerke` — the tab lives in the route, not in `useState`, so it is a link somebody
 sends a colleague and a place a reload returns to. `routes.tsx` therefore carries *two* detail
@@ -785,7 +883,9 @@ Documented in the audit performed on this repo, still open:
   endpoint, no UI. Scheduled publishing is half built.
 - The `Notification` and `Redirect` Prisma models have tables and no implementation at all.
   `docs/data-model.md` §3.23 makes Notification a real domain; nothing reads it yet.
-- No Department entity; the closest thing is a hardcoded option list on the team type's `group`.
+- `Department` has a table, a tree and a head, and **no API and no screen**; the team content
+  type's `group` is still a hardcoded option list. Standorte got their module first because the
+  website reads them; Abteilungen are `docs/ENTERPRISE_ROADMAP.md` → P2-6.
 - **The client renders any route to any signed-in user.** `routes.tsx` declares each route's
   permissions and `App.tsx` checks them, so the *shell* refuses — but that is a courtesy. The
   server's 403 is the control, as it has always been.
@@ -857,6 +957,30 @@ Opened by Wave 2 module 3, and each is a deliberate stop rather than an oversigh
 - **There is no `Contact`, so a recipient is free text.** `TransmittalRecipient` takes an
   `employeeId` *or* a typed name, firm and e-mail — the same compromise `MeetingAttendee` makes, and
   it becomes a foreign key in Wave 3.
+
+Opened by **Unternehmen**, and each is a deliberate stop rather than an oversight:
+
+- **Three of the thirteen settings groups the brief asks for are not built, and say so.**
+  *Benachrichtigungen* renders a `ModulePlaceholder` because the `Notification` table has no
+  consumer (Wave 2 module 9); *Sicherung* is an integration row reading "Nicht gebaut", because
+  there is no backup system in this application at all; *Analytics* and *Karten* the same. The
+  three states on that panel — `configured`, `unconfigured`, `unbuilt` — are distinct on purpose:
+  a missing feature and a missing setting look identical as one grey dot, and the first gets
+  waited on for ever.
+- **The application version is reported as absent.** Nothing stamps a build here, so
+  `/dashboard/system` returns `version: null` with a reason rather than `package.json`'s `0.0.1`,
+  which would be a number that never changes and looks like one that does.
+- **Lockout threshold, lockout duration and password length are still constants** in
+  `auth.rules.ts`. Session lifetime is configurable and clamped; these are not, so an incident
+  cannot be responded to without a deploy. `docs/ENTERPRISE_ROADMAP.md` → P1-5, together with the
+  active-sessions view `RefreshToken` already has the data for.
+- **`security.allowedOrigins` stays inert.** CORS is resolved once at bootstrap; making it
+  dynamic costs a database read per preflight and locks the dashboard out of its own API when it
+  is wrong. A deliberate deferral, not an oversight.
+- **The organisation's website defaults are stored and not yet consumed.** `seoTitlePattern`,
+  `seoDescription`, `ogImageUrl` and `faviconUrl` are columns the `seo` content type does not
+  fall back to yet. They are *not* marked `pending` the way a setting would be, because the
+  section says in its own description that the content type remains authoritative.
 
 `README.md` → *Known limitations* carries the product-level list (no MFA flow, local-disk media,
 placeholder legal pages, `CodeGate` is a display barrier and not security).

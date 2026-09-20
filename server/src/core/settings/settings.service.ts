@@ -3,109 +3,50 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import type { AuthUser } from "../../common/decorators";
+import { REDACTED, planSettingUpdates, type SettingDef } from "./settings.rules";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
 
-export const REDACTED = "••••••••";
+export { REDACTED };
+export type { SettingDef };
 
 /**
  * The settings that ship with the install.
  *
  * Seeded rather than hardcoded so they are editable, but defined here so a
- * fresh database comes up configured rather than empty. `secret: true` marks
- * the values that are redacted in every read — see `SettingsService.list`.
+ * fresh database comes up configured rather than empty.
  *
- * **`pending: true` marks a setting that nothing reads yet**, and it exists
- * because of what an audit of this file found: 24 of these 26 keys were stored,
- * shown in the dashboard as live controls, and consumed by no code anywhere.
- * `workflow.requireApproval` was the dangerous one — its own description says
- * switching it off lifts the four-eyes principle, so an operator could
- * reasonably believe they had switched it *on*. The SMTP block was the
- * confusing one: mail was configured from `server/.env`, so filling in this form
- * and finding mail still not sending gave no clue why.
+ * **Every entry declares a `type`**, and that is new. Types are what
+ * `settings.rules.ts` validates against on write and what the dashboard renders
+ * from; before them the field type was *inferred from the stored value*, which
+ * meant a setting could not be rendered correctly until it already held the
+ * right kind of value. See the note at the top of `settings.rules.ts` for the
+ * data-loss path that made it urgent.
  *
- * Most are now wired (see `pending` on the few that are not). For those that are
- * not, a flag is the honest answer rather than deletion: they are the shape of
- * features that are half-built — `security.requireMfaForAdmins` has columns and
- * a dependency but no enrolment flow — and the dashboard renders them as
- * explicitly not-yet-connected. That is the same choice the executive dashboard
- * makes with `KpiUnavailable`: a control that silently does nothing is worse
- * than one that says it does nothing.
+ * **`pending: true` marks a setting that nothing reads yet.** A flag is the
+ * honest answer rather than deletion: they are the shape of features that are
+ * half-built — `security.requireMfaForAdmins` has columns and a dependency but
+ * no enrolment flow — and the dashboard renders them as explicitly
+ * not-yet-connected. That is the same choice the executive dashboard makes with
+ * `KpiUnavailable`: a control that silently does nothing is worse than one that
+ * says it does nothing. A setting stops being `pending` in the same commit that
+ * gives it a reader.
  *
- * A setting stops being `pending` in the same commit that gives it a reader.
+ * **Nine keys left this list** when the firm became an entity: `company.name`,
+ * `company.legalName`, `company.email`, `company.website`, the three `brand.*`
+ * and two `site.*`. Eight of them were `pending`, and all nine are now typed,
+ * validated, versioned and audited **columns** on `Organisation` — a place
+ * where "the company's e-mail address" is a field rather than a JSON blob under
+ * a string key. `brand.primaryColor` is the one that was not merely moved but
+ * **removed**: the IEM palette is defined in `tailwind.config.ts` and
+ * `admin.css`, and a settings field that appeared to change it while changing
+ * nothing was a promise the system must not make.
  */
-export type SettingDef = {
-  key: string;
-  group: string;
-  value: unknown;
-  description: string;
-  secret?: boolean;
-  /** Stored and editable, but read by no code yet. Rendered as such. */
-  pending?: boolean;
-};
-
 export const DEFAULT_SETTINGS: SettingDef[] = [
-  {
-    key: "company.name",
-    group: "Unternehmen",
-    value: "IEM AG",
-    description: "Firmenname. Steht als Absendername in ausgehenden E-Mails, wenn kein eigener gesetzt ist.",
-  },
-  {
-    key: "company.legalName",
-    group: "Unternehmen",
-    value: "IEM AG — Ingenieurbüro für Energie- und Messtechnik",
-    description: "Vollständige Firmenbezeichnung",
-    pending: true,
-  },
-  {
-    key: "company.email",
-    group: "Unternehmen",
-    value: "info@iem.ch",
-    description: "Allgemeine E-Mail",
-    pending: true,
-  },
-  {
-    key: "company.website",
-    group: "Unternehmen",
-    value: "https://www.iem.ch",
-    description: "Website",
-    pending: true,
-  },
-
-  { key: "brand.logoUrl", group: "Marke", value: "/img/logo.svg", description: "Logo", pending: true },
-  {
-    key: "brand.faviconUrl",
-    group: "Marke",
-    value: "/favicon.svg",
-    description: "Favicon",
-    pending: true,
-  },
-  {
-    key: "brand.primaryColor",
-    group: "Marke",
-    value: "#003882",
-    description: "Primärfarbe — dieselbe wie im Logo. Änderungen wirken nicht auf die Website-Tokens.",
-    pending: true,
-  },
-
-  {
-    key: "site.baseUrl",
-    group: "Website",
-    value: "https://www.iem.ch",
-    description: "Basis-URL",
-    pending: true,
-  },
-  {
-    key: "site.defaultLocale",
-    group: "Website",
-    value: "de-CH",
-    description: "Sprache",
-    pending: true,
-  },
   {
     key: "site.maintenanceMode",
     group: "Website",
+    type: "boolean",
     value: false,
     description: "Wartungsmodus — die Website liefert dann den letzten Snapshot ohne Aktualisierung.",
     pending: true,
@@ -114,58 +55,112 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   {
     key: "mail.from",
     group: "E-Mail",
+    type: "email",
     value: "noreply@iem.ch",
-    description: "Absenderadresse. Leer lassen, um MAIL_FROM aus der Umgebung zu verwenden.",
+    description: "Absenderadresse",
+    blankMeans: "MAIL_FROM aus der Umgebung",
   },
   {
     key: "mail.fromName",
     group: "E-Mail",
+    type: "string",
     value: "IEM AG",
-    description: "Absendername. Leer lassen, um den Firmennamen zu verwenden.",
+    description: "Absendername",
+    blankMeans: "der Firmenname aus den Unternehmensangaben",
   },
   {
     key: "mail.smtpHost",
     group: "E-Mail",
+    type: "string",
     value: "",
-    description:
-      "SMTP-Server. Leer lassen, um SMTP_HOST aus der Umgebung zu verwenden — ist beides leer, werden E-Mails nur protokolliert.",
+    description: "SMTP-Server",
+    blankMeans: "SMTP_HOST aus der Umgebung — ist beides leer, werden E-Mails nur protokolliert",
   },
-  { key: "mail.smtpPort", group: "E-Mail", value: 587, description: "SMTP-Port" },
-  { key: "mail.smtpUser", group: "E-Mail", value: "", description: "SMTP-Benutzer" },
-  { key: "mail.smtpPassword", group: "E-Mail", value: "", description: "SMTP-Passwort", secret: true },
-  { key: "mail.smtpSecure", group: "E-Mail", value: false, description: "TLS ab Verbindungsaufbau" },
+  {
+    key: "mail.smtpPort",
+    group: "E-Mail",
+    type: "number",
+    value: 587,
+    description: "SMTP-Port",
+    min: 1,
+    max: 65535,
+  },
+  {
+    key: "mail.smtpUser",
+    group: "E-Mail",
+    type: "string",
+    value: "",
+    description: "SMTP-Benutzer",
+    blankMeans: "SMTP_USER aus der Umgebung",
+  },
+  {
+    key: "mail.smtpPassword",
+    group: "E-Mail",
+    type: "string",
+    value: "",
+    description: "SMTP-Passwort",
+    secret: true,
+    blankMeans: "SMTP_PASSWORD aus der Umgebung",
+  },
+  {
+    key: "mail.smtpSecure",
+    group: "E-Mail",
+    type: "boolean",
+    value: false,
+    description: "TLS ab Verbindungsaufbau",
+  },
 
   {
     key: "applications.notifyEmail",
     group: "Bewerbungen",
+    type: "email",
     value: "info@iem.ch",
     description: "Wohin eine Benachrichtigung über neue Bewerbungen geht",
   },
   {
+    /**
+     * The P0.
+     *
+     * `min: 30` is not a style choice. Below it the purge starts deleting
+     * dossiers a recruiter has not finished reading, and at `0` it deletes them
+     * the same night. The upper bound is ten years, which is longer than any
+     * retention an applicant would expect and short enough to stay a number
+     * rather than a synonym for "forever".
+     */
     key: "applications.retentionDays",
     group: "Bewerbungen",
+    type: "number",
     value: 180,
-    description:
-      "Nach wie vielen Tagen eine Bewerbung samt Dateien gelöscht wird. Personendaten — nicht unbegrenzt aufbewahren.",
+    description: "Aufbewahrungsfrist für Bewerbungen",
+    unit: "Tage",
+    min: 30,
+    max: 3650,
   },
   {
     key: "applications.maxFileBytes",
     group: "Bewerbungen",
+    type: "number",
     value: 10 * 1024 * 1024,
-    description:
-      "Grösse pro Datei. Die harte Obergrenze von 10 MB steht im Upload-Filter und kann hier nur unterschritten werden.",
+    description: "Grösse pro Datei",
+    unit: "Bytes",
+    min: 64 * 1024,
+    max: 10 * 1024 * 1024,
   },
 
   {
     key: "security.sessionTimeoutMinutes",
     group: "Sicherheit",
+    type: "number",
     value: 15,
-    description:
-      "Gültigkeit des Zugriffstokens. Gilt ab der nächsten Anmeldung oder Token-Erneuerung; 1 bis 240 Minuten.",
+    description: "Gültigkeit des Zugriffstokens",
+    unit: "Minuten",
+    min: 1,
+    max: 240,
   },
   {
     key: "security.requireMfaForAdmins",
     group: "Sicherheit",
+    type: "boolean",
     value: false,
     description: "Zwei-Faktor-Pflicht für Administratoren",
     // The columns (`User.mfaSecret`, `User.mfaEnabled`), the `otpauth`
@@ -177,6 +172,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   {
     key: "security.allowedOrigins",
     group: "Sicherheit",
+    type: "stringList",
     value: [],
     description: "Zusätzliche erlaubte Herkünfte für die API",
     // CORS is resolved once at bootstrap from `CORS_ORIGINS`. Making it dynamic
@@ -189,13 +185,15 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   {
     key: "workflow.requireApproval",
     group: "Freigabe",
+    type: "boolean",
     value: true,
     description:
-      "Vier-Augen-Prinzip: Einreichende dürfen ihre eigenen Änderungen nicht selbst freigeben. Ausschalten hebt das auf.",
+      "Vier-Augen-Prinzip: Einreichende dürfen ihre eigenen Änderungen nicht selbst freigeben",
   },
   {
     key: "workflow.autoPublishApproved",
     group: "Freigabe",
+    type: "boolean",
     value: false,
     description: "Freigegebene Inhalte sofort veröffentlichen, ohne zweiten Schritt",
     // Publishing is atomic and site-wide: it freezes *every* approved entry and
@@ -207,8 +205,28 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
   },
 ];
 
-/** Code-side definition by key — what `list` reads `pending` from. */
+/** Code-side definition by key — what `list` and `update` read. */
 const DEFS_BY_KEY = new Map(DEFAULT_SETTINGS.map((d) => [d.key, d]));
+
+/**
+ * Settings whose change weakens a control rather than configuring one.
+ *
+ * The dashboard confirms these before saving, with the consequence spelled out.
+ * Held here rather than in the screen because the *server* is where the list of
+ * things that matter belongs — a second copy in the client would be the one
+ * that goes out of date, and it would go out of date silently.
+ */
+export const DANGEROUS_SETTINGS: Record<string, string> = {
+  "workflow.requireApproval":
+    "Ausgeschaltet darf jede einreichende Person ihre eigenen Änderungen selbst freigeben. " +
+    "Das Vier-Augen-Prinzip entfällt für die gesamte Website.",
+  "applications.retentionDays":
+    "Eine kürzere Frist löscht bestehende Bewerbungen beim nächsten nächtlichen Lauf — " +
+    "samt Dateien, unwiderruflich.",
+  "security.sessionTimeoutMinutes":
+    "Eine längere Gültigkeit bedeutet, dass ein entwendetes Zugriffstoken entsprechend " +
+    "länger brauchbar bleibt.",
+};
 
 @Injectable()
 export class SettingsService {
@@ -218,28 +236,52 @@ export class SettingsService {
   ) {}
 
   /**
-   * All settings, grouped.
+   * All settings, grouped, with the declaration each is rendered from.
    *
    * Secret values never leave as plaintext — they come back as a fixed mask,
    * with `hasValue` saying whether one is set. The dashboard shows "gesetzt"
    * or "nicht gesetzt" and writing an unchanged mask back is a no-op, so
    * saving the SMTP form without retyping the password does not blank it.
+   *
+   * A row in the database that this code no longer declares is **skipped**
+   * rather than shown. The seeder reports orphans instead of deleting them, so
+   * a retired key survives a deploy; rendering it would put a control on the
+   * page that nothing reads and that `update` would refuse.
    */
   async list(canSeeSecrets: boolean) {
     const rows = await this.prisma.setting.findMany({ orderBy: [{ group: "asc" }, { key: "asc" }] });
     const groups = new Map<string, unknown[]>();
 
     for (const row of rows) {
+      const def = DEFS_BY_KEY.get(row.key);
+      if (!def) continue;
+
       const masked =
         row.secret && !canSeeSecrets
-          ? { ...row, value: row.value ? REDACTED : "", hasValue: Boolean(row.value) }
-          : { ...row, hasValue: Boolean(row.value) };
+          ? { value: row.value ? REDACTED : "", hasValue: Boolean(row.value) }
+          : { value: row.value, hasValue: Boolean(row.value) };
+
       const list = groups.get(row.group) ?? [];
-      // `pending` is a property of the code, not of the row — whether a setting
-      // has a reader is decided by what imports it, so it is carried by
-      // `DEFAULT_SETTINGS` and joined on here rather than stored in a column
-      // that would go stale the moment a consumer was written.
-      list.push({ ...masked, pending: DEFS_BY_KEY.get(row.key)?.pending ?? false });
+      list.push({
+        key: row.key,
+        group: row.group,
+        description: row.description,
+        secret: row.secret,
+        updatedAt: row.updatedAt,
+        ...masked,
+        // Everything below is a property of the *code*, not of the row: whether
+        // a setting has a reader, and what shape it may hold, are decided by
+        // what imports it. Storing them in columns would go stale the moment a
+        // consumer was written.
+        type: def.type,
+        pending: def.pending ?? false,
+        min: def.min,
+        max: def.max,
+        options: def.options,
+        unit: def.unit,
+        blankMeans: def.blankMeans,
+        dangerous: DANGEROUS_SETTINGS[row.key],
+      });
       groups.set(row.group, list);
     }
 
@@ -276,7 +318,16 @@ export class SettingsService {
     return typeof value === "string" && value.trim() ? value.trim() : fallback;
   }
 
-  /** A number setting, clamped. Out-of-range or non-numeric falls back. */
+  /**
+   * A number setting, clamped. Out-of-range or non-numeric falls back.
+   *
+   * **Use this rather than `value<number>()` for anything arithmetic**, even
+   * now that writes are validated. Validation stops a bad value being stored
+   * through the API; it does not stop one that is already in the table from a
+   * release before the type existed, or one written by a migration, or one
+   * typed straight into the database. The clamp is the reader's own guard and
+   * it costs nothing.
+   */
   async number(key: string, fallback: number, min: number, max: number): Promise<number> {
     const value = await this.value<unknown>(key);
     const n = typeof value === "number" ? value : Number(value);
@@ -290,43 +341,45 @@ export class SettingsService {
     return typeof value === "boolean" ? value : fallback;
   }
 
-  async update(
-    updates: { key: string; value: unknown }[],
-    actor: AuthUser,
-    ctx: Ctx,
-  ) {
-    const keys = updates.map((u) => u.key);
-    const before = await this.prisma.setting.findMany({ where: { key: { in: keys } } });
-    const byKey = new Map(before.map((b) => [b.key, b]));
+  /**
+   * Writes a batch, or refuses the whole batch.
+   *
+   * All-or-nothing on purpose. A settings form saves several fields at once and
+   * a partial write leaves the operator looking at a screen where some of their
+   * changes took and some did not, with no indication which — the worst
+   * possible feedback for a configuration page. `planSettingUpdates` sorts the
+   * batch first, so the refusal names every problem rather than the first.
+   */
+  async update(updates: { key: string; value: unknown }[], actor: AuthUser, ctx: Ctx) {
+    const plan = planSettingUpdates(DEFS_BY_KEY, updates);
 
-    const applied: { key: string; value: unknown }[] = [];
-    for (const update of updates) {
-      const existing = byKey.get(update.key);
-      if (!existing) throw new NotFoundException(`Unbekannte Einstellung „${update.key}“.`);
-      // Writing the mask back means "leave it alone" — see `list`.
-      if (existing.secret && update.value === REDACTED) continue;
-      /**
-       * An absent value is refused rather than written.
-       *
-       * Prisma reads `undefined` as "do not touch this column", so an update
-       * that lost its value on the way in used to sail through: a 200, an audit
-       * row claiming the setting had changed, and no change. That is exactly
-       * what happened while the DTO's `value` carried no decorator and the
-       * global `whitelist: true` pipe stripped it.
-       *
-       * The decorator is the fix; this is the check that makes the *next*
-       * version of that mistake loud instead of silent, wherever it comes from.
-       */
-      if (update.value === undefined) {
-        throw new BadRequestException(
-          `Für „${update.key}“ wurde kein Wert übermittelt.`,
-        );
-      }
-      applied.push(update);
+    if (plan.unknown.length) {
+      throw new NotFoundException(
+        `Unbekannte Einstellung(en): ${plan.unknown.map((k) => `„${k}“`).join(", ")}.`,
+      );
+    }
+    if (plan.errors.length) {
+      /*
+        The refusal is audited as a denial rather than only returned.
+
+        Someone repeatedly trying to push the retention period to zero is a
+        thing an operator should be able to see afterwards, and a 400 that
+        exists only in a browser's network tab is not evidence of anything.
+      */
+      this.audit.record({
+        actor,
+        action: "settings.rejected",
+        resource: "setting",
+        outcome: "FAILURE",
+        after: { keys: updates.map((u) => u.key) },
+        message: plan.errors.join(" "),
+        ...ctx,
+      });
+      throw new BadRequestException(plan.errors.join(" "));
     }
 
     await this.prisma.$transaction(
-      applied.map((u) =>
+      plan.apply.map((u) =>
         this.prisma.setting.update({
           where: { key: u.key },
           data: { value: u.value as Prisma.InputJsonValue, updatedById: actor.id },
@@ -340,8 +393,8 @@ export class SettingsService {
       resource: "setting",
       // The audit scrubber removes the values of secret keys; listing only the
       // keys here keeps the log useful without repeating that responsibility.
-      after: { keys: applied.map((a) => a.key) },
-      message: `${applied.length} Einstellung(en)`,
+      after: { keys: plan.apply.map((a) => a.key) },
+      message: `${plan.apply.length} Einstellung(en)`,
       ...ctx,
     });
 

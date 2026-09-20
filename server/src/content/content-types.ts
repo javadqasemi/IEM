@@ -413,8 +413,12 @@ export const CONTENT_TYPES: ContentTypeDef[] = [
         name: "office",
         label: "Standort",
         type: "select",
+        // Resolved from the document's `offices`, which now comes from the
+        // `Office` table under Unternehmen → Standorte rather than from a
+        // content type. The value is still the **city**, because that is what
+        // the team grid's filter groups by and what `crossCheck` compares.
         optionsFrom: "offices",
-        help: "Muss einem Standort entsprechen — daran hängt der Filter im Team-Raster.",
+        help: "Der Ort eines Standorts (Unternehmen → Standorte) — daran hängt der Filter im Team-Raster.",
       },
       {
         name: "role",
@@ -478,23 +482,22 @@ export const CONTENT_TYPES: ContentTypeDef[] = [
       },
     ],
   },
-  {
-    key: "offices",
-    kind: "COLLECTION",
-    name: "Standorte",
-    description: "Die Büros. Der erste Eintrag liefert die Telefonnummer für Kopf und Kontaktfeld.",
-    contentKey: "offices",
-    rank: 100,
-    icon: "office",
-    fields: [
-      { name: "city", label: "Ort", type: "text", required: true },
-      { name: "street", label: "Strasse", type: "text", required: true },
-      { name: "zip", label: "PLZ und Ort", type: "text", required: true },
-      { name: "phone", label: "Telefon", type: "tel", required: true },
-      { name: "phoneHref", label: "Telefon-Link", type: "text", required: true, help: "Form: tel:+41332274020" },
-      { name: "kind", label: "Bezeichnung", type: "text", required: true, help: "Hauptsitz, Zweigbüro …" },
-    ],
-  },
+  /*
+    `offices` used to be here, and its absence is the point.
+
+    The Standorte on the website are now derived from the `Office` table, which
+    is the same table `Employee.officeId`, `Project.officeId` and
+    `Building.officeId` point at. They are edited under
+    **Unternehmen → Standorte** and reach the site through `buildSnapshot`'s
+    injected `offices` — see rule 5 there.
+
+    As a content type this was a second store of the firm's own addresses, kept
+    in step by hand, and it had already drifted: the seeded `Office` rows put
+    Thun at Bierigutstrasse 6 while the published site said Uttigenstrasse 49.
+    A `phoneHref` field asked an editor to retype `tel:+41332274020` beside the
+    number they had just typed; `telHref()` derives it now, so a mistyped link
+    that dials the wrong number while looking perfect is no longer possible.
+  */
   {
     key: "sponsorships",
     kind: "COLLECTION",

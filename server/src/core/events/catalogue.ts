@@ -73,6 +73,29 @@ export type DomainEvents = {
   ContentPublished: { version: number; entriesPublished: number; warnings: string[] };
   ContentRolledBack: { typeKey: string; key: string; toVersion: number };
 
+  /* ---- The firm itself --------------------------------------------- */
+  /**
+   * The organisation is a singleton, so there is no `Created` and no `Deleted`
+   * — the row is upserted into existence and never removed. `fields` rather
+   * than the whole record for the same reason `ProjectUpdated` carries it: a
+   * rule that wants to react to "somebody changed the VAT number" should not
+   * have to diff the payload, and the `before`/`after` pair is on the envelope
+   * anyway.
+   */
+  OrganisationUpdated: { fields: string[] };
+  OfficeCreated: { name: string; city: string | null };
+  OfficeUpdated: { name: string; fields: string[] };
+  /**
+   * Archiving is not deleting, and both exist because they are different
+   * facts. An office that closed still has employees and projects pointing at
+   * it; a deleted one was created by mistake.
+   */
+  OfficeArchived: { name: string };
+  OfficeRestored: { name: string };
+  OfficeDeleted: { name: string };
+  /** Recorded whether it succeeded, which is the point of testing it. */
+  MailTested: { to: string; ok: boolean; error?: string };
+
   /* ---- Media, users, applications (exist today) -------------------- */
   MediaUploaded: { filename: string; mimeType: string; size: number };
   MediaDeleted: { filename: string };
@@ -303,6 +326,13 @@ export const DOMAIN_EVENT_NAMES = [
   "ContentRejected",
   "ContentPublished",
   "ContentRolledBack",
+  "OrganisationUpdated",
+  "OfficeCreated",
+  "OfficeUpdated",
+  "OfficeArchived",
+  "OfficeRestored",
+  "OfficeDeleted",
+  "MailTested",
   "MediaUploaded",
   "MediaDeleted",
   "UserInvited",

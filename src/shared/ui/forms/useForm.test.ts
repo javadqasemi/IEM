@@ -9,6 +9,25 @@ import { formReducerForTest as reducer } from "./useForm";
  * decisions are what can be wrong. Testing them through a renderer would need
  * a DOM this project deliberately does not have (`vitest.config.ts`), and would
  * tell us less about which rule broke.
+ *
+ * ---
+ *
+ * **What this file cannot see, stated rather than assumed.**
+ *
+ * Everything below is the pure reducer. The *wiring* around it has had exactly
+ * one bug and this file could not have caught it: the clean-state baseline was
+ * a `useRef` while `dirty` was a `useMemo` over `[values]`, and a ref is
+ * invisible to a dependency array — so moving the baseline on a successful
+ * save did not recompute `dirty`. `reducer.isDirty` was correct throughout and
+ * every assertion here passed.
+ *
+ * It is invisible in a dialog that closes on save and visible the moment a
+ * form stays open: the save bar went on saying "Ungespeicherte Änderungen"
+ * over a record that had just been written. The guard is therefore an e2e
+ * assertion — `e2e/organisation.spec.ts`, *"a save sends exactly one PATCH,
+ * and the value comes back"*, which waits for the bar to say "Gespeichert."
+ * That is the same reasoning `core/versioning/changed.test.ts` sets out for
+ * the toolchain gap, applied to a renderer gap instead.
  */
 
 type Values = { name: string; note: string; tags: string[] };

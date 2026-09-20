@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+﻿import { useId, useMemo, useState } from "react";
 import { cn } from "@/shared/utils/cn";
 import { formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
 import {
@@ -17,7 +17,6 @@ import {
   Input,
   SearchInput,
   Select,
-  Toggle,
   type DateRange,
 } from "@/shared/ui/forms";
 import { Modal } from "@/shared/ui/overlays";
@@ -27,13 +26,13 @@ import { useDebounced, useMutation } from "@/shared/hooks";
 import { usePageActions } from "@/core/router";
 import { actionLabel } from "@/entities/audit";
 import { ActivityFeed } from "@/widgets/activity";
-import { api, type SettingRow } from "../lib/api";
+import { api } from "../lib/api";
 import { authRepository, useAuth } from "@/core/auth";
 import { THEME_CHOICES, useTheme } from "../lib/theme";
 import { useAsync } from "../lib/useAsync";
 
 /**
- * Three screens that share a file: Settings, Audit and Profile.
+ * Two screens that share a file: Audit and Profile.
  *
  * It was four and 1'009 lines. **Applications left** for
  * `features/applications/`, which is the reference implementation of the five
@@ -42,197 +41,19 @@ import { useAsync } from "../lib/useAsync";
  * retention arithmetic and a status transition table, both of which are now
  * pure functions with tests rather than expressions inside JSX.
  *
- * The remaining three follow in Stage D. Each becomes its own feature folder;
- * nothing here needs to change for that, a screen simply leaves.
+ * **Settings left next**, for `features/organisation/`, and it did not survive
+ * the move unchanged. What was one page of seven cards and a single Save
+ * button is now a workspace with a sub-navigation, a section in the URL, an
+ * unsaved-changes guard, per-field validation and a confirmation on the
+ * settings whose own descriptions say they weaken a control. The key/value
+ * store it read is still there and is now a *part* of that workspace rather
+ * than the whole of it — the company's name, addresses and legal identity
+ * became columns on `Organisation`, which is where a typed, validated,
+ * versioned and audited value can live.
+ *
+ * The remaining two follow. Each becomes its own feature folder; nothing here
+ * needs to change for that, a screen simply leaves.
  */
-
-/* ================================================================== */
-/* Settings                                                            */
-/* ================================================================== */
-
-export function SettingsPage() {
-  const { can } = useAuth();
-  const toast = useToast();
-  const settings = useAsync(() => api.settings(), []);
-  const [changes, setChanges] = useState<Record<string, unknown>>({});
-  const save = useMutation(api.updateSettings);
-
-  if (settings.error) return <ErrorState message={settings.error} onRetry={settings.reload} />;
-
-  const dirty = Object.keys(changes).length > 0;
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Einstellungen"
-        title="System und Betrieb"
-        description="Unternehmensangaben, E-Mail-Versand, Aufbewahrungsfristen und Sicherheitsvorgaben."
-        actions={
-          can("settings.update") ? (
-            <Button
-              variant="primary"
-              disabled={!dirty}
-              busy={save.busy}
-              onClick={async () => {
-                const updates = Object.entries(changes).map(([key, value]) => ({ key, value }));
-                const ok = await save.run(updates);
-                if (ok) {
-                  setChanges({});
-                  toast.success("Gespeichert", `${updates.length} Einstellung(en) übernommen.`);
-                  settings.reload();
-                }
-              }}
-            >
-              Speichern
-            </Button>
-          ) : null
-        }
-      />
-
-      {save.error ? <ErrorState title="Speichern fehlgeschlagen" message={save.error} /> : null}
-
-      {settings.loading ? (
-        <div className="flex flex-col gap-6">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-56 rounded-lg" />
-          ))}
-        </div>
-      ) : (
-        (settings.data ?? []).map((group) => (
-          <Card key={group.group} title={group.group}>
-            <div className="flex flex-col gap-5">
-              {group.settings.map((setting) => (
-                <SettingField
-                  key={setting.key}
-                  setting={setting}
-                  value={changes[setting.key] ?? setting.value}
-                  disabled={
-                    !can("settings.update") ||
-                    (setting.secret && !can("settings.secrets"))
-                  }
-                  onChange={(next) => setChanges({ ...changes, [setting.key]: next })}
-                />
-              ))}
-            </div>
-          </Card>
-        ))
-      )}
-    </>
-  );
-}
-
-/**
- * One setting, rendered from the shape of its stored value.
- *
- * The type is inferred rather than declared, which is the honest reflection of
- * a JSON column: a boolean gets a toggle, a number a numeric input, an array a
- * comma list, everything else a text box. A secret shows its mask and writing
- * the mask back is a no-op on the server, so saving the SMTP form without
- * retyping the password does not blank it.
- *
- * **`pending` marks a setting nothing reads yet**, and it is drawn differently
- * rather than hidden. An audit of this screen found that 23 of the 25 settings
- * were stored, editable, and consumed by no code — the SMTP block configured
- * nothing because mail came from the environment, and `workflow.requireApproval`
- * described lifting the four-eyes principle while doing nothing at all, so an
- * operator could as easily have believed they were switching it *on*. Most are
- * now wired; the rest say so.
- *
- * Saying so beats hiding them: they are the shape of half-built features —
- * `security.requireMfaForAdmins` has its columns and its dependency but no
- * enrolment flow — and an operator looking for the MFA switch should find it
- * with an explanation rather than not find it. It is the same choice the
- * executive dashboard makes with `KpiUnavailable`: a figure with no source shown
- * as a gap rather than as a zero.
- */
-function SettingField({
-  setting,
-  value,
-  onChange,
-  disabled,
-}: {
-  setting: SettingRow;
-  value: unknown;
-  onChange: (next: unknown) => void;
-  disabled?: boolean;
-}) {
-  const id = `setting-${setting.key}`;
-
-  /** The key line, plus a plain statement when nothing reads the value. */
-  const hint = setting.pending
-    ? `${setting.key} · der Wert wird gespeichert, aber noch von nichts gelesen`
-    : setting.secret
-      ? `${setting.key} · ${setting.hasValue ? "gesetzt" : "nicht gesetzt"} — leer lassen, um den Wert zu behalten`
-      : setting.key;
-
-  /**
-   * A badge, not a dimmed block.
-   *
-   * `opacity-60` on the wrapper was the first attempt, and an axe pass measured
-   * what it did: it multiplies through to the text inside, dropping the hint
-   * from `muted` to **2.54:1** in the light theme and 3.43:1 in the dark. The
-   * information — "nothing reads this yet" — was being carried by the one
-   * property that also makes it hard to read.
-   *
-   * A label says it outright, at full contrast, and says it more precisely than
-   * a shade could.
-   */
-  const pendingMark = setting.pending ? (
-    <Badge tone="neutral">noch nicht angebunden</Badge>
-  ) : null;
-
-  if (typeof setting.value === "boolean") {
-    return (
-      <div className="flex flex-col gap-1.5">
-        {pendingMark}
-        <Toggle
-          label={setting.description ?? setting.key}
-          hint={hint}
-          checked={Boolean(value)}
-          onChange={onChange}
-          disabled={disabled}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <Field
-      label={setting.description ?? setting.key}
-      htmlFor={id}
-      hint={hint}
-      action={pendingMark}
-    >
-      {Array.isArray(setting.value) ? (
-        <Input
-          id={id}
-          disabled={disabled}
-          value={(value as string[])?.join(", ") ?? ""}
-          onChange={(e) =>
-            onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))
-          }
-        />
-      ) : typeof setting.value === "number" ? (
-        <Input
-          id={id}
-          type="number"
-          disabled={disabled}
-          value={String(value ?? "")}
-          onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
-        />
-      ) : (
-        <Input
-          id={id}
-          disabled={disabled}
-          type={setting.secret ? "password" : "text"}
-          value={String(value ?? "")}
-          onChange={(e) => onChange(e.target.value)}
-          autoComplete={setting.secret ? "new-password" : undefined}
-        />
-      )}
-    </Field>
-  );
-}
 
 /* ================================================================== */
 /* Audit                                                               */

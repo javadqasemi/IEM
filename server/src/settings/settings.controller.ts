@@ -1,7 +1,10 @@
-import { Body, Controller, Get, Patch, Req } from "@nestjs/common";
+import { Body, Controller, Get, Patch, Post, Req } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import { Allow, IsArray, IsString, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { SettingsService } from "../core/settings/settings.service";
+import { MailService } from "../mail/mail.service";
+import { EventBus } from "../core/events/event-bus";
 import {
   ClientIp,
   CurrentUser,
@@ -26,14 +29,21 @@ class SettingUpdate {
    * doing so, which is worse than an error.
    *
    * `@Allow()` rather than a real validator because the value genuinely is
-   * arbitrary JSON — a string, a number, a boolean or an array, depending on the
-   * key — and the shape is checked against the setting's own definition in the
-   * service. `@Allow` is the decorator whose entire purpose is "keep this
-   * through the whitelist without asserting anything about it".
+   * arbitrary JSON — a string, a number, a boolean or an array, depending on
+   * the key. **The shape is checked against the setting's own declaration in
+   * `settings.rules.ts`**, which is where a per-key rule can live and a
+   * decorator cannot.
    *
-   * This is the second time this exact trap has been sprung in this codebase;
-   * the first is written up in CLAUDE.md against the content DTOs. Undecorated
-   * fields do not fail loudly. They vanish.
+   * That sentence used to be here and was not true: nothing checked the shape
+   * anywhere, and one unchecked value — `applications.retentionDays` — was
+   * multiplied into a deletion deadline. A `0` there deleted every applicant
+   * dossier received that day; a non-numeric one produced `new Date(NaN)` and
+   * took the public application form down with a 500. The rules file exists
+   * because of that; see the note at the top of it.
+   *
+   * This is the second time the whitelist trap has been sprung in this
+   * codebase; the first is written up in CLAUDE.md against the content DTOs.
+   * Undecorated fields do not fail loudly. They vanish.
    */
   @Allow() value!: unknown;
 }
@@ -47,7 +57,11 @@ export class UpdateSettingsDto {
 
 @Controller("settings")
 export class SettingsController {
-  constructor(private readonly settings: SettingsService) {}
+  constructor(
+    private readonly settings: SettingsService,
+    private readonly mail: MailService,
+    private readonly events: EventBus,
+  ) {}
 
   @Get()
   @RequirePermissions("settings.read")
@@ -70,5 +84,42 @@ export class SettingsController {
       ip,
       userAgent: req.headers["user-agent"] ?? null,
     });
+  }
+
+  /**
+   * Proves the mail configuration, to the caller's own address.
+   *
+   * **The recipient is not a parameter**, and that is the security property
+   * rather than a simplification: an endpoint that sends mail to an
+   * arbitrary address, from the firm's own domain, with a body a caller could
+   * influence, is an open relay with a permission check in front of it.
+   * `settings.update` is a permission several roles hold; none of them is
+   * "may send mail as IEM to anyone".
+   *
+   * Throttled at three a minute for the same reason — the send itself is the
+   * expensive, outward-facing part, and a settings page does not need more.
+   *
+   * The outcome is announced whichever way it goes. Somebody debugging "mail
+   * stopped working last Tuesday" wants the failures in the audit log, not
+   * only the successes.
+   */
+  @Post("mail/test")
+  @RequirePermissions("settings.update")
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  async testMail(@CurrentUser() user: AuthUser) {
+    const result = await this.mail.sendTest(user.email);
+
+    this.events.publish("MailTested", {
+      entity: "setting",
+      entityId: "mail",
+      payload: { to: user.email, ok: result.ok, error: result.error },
+      message: result.stub
+        ? "Kein SMTP-Server konfiguriert — die Nachricht wurde nur protokolliert."
+        : result.ok
+          ? `Testnachricht über ${result.host} versendet.`
+          : `Test-Versand fehlgeschlagen: ${result.error}`,
+    });
+
+    return { ...result, to: user.email };
   }
 }

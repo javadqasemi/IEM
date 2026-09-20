@@ -401,6 +401,59 @@ question its recipient is entitled to an answer to.
 holds `verify` but not `resolve`, which is the correct shape for a role that
 signs off rather than fixes.
 
+## 3.12 The firm itself — `organisation` and `office`
+
+Built with the Unternehmen module (`docs/ENTERPRISE_ROADMAP.md` → P1-1). Two
+resources rather than one, because an office is a record people create and
+archive while the organisation is a singleton that is only ever edited.
+
+| Resource | Standard actions | Extra keys | Notes |
+| --- | --- | --- | --- |
+| `organisation` | read, update | `organisation.updateLegal` | No `create`, no `delete` — the row is upserted into existence and never removed |
+| `office` | read, create, update, delete | `office.archive` | `archive` is the operation a closed office actually gets; `delete` is for a row created by mistake |
+
+**`organisation.updateLegal` is separate from `organisation.update`, and it is
+a field-level `◐`.** Changing the main telephone number and changing the UID
+are both writes to the same row and are not the same authority: the second is
+what appears in the commercial register, on every invoice and in the Impressum,
+and getting it wrong is a legal problem rather than an inconvenience. The same
+argument that splits `drawing.check` from `drawing.release` splits these.
+
+It cannot be a route decorator. `@RequirePermissions` is AND across its
+arguments and cannot ask *"only if the body touches these fields"*, and two
+routes would put the choice of which one to call in the client — which is not
+authorisation. So the gate is a `permissions.has` inside the handler, checked
+against `LEGAL_FIELDS`, and it is the §4 pattern below. The response to `GET
+/organisation` carries `canEditLegal` so the form can render those fields
+read-only rather than letting somebody fill them in and meet a 403 on save.
+
+**`office.archive` is separate from `office.delete`** for the reason Projects
+separates the same pair: an office that has closed still has employees,
+projects and buildings pointing at it, and its history has to keep resolving.
+`refuseDeleteOffice` refuses outright once anything references it, so `delete`
+is the rarer permission and archiving is the operation that exists in practice.
+
+### By role
+
+| Resource | Mgmt | Admin | PM | Engineer | HR | Finance | Guest |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| `organisation.read` | ● | ● | ○ | ○ | ○ | ○ | ○ |
+| `organisation.update` | ● | ● | ○ | ○ | ○ | ○ | ○ |
+| `organisation.updateLegal` | ● | **○** | ○ | ○ | ○ | ○ | ○ |
+| `office.read` | ● | ● | ○ | ○ | ○ | ○ | ○ |
+| `office.create` / `update` / `archive` | ● | ● | ○ | ○ | ○ | ○ | ○ |
+| `office.delete` | ● | **○** | ○ | ○ | ○ | ○ | ○ |
+
+The two bold cells are the whole point of the split, and they are the reason
+the seed grows a seventh test account (`adm@iem.test`): `administrator` is the
+only role holding one key of each pair without the other, so every other
+account stops at the route guard and the field-level gate is unobservable.
+`e2e/security.spec.ts` covers it with that account.
+
+`Manager` and the CMS-only roles get `organisation.read` and `office.read` and
+nothing more: the company's address is context they need while working, and
+changing it is not their job.
+
 ## 4. Row-level rules (`◐`)
 
 The guard is coarse and the service is fine-grained. The `◐` cells resolve to
@@ -417,6 +470,15 @@ these rules, each implemented once in the owning service and covered by a test:
 | **Assigned issue** — actor is `assigneeId` | `issue.resolve` for the Draftsman |
 | **Not the resolver** — `actor.id !== issue.resolvedById` | `issue.verify`, always, whatever the role |
 | **Not the releaser** — actor did not release the phase's last deliverable | `projectPhase.approve` |
+| **Legal fields** — the body touches none of `LEGAL_FIELDS` unless the actor holds `organisation.updateLegal` | `PATCH /organisation` |
+
+The last one is a **field-level** `◐` rather than a row-level one, and it is
+the only one in the catalogue: there is one row, and what varies is which of
+its columns the caller may write. It is listed here because the mechanism is
+the same — a `permissions.has` inside the handler, which
+`permissions.agreement.test.ts` counts as enforcement — and because a reader
+looking for "where are the rules a decorator cannot express" should find it in
+one place.
 
 The last two are the four-eyes rule, written twice because it applies to two
 entities. It is enforced in the service in both cases and holds regardless of

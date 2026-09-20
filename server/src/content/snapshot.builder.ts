@@ -50,10 +50,28 @@ type EntryRow = {
  *    `select` that omits the column returns `undefined`, which is falsy, and
  *    the filter then silently passes everything — the feature would look
  *    implemented and do nothing.
+ * 5. **`offices` does not come from a content entry.** It is injected, from the
+ *    `Office` table, and it is the one key in the document that has a
+ *    relational source. There used to be an `offices` content type holding the
+ *    same facts as editorial copy while `Office` held them as master data for
+ *    employees, projects and buildings — two stores, no relationship, and they
+ *    had already disagreed: the seed put Thun at Bierigutstrasse 6 and the live
+ *    site at Uttigenstrasse 49.
+ *
+ *    Injected rather than read here because this function is pure and must
+ *    stay so — it is the model the publish screen runs on every load. The
+ *    caller fetches (`OrganisationService.siteOffices`) and passes. An omitted
+ *    `offices` leaves the key absent, and `assertComplete` then refuses the
+ *    publish rather than blanking the site's address band, which is exactly
+ *    the failure mode that backstop exists for.
  */
 export function buildSnapshot(
   entries: EntryRow[],
-  opts: { source: "draft" | "published" } = { source: "published" },
+  opts: {
+    source: "draft" | "published";
+    /** From the `Office` table. See rule 5 above. */
+    offices?: unknown[];
+  } = { source: "published" },
 ): Record<string, unknown> {
   const byType = new Map<string, EntryRow[]>();
   for (const e of entries) {
@@ -93,6 +111,8 @@ export function buildSnapshot(
 
     out[type.contentKey] = rows.map((r) => stripEmpty(pick(r) as Record<string, unknown>));
   }
+
+  if (opts.offices) out.offices = opts.offices;
 
   return out;
 }
@@ -319,6 +339,10 @@ function labelFor(contentKey: string): string {
     jobBewerbung: "Stelleninserat — Bewerbung",
     jobSchluss: "Stelleninserat — Schlusssatz",
     contactEmail: "Bewerbungsadresse",
+    // Injected from the `Office` table rather than written by a content type,
+    // so `CONTENT_TYPES` has no name for it — see rule 5 on `buildSnapshot`.
+    // The publish screen would otherwise report a changed area as "offices".
+    offices: "Standorte",
   };
   return loose[contentKey] ?? contentKey;
 }

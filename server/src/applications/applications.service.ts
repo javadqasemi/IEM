@@ -152,7 +152,28 @@ export class ApplicationsService {
       });
     }
 
-    const retentionDays = await this.settings.value<number>("applications.retentionDays", 180);
+    /*
+      Clamped, like `maxFileBytes` above it — and the fact that this line was
+      the one raw `value<number>()` read in the codebase is exactly why it was
+      the dangerous one.
+
+      `retainUntil` is a **deletion deadline**: the 03:00 purge removes every
+      application past it, with its files, permanently. Read unclamped, a `0`
+      in the settings table deleted every dossier received that day and a
+      non-numeric value produced `new Date(NaN)`, which Prisma rejects — so the
+      public application form 500'd and candidates silently could not apply.
+
+      Writes are validated now (`settings.rules.ts`), which stops the value
+      being stored. This stops it being *read*, which is the guard that also
+      covers a row written before the type existed or edited straight in the
+      database. The bounds are the ones the setting declares.
+    */
+    const retentionDays = await this.settings.number(
+      "applications.retentionDays",
+      180,
+      30,
+      3650,
+    );
 
     const application = await this.prisma.jobApplication.create({
       data: {

@@ -9,6 +9,7 @@ import { Prisma, WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
 import { SettingsService } from "../core/settings/settings.service";
+import { OrganisationService } from "../core/organisation/organisation.service";
 import { contentTypeByKey } from "./content-types";
 import { validateEntry } from "./content.validator";
 import {
@@ -48,6 +49,17 @@ export class ContentService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
+    /**
+     * The firm's offices, which the published document carries and no content
+     * entry holds any more.
+     *
+     * A *second* caller of `OrganisationService` outside its own routes —
+     * `MailService` is the first — which is what put that service in `core/`
+     * rather than in the feature folder. This module may inject it for the
+     * same reason it may inject `SettingsService`: it is infrastructure, not a
+     * sibling feature, and `architecture.test.ts` distinguishes the two.
+     */
+    private readonly organisation: OrganisationService,
   ) {}
 
   /* ================================================================ */
@@ -638,6 +650,20 @@ export class ContentService {
    * visitor rather than by us.
    */
   async publish(note: string | undefined, actor: AuthUser, ctx: Ctx) {
+    /*
+      Read *before* the transaction, not inside it.
+
+      The offices come from a different module's table and nothing in this
+      transaction writes them, so holding the publish transaction open across
+      that read buys no consistency and lengthens the one transaction in the
+      system that locks the whole content table. The window it opens is real
+      and tiny — an office edited between this line and the commit would land
+      in the next publish — and a publish is a deliberate act somebody is
+      watching, which is the case where "the next one" is an acceptable answer.
+    */
+    const offices = await this.organisation.siteOffices();
+    const officeWarnings = await this.organisation.publishWarnings();
+
     const result = await this.prisma.$transaction(async (tx) => {
       const approved = await tx.contentEntry.findMany({
         where: { status: WorkflowState.APPROVED, deletedAt: null },
@@ -670,9 +696,9 @@ export class ContentService {
         },
       });
 
-      const content = buildSnapshot(rows, { source: "published" });
+      const content = buildSnapshot(rows, { source: "published", offices });
       assertComplete(content);
-      const warnings = crossCheck(content);
+      const warnings = [...crossCheck(content), ...officeWarnings];
 
       const last = await tx.contentSnapshot.findFirst({ orderBy: { version: "desc" } });
       const snapshot = await tx.contentSnapshot.create({
@@ -743,7 +769,7 @@ export class ContentService {
    * the same way: as an area that differs.
    */
   async pendingChanges() {
-    const [rows, last] = await Promise.all([
+    const [rows, last, offices, officeWarnings] = await Promise.all([
       this.prisma.contentEntry.findMany({
         where: { deletedAt: null },
         select: {
@@ -760,9 +786,11 @@ export class ContentService {
         },
       }),
       this.prisma.contentSnapshot.findFirst({ orderBy: { version: "desc" } }),
+      this.organisation.siteOffices(),
+      this.organisation.publishWarnings(),
     ]);
 
-    const next = buildSnapshot(rowsForNextPublish(rows), { source: "published" });
+    const next = buildSnapshot(rowsForNextPublish(rows), { source: "published", offices });
     const live = (last?.content ?? null) as Record<string, unknown> | null;
     const changes = diffDocuments(live, next);
 
@@ -772,6 +800,17 @@ export class ContentService {
       changed: changes.length > 0,
       changes,
       approved: rows.filter((r) => r.status === WorkflowState.APPROVED).length,
+      /**
+       * Read before the publish rather than after it.
+       *
+       * An incomplete Standort does not fail `assertComplete` — the array is
+       * non-empty, it just has a blank telephone number in it — so without
+       * this the first anyone hears of it is a visitor looking at a contact
+       * band with no number. `crossCheck`'s warnings are only available once a
+       * document has been built; these are available on the screen where
+       * somebody is deciding whether to publish.
+       */
+      warnings: officeWarnings,
     };
   }
 
@@ -797,8 +836,21 @@ export class ContentService {
         hidden: true,
       },
     });
-    const content = buildSnapshot(rows, { source: "draft" });
-    return { version: -1, publishedAt: new Date().toISOString(), content, warnings: crossCheck(content) };
+    /*
+      The offices are the *live* ones even in the draft preview, and there is
+      no draft version of them to show: `Office` has no draft/published split
+      — a change to a Standort is immediate in the register and reaches the
+      site at the next publish. Showing the live rows here is therefore what
+      the preview would produce, which is the property a preview is for.
+    */
+    const offices = await this.organisation.siteOffices();
+    const content = buildSnapshot(rows, { source: "draft", offices });
+    return {
+      version: -1,
+      publishedAt: new Date().toISOString(),
+      content,
+      warnings: [...crossCheck(content), ...(await this.organisation.publishWarnings())],
+    };
   }
 
   listSnapshots(limit = 50) {

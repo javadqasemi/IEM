@@ -878,13 +878,67 @@ blocks new time entries, but keeps every historical record.
 `documentId?`. Expiry drives a notification: a lapsed certificate is a
 compliance problem, not a diary entry.
 
-### 3.16 Department / Office
+### 3.16 Organisation / Department / Office
+
+**Organisation** — the firm itself, and **exactly one row, whose id is the
+literal `org`**. A singleton as a table rather than as a settings group,
+because the alternative is what it replaced: nine key/value rows holding the
+company's name, legal name and e-mail as untyped JSON, eight of which nothing
+read. A column can be typed, indexed, validated, versioned and audited; a blob
+under a string key cannot. Every read is `findUnique({ where: { id: "org" } })`
+and every write an `upsert` on the same, so the row is self-healing and no
+caller needs a null branch — a `findFirst` against a table that should have one
+row silently starts returning the wrong one the day a second appears.
+
+Four groups of fields, and they are the sections of the settings workspace:
+
+| Group | Fields |
+| --- | --- |
+| General | `name` `shortName` `description?` `foundedYear?` `organisationType` `defaultLocale` `defaultTimezone` `defaultCurrency` `status` |
+| Legal | `legalName?` `legalForm?` `uid?` `vatId?` `commercialRegister?` `registerOffice?` `legalStreet?` `legalZip?` `legalCity?` `legalCountry` `invoiceAddress?` `legalContactName?` `legalContactEmail?` `dataProtectionContactName?` `dataProtectionContactEmail?` `copyright?` `legalNotice?` |
+| Contact | `mainEmail?` `mainPhone?` `recruitmentEmail?` `supportEmail?` `billingEmail?` `website?` |
+| Website defaults | `seoTitlePattern?` `seoDescription?` `ogImageUrl?` `faviconUrl?` |
+
+**Validation** — `uid` and `vatId` are checked for shape *and* modulo-11 check
+digit (`organisation.rules.ts`), because `CHE-123.456.789` is the shape of a
+UID and is not one, and a wrong UID on an invoice is a wrong UID everywhere it
+is copied to afterwards. The two being different numbers is a **warning beside
+the saved record**, not a refusal: the day a firm genuinely has one and not the
+other, refusing would make the correct data impossible to enter.
+**Lifecycle** — `version` is the optimistic lock, same mechanism as
+`Project.version`; the legal half needs a second permission (§3.12 of
+`permissions.md`).
+**Status** — `ACTIVE` `DORMANT` `LIQUIDATION`.
 
 **Department** — `name` `code` `parentId?` `headId?` → Employee. Self-referencing
-tree; the audit noted no Department entity exists and the closest thing is a
-hardcoded option list on the team content type.
-**Office** — `name` `address` `zip` `city` `phone` `isHeadquarters`. Thun and
-Bern.
+tree. **Still has no API and no screen**: the team content type's `group` is a
+hardcoded option list, and the module is `ENTERPRISE_ROADMAP.md` → P2-6.
+
+**Office** — `name` `kind` `street?` `zip?` `city?` `canton?` `country`
+`phone?` `email?` `latitude?` `longitude?` `mapsUrl?` `openingHours?`
+`isHeadquarters` `isPublic` `position` `archivedAt?` `version`. Thun and Bern.
+
+**Master data and website content at once**, which is the point: `Employee`,
+`Project` and `Building` point at a row here, *and* the published document's
+`offices` array is built from the same rows (`buildSnapshot`, injected). Before
+that they were two unrelated stores and had already drifted — the seed put Thun
+at Bierigutstrasse 6 while the live site said Uttigenstrasse 49. `isPublic` is
+what lets both live in one table: a registered address nobody should visit is a
+real row that does not reach the site.
+
+Two derivations, so nothing is stored twice: the site's `OfficeEntry.zip` means
+*"PLZ und Ort"* on one line and is `${zip} ${city}`; `phoneHref` is `telHref()`
+over `phone`, which retires a CMS field an editor used to retype by hand with
+the help text *"Form: tel:+41332274020"*.
+
+**Validation** — exactly one `isHeadquarters` among the live rows; coordinates
+are required in pairs (half a coordinate points at the Gulf of Guinea and
+nothing throws).
+**Lifecycle** — archive, not delete. `refuseArchiveOffice` refuses the
+headquarters and refuses the **last public office**, because that one does not
+fail at the click: it fails at the next publish, for somebody else, with a
+message about an empty content key. `refuseDeleteOffice` refuses any office an
+employee, project or building points at.
 
 ### 3.17 TimeEntry
 

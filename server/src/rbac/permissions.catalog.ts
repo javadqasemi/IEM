@@ -96,6 +96,18 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "role.read",
       "application.read", "application.update", "application.download", "application.export",
       "settings.read", "settings.update",
+      /*
+        The firm's own record: everything except the two keys that are not an
+        administrator's to hold. `organisation.updateLegal` writes the UID, the
+        commercial-register entry and the registered seat — what appears on
+        every invoice and in the Impressum — and `office.delete` removes a row
+        that employees and projects point at. Both belong to the
+        Geschäftsleitung, by the same argument that withholds `project.update`
+        two blocks below: an administrator maintains the system, which is not
+        the same as speaking for the company.
+      */
+      "organisation.read", "organisation.update",
+      "office.read", "office.create", "office.update", "office.archive",
       "seo.read", "seo.update",
       "audit.read",
       "system.health",
@@ -127,6 +139,7 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "user.read", "role.read",
       "application.read", "application.update", "application.download",
       "settings.read", "seo.read",
+      "organisation.read", "office.read",
       "audit.read", "system.health",
     ],
   },
@@ -329,6 +342,14 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "customer.read", "building.read", "employee.read", "discipline.read",
       "content.read", "content.preview", "content.history",
       "contentType.read", "media.read",
+      /*
+        The whole of the firm's own record, `updateLegal` and `office.delete`
+        included — this is the role those two were withheld from
+        `administrator` for. Who the company legally is, and which offices it
+        has, is the Geschäftsleitung's to state.
+      */
+      "organisation.read", "organisation.update", "organisation.updateLegal",
+      "office.read", "office.create", "office.update", "office.archive", "office.delete",
       "user.read", "role.read",
       "audit.read", "system.health",
     ],

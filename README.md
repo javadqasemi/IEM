@@ -361,15 +361,22 @@ Path alias `@/*` → `src/*`, configured in both `tsconfig.json` and `vite.confi
 ## Known limitations
 
 - Nav links are in-page anchors; the public site has no router, by design.
-- **The dashboard has not been exercised against a live database in this repo.** Everything
-  typechecks, builds and renders, and the seed is written against the site's own content — but the
-  first `npm run setup` on a real PostgreSQL is still the first real run.
+- **No backups.** There is no backup automation in this application; the System panel under
+  Einstellungen says so rather than showing an empty tile. Sicherung of the database and the
+  media directory happens outside it. `docs/ENTERPRISE_ROADMAP.md` → P2-5.
+- **No version stamp.** Nothing writes a commit or a build time into the artefact, so the System
+  panel reports the application version as unavailable rather than showing `package.json`'s
+  `0.0.1` — a number that never changes and looks like one that does.
 - **No analytics.** The dashboard's executive view shows visitors, conversions, revenue and
   customers as explicitly unavailable rather than as zeros, because nothing here measures them.
   Wiring any of them up means choosing a data source and, for visitor data, a privacy policy first.
-- **Scheduled publishing assumes one API instance.** The background jobs are in-process `@Cron`
-  timers, so a second instance would run them too and could produce duplicate snapshots. Put them
-  behind a queue or a leader lock before scaling horizontally.
+- **Scheduled publishing needs Redis to be safe on more than one instance.** The background jobs
+  are in-process `@Cron` timers taking a `RedisService.withLock`, so a cluster is correct when
+  `REDIS_URL` is set and *not* when it is absent — a second instance would then run them too and
+  could produce duplicate snapshots. The bootstrap log says which of the two is in force, and the
+  System panel under Einstellungen reports Redis as configured or not.
+- **Scheduled publishing is also only half built in the other direction**: `ContentEntry.scheduledAt`
+  is read and cleared by the cron and set by nothing — no endpoint, no UI.
 - **No MFA yet.** The schema and a settings toggle for it exist; the enrolment and verification
   flow does not.
 - Media is stored on local disk. `StorageAdapter` is the one seam to implement for S3 or Azure Blob.

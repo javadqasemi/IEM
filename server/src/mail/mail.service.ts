@@ -3,8 +3,17 @@ import { ConfigService } from "@nestjs/config";
 import * as nodemailer from "nodemailer";
 import type { JobApplication } from "@prisma/client";
 import { SettingsService } from "../core/settings/settings.service";
+import { OrganisationService } from "../core/organisation/organisation.service";
 
-/** The keys this service reads, in one place so the group read below is honest. */
+/**
+ * The keys this service reads, in one place so the group read below is honest.
+ *
+ * `company.name` used to be the eighth. It is now a **column** on
+ * `Organisation` and comes from `OrganisationService.identity()` — the firm's
+ * name is a property of the firm, not a string under a settings key, and it
+ * was one of the eight `company.*`/`brand.*` rows that nothing but this line
+ * ever read.
+ */
 const MAIL_KEYS = [
   "mail.smtpHost",
   "mail.smtpPort",
@@ -13,7 +22,6 @@ const MAIL_KEYS = [
   "mail.smtpSecure",
   "mail.from",
   "mail.fromName",
-  "company.name",
 ];
 
 type MailConfig = {
@@ -68,6 +76,7 @@ export class MailService {
   constructor(
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
+    private readonly organisation: OrganisationService,
   ) {}
 
   /**
@@ -94,7 +103,21 @@ export class MailService {
       return this.config.get<string>(envKey) ?? fallback;
     };
 
-    const company = typeof stored["company.name"] === "string" ? (stored["company.name"] as string) : "";
+    /*
+      The sender name, when the mail settings do not give one.
+
+      Wrapped, for the same reason the settings read above is: the database
+      being unreachable must not stop a password-reset mail the environment
+      alone could have sent.
+    */
+    let company = "";
+    try {
+      company = (await this.organisation.identity()).name;
+    } catch (err) {
+      this.logger.warn(
+        `Unternehmensname nicht lesbar, Umgebung wird verwendet: ${(err as Error).message}`,
+      );
+    }
     const port = Number(stored["mail.smtpPort"]);
     const secure = stored["mail.smtpSecure"];
 
@@ -169,6 +192,53 @@ export class MailService {
     } catch (err) {
       // Logged, never rethrown — see the note at the top of the class.
       this.logger.error(`Versand an ${to} fehlgeschlagen: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * A probe, and **the one send that is allowed to fail loudly.**
+   *
+   * Everything else in this class swallows a transport error on purpose: a
+   * stored job application must not be lost because a relay refused. That
+   * property is exactly what makes mail unprovable — a wrong password and a
+   * correct one produce the same silence, and an operator who fills in the SMTP
+   * form has no way to find out which they have.
+   *
+   * So this one returns the error rather than logging it, and reports the
+   * *stub* case as a distinct outcome rather than as success: "no SMTP server
+   * configured, the message was written to the log" is a true and useful
+   * answer, and calling it "sent" would be a lie the form would repeat.
+   */
+  async sendTest(to: string): Promise<{ ok: boolean; stub: boolean; host: string; error?: string }> {
+    const mail = await this.resolve();
+    const transport = this.transportFor(mail);
+    const body = [
+      "Diese Nachricht ist ein Test aus dem IEM-Dashboard.",
+      "",
+      `Absender:  "${mail.fromName}" <${mail.from}>`,
+      `Server:    ${mail.host || "— keiner konfiguriert —"}:${mail.port}`,
+      `TLS:       ${mail.secure ? "ab Verbindungsaufbau" : "STARTTLS oder keine"}`,
+      "",
+      "Kommt sie an, ist der Versand korrekt eingerichtet.",
+    ].join("\n");
+
+    if (!transport) {
+      this.logger.log(`[mail:stub] Test an ${to}\n${body}`);
+      return { ok: false, stub: true, host: "" };
+    }
+
+    try {
+      await transport.sendMail({
+        from: `"${mail.fromName}" <${mail.from}>`,
+        to,
+        subject: "Testnachricht — IEM Dashboard",
+        text: body,
+      });
+      return { ok: true, stub: false, host: mail.host };
+    } catch (err) {
+      const error = (err as Error).message;
+      this.logger.warn(`Test-Versand an ${to} fehlgeschlagen: ${error}`);
+      return { ok: false, stub: false, host: mail.host, error };
     }
   }
 
