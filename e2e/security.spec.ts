@@ -280,6 +280,49 @@ test.describe("the permission matrix, by verb", () => {
       path: "/users/cmzzzznotarealid0000/sessions/cmzzzznotarealsess00",
       expect: 403,
     },
+
+    /*
+      Somebody else's second factor.
+
+      **403 and 400 are the two halves of one proof here**, which is the same
+      trick the session cells use with 403 and 404 and works for a different
+      reason. `PermissionsGuard` runs before the `ValidationPipe`, so a role
+      without `user.resetMfa` is refused at the guard and the empty body is
+      never examined — while a role *with* the key gets past the guard,
+      reaches the validator and is told the body is missing `reauthToken`.
+
+      So a **400 means the permission passed** and a 403 means it did not. A
+      route that answered 403 to everybody would look like it worked while
+      granting the key to nobody; one that answered 400 to everybody would be
+      a route with no guard at all. Neither can hide behind these cells.
+
+      `administrator` holds it deliberately — clearing a lost authenticator
+      is support work, it grants no access, and putting it behind the single
+      Super Admin account is how a locked-out Geschäftsleitung ends up with
+      somebody editing the database. `management` is the interesting refusal:
+      it holds `user.read`, so this separates "may look at the user list"
+      from "may strip somebody's second factor".
+    */
+    { who: "superAdmin", method: "POST", path: "/users/cmzzzznotarealid0000/mfa/reset", expect: 400 },
+    { who: "administrator", method: "POST", path: "/users/cmzzzznotarealid0000/mfa/reset", expect: 400 },
+    { who: "management", method: "POST", path: "/users/cmzzzznotarealid0000/mfa/reset", expect: 403 },
+    { who: "hr", method: "POST", path: "/users/cmzzzznotarealid0000/mfa/reset", expect: 403 },
+    { who: "projectManager", method: "POST", path: "/users/cmzzzznotarealid0000/mfa/reset", expect: 403 },
+    { who: "engineer", method: "POST", path: "/users/cmzzzznotarealid0000/mfa/reset", expect: 403 },
+    { who: "guest", method: "POST", path: "/users/cmzzzznotarealid0000/mfa/reset", expect: 403 },
+
+    /*
+      One's **own** second factor carries no permission at all, and these two
+      cells are what stops somebody "tidying up" by adding one.
+
+      The argument is `/auth/sessions`': these are operations on the caller's
+      own account, like `/auth/me`, and a key every role had to be granted
+      for the dashboard to work is a key that means nothing. The guest is the
+      floor of the matrix and holds two content permissions — if `GET
+      /auth/mfa` answers 200 for them, it answers 200 for everybody.
+    */
+    { who: "guest", method: "GET", path: "/auth/mfa", expect: 200 },
+    { who: "engineer", method: "GET", path: "/auth/mfa", expect: 200 },
   ];
 
   for (const cell of READS) {

@@ -29,7 +29,38 @@ export type Session = {
 };
 
 export type LoginResult = {
+  mfaRequired?: false;
   accessToken: string;
   expiresIn: number;
   user: Session;
+  /** Present only when the session was opened with a recovery code. */
+  usedRecoveryCode?: boolean;
+  /** How many unused codes are left afterwards. `-1` when none was used. */
+  remainingRecoveryCodes?: number;
 };
+
+/**
+ * The password was right and the second factor has not been shown.
+ *
+ * A `challenge` and nothing else — no access token, no cookie. It grants the
+ * right to present a code against one account for five minutes and nothing
+ * more, which is why it is safe to hold in component state.
+ */
+export type MfaRequired = {
+  mfaRequired: true;
+  challenge: string;
+  expiresIn: number;
+};
+
+/**
+ * What signing in produces, as a union rather than an optional field.
+ *
+ * The server returns the same shape for the same reason it does there: a
+ * caller that forgets the branch must not end up with half a session. Here
+ * the forgetting would look like `setUser(undefined)` and a blank dashboard;
+ * `kind` on the discriminant makes it a compile error instead.
+ */
+export type LoginOutcome = LoginResult | MfaRequired;
+
+/** The open re-authentication window — see `widgets/reauth`. */
+export type RecentAuth = { token: string; expiresAt: string };

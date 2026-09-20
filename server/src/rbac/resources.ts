@@ -114,6 +114,36 @@ export const RESOURCES: ResourceDef[] = [
     */
     readSessions: "Aktive Sitzungen eines Benutzers ansehen",
     revokeSessions: "Sitzungen eines Benutzers beenden",
+    /*
+      Resetting somebody else's second factor — and the reason there is no
+      `user.readMfa` beside it.
+
+      **Reset is its own key** for the reason `revokeSessions` is split from
+      `readSessions`: it is an intervention. It removes a security control
+      from an account that is not the caller's, it revokes every session that
+      account holds, and it is the one operation in the module an attacker
+      holding an administrator session would reach for first. It is not
+      something every role that can edit a name should inherit.
+
+      **Reading is not split**, and that is a decision rather than an
+      omission. Sessions got their own key because they expose a colleague's
+      devices, their addresses and their working hours; "hat einen zweiten
+      Faktor" is a boolean that reveals none of that, it is already in the
+      user list response, and a key whose removal changes nothing a reader
+      could notice is the dead permission F6 exists to prevent. The audit log
+      records a reset either way.
+
+      **`administrator` does hold it**, unlike `organisation.updateLegal`,
+      and the difference is what the key is *for*. Clearing a lost
+      authenticator is support work — it is the answer to "my phone is in a
+      river", it happens on a Tuesday morning, and putting it behind the
+      single Super Admin account is how a locked-out Geschäftsleitung ends up
+      with somebody editing the database by hand. It also grants no access:
+      the password is still required, and the account's sessions are revoked
+      rather than opened. `administrator` already holds `user.update`, which
+      can suspend the account outright — a strictly more disruptive act.
+    */
+    resetMfa: "Zwei-Faktor-Authentisierung eines Benutzers zurücksetzen",
   }),
 
   resource("role", "Rollen", "Rollen", {

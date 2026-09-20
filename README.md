@@ -377,8 +377,14 @@ Path alias `@/*` → `src/*`, configured in both `tsconfig.json` and `vite.confi
   System panel under Einstellungen reports Redis as configured or not.
 - **Scheduled publishing is also only half built in the other direction**: `ContentEntry.scheduledAt`
   is read and cleared by the cron and set by nothing — no endpoint, no UI.
-- **No MFA yet.** The schema and a settings toggle for it exist; the enrolment and verification
-  flow does not.
+- **MFA is built, and is not yet enforceable as a policy.** Enrolment, TOTP sign-in,
+  recovery codes, self-service disable and an administrative reset all work
+  (`docs/ENTERPRISE_ROADMAP.md` → P3-2). What is deliberately missing is the
+  organisation-level *"required for everyone"* switch: making it true means refusing a
+  session to somebody who has not enrolled, which needs a forced-enrolment flow at
+  sign-in, and a switch without that flow would be a security property an operator can
+  read and not have. It also **needs `MFA_ENCRYPTION_KEY` in `server/.env`** — without it
+  the application starts normally and the feature answers 503 naming the variable.
 - Media is stored on local disk. `StorageAdapter` is the one seam to implement for S3 or Azure Blob.
 - The hero backdrop and the Ablauf scene are a **real client project**. Confirm with IEM that the
   project may be named and its model shown before this goes anywhere public.

@@ -11,7 +11,7 @@ import {
 import { ApiError, clearQueryCache, setAccessToken, setUnauthenticatedHandler } from "@/core/api";
 import { publishAuthChange, subscribeAuthChanges } from "./channel";
 import { authRepository } from "./repository";
-import type { Session } from "./types";
+import type { LoginResult, MfaRequired, Session } from "./types";
 
 type AuthState = {
   user: Session | null;
@@ -28,7 +28,28 @@ type AuthState = {
   unreachable: boolean;
   /** A session that was live ended by itself — expired, or revoked elsewhere. */
   sessionExpired: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /**
+   * Signs in, or reports that a second factor is still owed.
+   *
+   * Returns the challenge rather than holding it here, because the challenge
+   * belongs to **one attempt on one screen** and nothing outside that screen
+   * has any use for it. Keeping it in the provider would make "half signed
+   * in" a state of the whole application, which is exactly the shape a second
+   * factor exists to prevent — every consumer of `useAuth` would then have a
+   * fourth case to get wrong.
+   */
+  login: (email: string, password: string) => Promise<MfaRequired | null>;
+  /**
+   * Finishes a sign-in with a code from the app or a recovery code.
+   *
+   * Resolves with what the server said about the recovery codes, so the
+   * screen can pass the warning through to the dashboard. `null` is never
+   * returned — a failure throws, and the form shows the message.
+   */
+  completeMfa: (
+    challenge: string,
+    input: { code?: string; recoveryCode?: string },
+  ) => Promise<{ usedRecoveryCode: boolean; remainingRecoveryCodes: number }>;
   logout: () => Promise<void>;
   reload: () => Promise<void>;
   /** Re-runs the restore, for the retry button on the unreachable screen. */
@@ -180,17 +201,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [restore],
   );
 
-  const login = useCallback(async (email: string, password: string) => {
-    const result = await authRepository.login(email, password);
+  /**
+   * Everything that turns a successful credential exchange into a session.
+   *
+   * Shared by `login` and `completeMfa` so the two paths cannot drift — and
+   * they would: the ordering here is load-bearing (the cache is emptied
+   * *before* the new user's first render, because anything still in it was
+   * fetched under whoever was signed in on this tab before) and a second
+   * copy would eventually put one of the five lines in the wrong place.
+   */
+  const adopt = useCallback((result: LoginResult) => {
     setAccessToken(result.accessToken);
-    // Emptied *before* the new user's first render. Anything still cached was
-    // fetched under the previous session on this tab.
     clearQueryCache();
     setSessionExpired(false);
     setUnreachable(false);
     setUser(result.user);
     publishAuthChange({ type: "signed-in" });
   }, []);
+
+  const login = useCallback(
+    async (email: string, password: string): Promise<MfaRequired | null> => {
+      const result = await authRepository.login(email, password);
+      /*
+        The branch that must not be forgotten. On `mfaRequired` the server
+        set no cookie and returned no token, so there is nothing to adopt —
+        touching `setUser` here would render the dashboard for somebody who
+        has shown one of two credentials.
+      */
+      if (result.mfaRequired) return result;
+      adopt(result);
+      return null;
+    },
+    [adopt],
+  );
+
+  const completeMfa = useCallback(
+    async (challenge: string, input: { code?: string; recoveryCode?: string }) => {
+      const result = await authRepository.verifyMfa(challenge, input);
+      adopt(result);
+      return {
+        usedRecoveryCode: result.usedRecoveryCode ?? false,
+        remainingRecoveryCodes: result.remainingRecoveryCodes ?? -1,
+      };
+    },
+    [adopt],
+  );
 
   const logout = useCallback(async () => {
     try {
@@ -225,13 +280,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unreachable,
       sessionExpired,
       login,
+      completeMfa,
       logout,
       reload,
       retry,
       can,
       canAny: (...keys: string[]) => keys.some(can),
     };
-  }, [user, loading, unreachable, sessionExpired, login, logout, reload, retry]);
+  }, [user, loading, unreachable, sessionExpired, login, completeMfa, logout, reload, retry]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

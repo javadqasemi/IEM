@@ -17,6 +17,7 @@ import { AuthModule } from "./auth/auth.module";
 import { MailModule } from "./mail/mail.module";
 import { MediaModule } from "./media/media.module";
 
+import { CryptoModule } from "./core/crypto/crypto.module";
 import { SettingsModule } from "./core/settings/settings.module";
 import { SettingsRoutesModule } from "./settings/settings.controller.module";
 import { OrganisationModule } from "./core/organisation/organisation.module";
@@ -93,6 +94,12 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     // that features read rather than features themselves, and `MailService`
     // below injects each of them.
     OrganisationModule,
+    // Encryption at rest, before `AuthModule` because `MfaService` reads it.
+    // Global like the two above and for the same reason: API keys and stored
+    // integration credentials are the next callers, and a second answer to
+    // "how do we keep a secret in a column" is how installations end up with
+    // one of them wrong.
+    CryptoModule,
     MailModule,
     AuthModule,
     MediaModule,

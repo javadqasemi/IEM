@@ -25,9 +25,10 @@ export type { SettingDef };
  *
  * **`pending: true` marks a setting that nothing reads yet.** A flag is the
  * honest answer rather than deletion: they are the shape of features that are
- * half-built — `security.requireMfaForAdmins` has columns and a dependency but
- * no enrolment flow — and the dashboard renders them as explicitly
- * not-yet-connected. That is the same choice the executive dashboard makes with
+ * half-built — `security.requireMfaForAdmins` is the last one, and since P3-2
+ * it is half-built in the *other* direction, because the second factor now
+ * works and only the compulsion is missing — and the dashboard renders them as
+ * explicitly not-yet-connected. That is the same choice the executive dashboard makes with
  * `KpiUnavailable`: a control that silently does nothing is worse than one that
  * says it does nothing. A setting stops being `pending` in the same commit that
  * gives it a reader.
@@ -207,10 +208,30 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     type: "boolean",
     value: false,
     description: "Zwei-Faktor-Pflicht für Administratoren",
-    // The columns (`User.mfaSecret`, `User.mfaEnabled`), the `otpauth`
-    // dependency and this switch all exist; the enrolment and verification flow
-    // does not. Enforcing a requirement nobody can satisfy would lock every
-    // administrator out, so this stays inert and says so until that flow lands.
+    /*
+      Still `pending`, and the reason has changed — which is worth writing
+      down, because the old one no longer applies and a reader would assume
+      it does.
+
+      It used to say the enrolment flow did not exist, so enforcing this
+      would lock every administrator out. **The flow exists** (P3-2):
+      `/auth/mfa/enroll`, a real TOTP sign-in, recovery codes, a self-service
+      disable and an administrative reset. `User.mfaSecret`, which this
+      comment used to name, is gone.
+
+      What is missing is the *enforcement*, and it is a screen rather than a
+      check. Making this true means refusing a session to somebody who has
+      not enrolled, which needs a **forced-enrolment flow at sign-in**: a
+      screen that appears instead of the dashboard, cannot be skipped, and
+      survives a broken authenticator without locking the firm out of its own
+      system. Shipping the switch before that flow would produce a row saying
+      "MFA is required" while everybody without it carries on signing in — a
+      security property an operator can read, believe, and not have, which is
+      exactly what `auth/security.policy.ts` sorts its four categories to
+      prevent.
+
+      So it stays inert and says so. `docs/ENTERPRISE_ROADMAP.md` → P3-2b.
+    */
     pending: true,
   },
   {

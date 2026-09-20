@@ -73,6 +73,25 @@ const API_ONLY = [
 const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/, /drawings-ui\.spec\.ts/, /auth\.spec\.ts/];
 
 /**
+ * The one suite that runs once for **all three** reasons at the same time.
+ *
+ * `mfa.spec.ts` signs three accounts in at `beforeAll`, opens two browser
+ * contexts of its own, and enables a real second factor on a live account.
+ * Any one of those would put it here; together they make running it at three
+ * widths both expensive and actively harmful — three projects enrolling and
+ * disabling the same credential would race each other through a shared
+ * database, and the failures would surface as wrong TOTP codes.
+ *
+ * It is also the slowest file in the suite by a distance, and unavoidably so:
+ * the replay guard refuses a time step at or below the one already accepted,
+ * so a test that authenticates twice with the same credential has to **wait
+ * out a thirty-second step** between them. That is the feature working. The
+ * waits are in `waitForNextStep` and there are as few of them as the
+ * assertions allow.
+ */
+const SECOND_FACTOR = [/mfa\.spec\.ts/];
+
+/**
  * Browser suites that run once for a **third** reason: they write.
  *
  * `organisation.spec.ts` edits the company record and tries to archive the
@@ -96,7 +115,13 @@ const MUTATES = [/organisation\.spec\.ts/, /sessions\.spec\.ts/];
 const SOURCE_ASSERTIONS = [/login-budget\.spec\.ts/];
 
 /** What the two narrower projects skip. */
-const RUN_ONCE = [...API_ONLY, ...SIGNS_IN_TWICE, ...MUTATES, ...SOURCE_ASSERTIONS];
+const RUN_ONCE = [
+  ...API_ONLY,
+  ...SIGNS_IN_TWICE,
+  ...MUTATES,
+  ...SOURCE_ASSERTIONS,
+  ...SECOND_FACTOR,
+];
 
 export default defineConfig({
   testDir: "./e2e",

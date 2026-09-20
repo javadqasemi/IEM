@@ -1,10 +1,11 @@
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/shared/ui/primitives";
-import { Field, Input } from "@/shared/ui/forms";
+import { Field, Input, OtpInput, RecoveryCodeInput } from "@/shared/ui/forms";
 import { Wordmark } from "@/components/Wordmark";
 import { ApiError } from "@/core/api";
 import { authRepository } from "@/core/auth";
 import { useAuth } from "@/core/auth";
+import type { MfaRequired } from "@/core/auth";
 import { navigate, useRoute } from "@/core/router";
 import { SPENT_AUTH_ROUTES } from "../routes";
 
@@ -56,8 +57,44 @@ function SignIn() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  /**
+   * The half-finished sign-in, held here and nowhere else.
+   *
+   * It belongs to **this attempt on this screen**: a challenge is worth five
+   * minutes and can do exactly one thing, so putting it in `AuthProvider`
+   * would make "half signed in" a state of the whole application and give
+   * every consumer of `useAuth` a fourth case to get wrong. Navigating away
+   * abandons it, which is correct — the password form is one keystroke away
+   * and a new challenge costs nothing.
+   */
+  const [pending, setPending] = useState<MfaRequired | null>(null);
   const emailId = useId();
   const passwordId = useId();
+
+  /**
+   * Going back to the password form.
+   *
+   * The challenge is dropped rather than kept for a retry: it is bound to
+   * the password that was just accepted, and offering "back" without
+   * discarding it would leave a live credential in a closed screen's state.
+   */
+  const restart = () => {
+    setPending(null);
+    setPassword("");
+    setError("");
+  };
+
+  if (pending) {
+    return (
+      <MfaStep
+        challenge={pending}
+        onBack={restart}
+        onDone={() => {
+          if (SPENT_AUTH_ROUTES.includes(route.path)) navigate("/", { replace: true });
+        }}
+      />
+    );
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -69,7 +106,13 @@ function SignIn() {
     setError("");
     setBusy(true);
     try {
-      await login(email, password);
+      const challenge = await login(email, password);
+      if (challenge) {
+        // Correct password, second factor still owed. Nothing was issued —
+        // see `AuthProvider.login`.
+        setPending(challenge);
+        return;
+      }
       /*
         Stay where they were trying to go.
 
@@ -154,6 +197,156 @@ function SignIn() {
       >
         Passwort vergessen?
       </a>
+    </form>
+  );
+}
+
+/**
+ * Step two of a sign-in: the code from the authenticator, or a recovery code.
+ *
+ * ---
+ *
+ * **The brand is not redesigned.** It renders inside the same `panel` as the
+ * password form, with the same heading scale, the same field spacing and the
+ * same primary button — a reader who has just typed their password should
+ * not feel that they have been handed to a different system at the moment
+ * they are being asked for a second credential, which is precisely the
+ * feeling a phishing page produces.
+ *
+ * **Two fields, one at a time.** The recovery path is a link rather than a
+ * second box on the same screen: showing both invites somebody to spend a
+ * one-time code when their phone is in their pocket, and ten of those is all
+ * they have.
+ *
+ * **`autoFocus` on the code field.** The reader arrived here by pressing a
+ * button, so the keyboard is already theirs and the next thing they will do
+ * is type six digits. On a phone this is also what raises the number pad.
+ */
+function MfaStep({
+  challenge,
+  onBack,
+  onDone,
+}: {
+  challenge: MfaRequired;
+  onBack: () => void;
+  onDone: () => void;
+}) {
+  const { completeMfa } = useAuth();
+  const [mode, setMode] = useState<"totp" | "recovery">("totp");
+  const [code, setCode] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const codeId = useId();
+  const recoveryId = useId();
+
+  const ready = mode === "totp" ? code.length === 6 : recoveryCode.trim().length > 0;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    // Same guard as the password form: a second submit spends an attempt
+    // against both the route's throttle and the challenge's own ceiling of
+    // five, and can only produce the answer already in flight.
+    if (busy || !ready) return;
+    setError("");
+    setBusy(true);
+    try {
+      await completeMfa(
+        challenge.challenge,
+        mode === "totp" ? { code } : { recoveryCode },
+      );
+      onDone();
+    } catch (err) {
+      /*
+        The server's message, as-is.
+
+        It is deliberately the same for a wrong code, a replayed one and a
+        challenge that has already been spent — and it says something
+        different and useful when the attempts have run out or the whole
+        thing has expired. Rewording it here would lose that, and guessing
+        which case it was would be guessing.
+      */
+      setError(err instanceof ApiError ? err.message : "Die Bestätigung ist fehlgeschlagen.");
+      // The code is spent either way — right or wrong, it will not be
+      // accepted twice — so clearing it saves a select-all before retyping.
+      setCode("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="panel flex flex-col gap-5 p-6">
+      <h1 className="font-display text-xl font-semibold text-ink">Zwei-Faktor-Bestätigung</h1>
+
+      <p className="text-[14px] leading-relaxed text-muted">
+        {mode === "totp"
+          ? "Bitte den sechsstelligen Code aus Ihrer Authenticator-App eingeben."
+          : "Bitte einen Ihrer Wiederherstellungscodes eingeben. Jeder Code funktioniert genau einmal."}
+      </p>
+
+      {/*
+        The error goes **through `Field`**, not beside it.
+
+        A `<p role="alert">` of its own is announced once and then belongs to
+        nothing: a reader who tabs back to the input hears the label and not
+        the reason it was refused. `Field` owns that relationship — it clones
+        its child to supply `aria-describedby` and `aria-invalid` — and
+        CLAUDE.md records the release where every hand-written
+        `<Field><Input/></Field>` in the dashboard skipped it.
+      */}
+      {mode === "totp" ? (
+        <Field label="Code aus der App" htmlFor={codeId} error={error || undefined}>
+          <OtpInput
+            id={codeId}
+            value={code}
+            onChange={setCode}
+            invalid={Boolean(error)}
+            disabled={busy}
+            autoFocus
+          />
+        </Field>
+      ) : (
+        <Field
+          label="Wiederherstellungscode"
+          htmlFor={recoveryId}
+          hint="Gross- und Kleinschreibung sowie der Bindestrich spielen keine Rolle."
+          error={error || undefined}
+        >
+          <RecoveryCodeInput
+            id={recoveryId}
+            value={recoveryCode}
+            onChange={setRecoveryCode}
+            invalid={Boolean(error)}
+            disabled={busy}
+            autoFocus
+          />
+        </Field>
+      )}
+
+      <Button type="submit" variant="primary" size="lg" busy={busy} disabled={!ready}>
+        Bestätigen
+      </Button>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 text-[13px]">
+        <button
+          type="button"
+          onClick={() => {
+            setMode(mode === "totp" ? "recovery" : "totp");
+            setError("");
+          }}
+          className="text-brand-blue transition-colors hover:text-brand-bronze"
+        >
+          {mode === "totp" ? "Wiederherstellungscode verwenden" : "Doch den Code aus der App"}
+        </button>
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-muted transition-colors hover:text-ink"
+        >
+          Abbrechen
+        </button>
+      </div>
     </form>
   );
 }

@@ -168,7 +168,7 @@ into four kinds and makes exactly one of them configurable:
 | **Invariant** | Compile time, never configurable | `REFRESH_GRACE_MS`, `PASSWORD_FLOOR`, `PASSWORD_MAX_LENGTH`, the obvious-password deny-list, rotation and family revocation, the `@Throttle` limits |
 | **Environment** | Deployment and secrets, never readable through the API | `JWT_ACCESS_SECRET`, `REFRESH_TTL_DAYS`, `CORS_ORIGINS`, `REDIS_URL`, `SMTP_*` |
 | **Organisation policy** | Super Admin, validated, audited, **clamped** | `security.sessionTimeoutMinutes`, `maxFailedLogins`, `lockoutMinutes`, `passwordMinLength` |
-| **User** | The person's own | Their password, their sessions, their MFA enrolment |
+| **User** | The person's own | Their password, their sessions, their MFA enrolment — the last of which is now built, **P3-2 ✅** |
 
 **The rule that makes the third kind safe: a policy may tighten an invariant and may not
 loosen it.** `resolvePasswordPolicy` clamps the configured minimum *up* to
@@ -302,7 +302,8 @@ of an identical file offers the existing asset.
 | | |
 | --- | --- |
 | P3-1 ○ | **Legal pages** are placeholders (`README.md` → Known limitations). Now that the organisation holds UID, register and data-protection contact, an Impressum can be generated from it rather than typed. |
-| P3-2 ○ | **MFA enrolment.** Columns, dependency and switch exist; the flow does not. Until it does the switch must stay inert — enforcing it would lock out every administrator. |
+| P3-2 ✅ | **MFA enrolment.** Delivered in full — see the section below, which the brief that commissioned it calls *P2.2*. The `mfaSecret` column the old entry referred to is **gone**: a plaintext TOTP secret beside the e-mail address it belongs to is not a head start, it is the thing that had to be removed first. |
+| P3-2b ○ | **MFA as an organisation policy** — *optional* / *required for privileged roles* / *required for everyone*. Deliberately **not** shipped with P3-2 and the reason is the shape of the setting rather than the size of it: making it true means refusing a session to somebody who has not enrolled, which means a forced-enrolment flow at sign-in that cannot be skipped and that has to survive a broken authenticator without locking the firm out of its own system. A setting without that flow is a row saying "MFA is required for everyone" while everyone without it carries on signing in — a security property an operator can read, believe, and not have, which is exactly what `security.policy.ts` exists to prevent. The seam is `AuthService.login`, which already branches on `MfaService.requiresFactor`; nothing in the module changes to add it. |
 | P3-3 ○ | **Structured data.** The organisation now holds everything a schema.org `Organization` / `LocalBusiness` block needs. Emitting it is invisible to the design and good for search. |
 | P3-4 ○ | **Lint backlog.** 0 errors is the bar and holds; 35 warnings (28 React-Compiler, 8 `exhaustive-deps`) are a countable backlog that grows with the dashboard. |
 | P3-5 ○ | **Prettier.** Configured, deliberately not run across the tree. A one-commit reformat is a decision to take once, on its own. |
@@ -310,6 +311,88 @@ of an identical file offers the existing asset.
 | P3-7 ✅ | **The login throttle is now a budget the suite spends rather than one it discovers.** Six independent paths reached `/auth/login` and none knew what the others had spent, so whichever was eleventh inside a sixty-second window failed — two files away, as a missing rail over a screenshot of the login page. `spendLogin()` in `e2e/fixtures.ts` reserves an attempt before the request and waits when the window is full; every path calls it, including the ones expected to fail. `login-budget.spec.ts` asserts against the source that none opts out, because a bypass is unobservable at runtime except as somebody else's flake. `infrastructure.spec.ts` stopped signing in twice with a hardcoded password. **No production limit moved.** Superseded the paragraph below. |
 | P3-8 ✅ | **`e2e/` was typechecked by nobody.** `tsconfig.json` is the application and `tsconfig.test.json` covers `src/**/*.test.ts`; twenty-odd Playwright files were checked by neither, and Playwright transpiles without checking. `tsconfig.e2e.json` is a third program in `npm run typecheck`, and its first run found a `spendLogin` used in `security.spec.ts` and imported nowhere. |
 | P3-7 (old) ○ | **The e2e suite now sits at the login-throttle ceiling.** `/auth/login` allows 10/min per IP; a full run needs roughly that many, because `security.spec.ts` signs in one account per role and `auth.spec.ts` deliberately spends attempts on failures. The seventh role account (`adm@iem.test`, added for the `organisation.updateLegal` gate) is what closed the margin, and the 61-second ride-out in `apiToken`/`workerContext` now fires often enough to be felt. **Do not raise the limit** — it is a real control and CLAUDE.md records three separate misdiagnoses of it. The two honest levers are to run `auth.spec.ts` last so its deliberate failures do not starve the rest, or to drop the seventh account: `organisation.controller.test.ts` already covers the legal gate as a pure unit test, so only the `office.delete` route cell would be lost, and that one is a plain decorator the agreement test already checks. |
+
+---
+
+## P3-2 ✅ Multi-factor authentication — the brief's *P2.2*
+
+**Problem.** `User.mfaSecret` and `User.mfaEnabled` existed, `otpauth` was a declared and
+unused dependency, and a settings switch referred to a flow that did not exist. The column
+was the worst part of it: a **plaintext Base32 TOTP secret** in the same row as the e-mail
+address it belongs to, readable by anyone with a database console or a backup.
+
+**Business impact.** A password is the only thing between a stolen credential and the
+firm's whole project book, its client list and its drawings. Every other control in this
+system — the lockout, the throttle, the audit log, the row-level scope — assumes the
+person holding the password is the account holder.
+
+### Architecture
+
+**Four tables, not three columns**, each answering a question the others cannot:
+
+| | |
+| --- | --- |
+| `MfaCredential` | **What the person has.** One row per method per user, `PENDING` until a code has been checked against it. The secret is AES-256-GCM at rest; `lastUsedStep` is the replay guard |
+| `MfaRecoveryCode` | **What they fall back to.** Ten rows, sha256, each spendable once |
+| `MfaChallenge` | **A sign-in halfway through.** The password was right and the factor has not been shown |
+| `ReauthToken` | **"I proved it again just now"** — a different claim from "I am signed in", and the one that guards switching the factor off |
+
+**The property everything else rests on:** a correct password against an enrolled account
+returns **no access token and sets no refresh cookie**. `AuthService.login` returns a
+discriminated union rather than an optional field precisely so that a caller cannot
+forget the branch, because forgetting it once means the factor is advisory.
+
+### The decisions worth reading
+
+| | |
+| --- | --- |
+| **A challenge is a row, not a JWT** | It has to be revocable and *countable*. A stateless challenge cannot enforce "five wrong codes and this attempt is over", and it is replayable for its whole lifetime by anyone who sees it. The same argument `RefreshToken` is built on |
+| **One encryption service, in `core/crypto`** | A TOTP secret is the first value here that must be read back in the clear; API keys and stored SMTP credentials are the same shape and are next. `MFA_ENCRYPTION_KEY` is **environment**, deliberately not derived from `JWT_ACCESS_SECRET` — rotating that one is the documented way to sign everybody out, and an operator doing the ordinary thing would otherwise destroy every enrolment |
+| **Recent authentication is not MFA-specific** | `ReauthService.require` is one gate, five minutes, a window rather than a ticket. Backup restore, API secrets and destructive administration are already named as its next callers |
+| **Disabling keeps the sessions; an admin reset ends them** | The asymmetry is the point. A password change revokes because every other session holds a token issued against a credential that no longer exists — untrue here. An administrator resets because the holder is locked out (nothing to lose) or the credential is suspect (everything to gain); both readings end the sessions |
+| **`user.resetMfa`, and no `user.readMfa`** | Reset is an intervention and gets a key. Reading is not split: `mfaEnabled` is a boolean already in the user list, and it reveals nothing the way a session's device, IP and working hours do. `administrator` holds the reset key — clearing a lost authenticator is support work, it grants no access, and putting it behind the single Super Admin account is how a locked-out Geschäftsleitung ends up with somebody editing the database |
+| **Crockford's base32 for recovery codes** | The omitted glyphs *fold*: a typed `O` can only have meant `0`, so a correctly copied code is repaired rather than refused. Thirty-two symbols is also exactly five bits, so a masked byte picks one without the modulo bias a 30-symbol alphabet would need rejection sampling to avoid |
+| **The QR code is geometry, not an image** | The server returns a `viewBox` size and one SVG path. No `dangerouslySetInnerHTML`, ~2 kB instead of ~12, and the page draws the quiet zone in its own tokens. One path rather than 841 rectangles |
+
+### Security numbers
+
+All seven are **invariants** in `mfa.rules.ts`, not settings, and `security.policy.ts` says
+why: three are interoperability constraints (SHA-1, six digits, thirty seconds — an
+authenticator showing a code the server rejects is indistinguishable from a broken
+enrolment), one is a detector's tolerance (**±1 step**, so a code is live for at most
+ninety seconds), and three are brute-force bounds (enrolment 10 min, challenge 5 min,
+**five attempts per challenge**). Rate limits: ten a minute per IP on each of
+`/auth/mfa/challenge`, `/auth/mfa/enroll/verify` and `/auth/reauthenticate`, which are
+separate buckets from `/auth/login` because Nest keys a throttle per handler.
+
+### Operational recovery
+
+If `MFA_ENCRYPTION_KEY` is lost, enrolled users cannot complete a sign-in with their app —
+the stored secrets cannot be read. **Their recovery codes still work**, because those are
+hashed rather than encrypted, and anyone holding `user.resetMfa` can clear a credential.
+Back the key up *with* the database, never in it. If the variable is absent entirely the
+application still boots and MFA answers 503 naming it, which is the right direction for a
+deployment that does not use the feature.
+
+### Delivered
+
+| | |
+| --- | --- |
+| Database | Four tables, two enums, `User.mfaSecret` **dropped**. Migration `20260920180304_mfa_totp` |
+| API | `GET /auth/mfa`, `POST /auth/mfa/enroll`, `…/enroll/verify`, `…/disable`, `…/recovery-codes`, `POST /auth/mfa/challenge` (public), `POST /auth/reauthenticate`, `POST /users/:id/mfa/reset` |
+| Permissions | `user.resetMfa` — 116 → **117**, enforced. `KNOWN_UNENFORCED` unchanged at 14 |
+| Audit | Ten `auth.mfa_*` / `auth.reauth*` actions, direct `AuditService.record` like the rest of auth rather than domain events — these are things that happened to *nobody else*, which is the documented split. No secret, code or ciphertext appears in any of them |
+| Frontend | `features/mfa/` on the five-layer pattern with two `lazy()` boundaries (12.5 kB + 2.1 kB + 4.2 kB shared), `OtpInput`/`RecoveryCodeInput` in `shared/ui/forms`, `ReauthenticationDialog` beside `ConfirmDialog` in `shared/ui/overlays` |
+| Tests | +79 server unit (60 rules, 18 crypto, 15 DTO), +13 client, +23 e2e including an **independent RFC 4226/6238 implementation** in `e2e/totp.ts` checked against the published vectors, +9 security-matrix cells |
+
+**Two defects were found by the e2e suite rather than by review**, and the second is the
+one that mattered:
+
+| | Found by | |
+| --- | --- | --- |
+| 1 | e2e, replay | The suite's own tests reused a TOTP code inside one time step and were refused. That is the replay guard working; the tests now track the spent step and wait only when they must. Worth recording because it is the behaviour an authenticator user will meet if they sign in twice in thirty seconds, and the screen says so |
+| 2 | e2e, browser | **`invalidate()` unmounted the dialog holding the recovery codes.** The exact trap CLAUDE.md records from the settings workspace, arriving somewhere far more expensive: `MfaCard` renders a skeleton while it has no status and the wizard is its child, so invalidating the status key after enrolment would have destroyed **ten one-time codes that cannot be fetched again** before the reader could write them down. Every mutation in `useMfa.ts` now primes the known outcome instead, and the card carries a comment saying not to add one back |
+| 3 | e2e, twice misdiagnosed | **A test that was not testing anything.** The browser journey timed out at six minutes and was twice read as "legitimately slow" — it does pay two throttled sign-ins and three TOTP step waits, so the story fitted. It was wrong: `page.goto` to a URL differing only in its **hash** is a same-document navigation, so after `clearCookies()` the SPA never rebooted, the session survived, no login form appeared, and the next `fill` waited for it until the clock ran out. The screenshot showed a healthy dashboard, which is the tell. **The browser sign-in through a second factor was never being exercised.** `page.reload()` in `signInAs` took it from six minutes timing out to sixty seconds passing. Recorded because the mistake was the response, not the bug: raising a timeout is what stops you finding the cause |
 
 ---
 

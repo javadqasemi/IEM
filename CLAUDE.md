@@ -82,6 +82,7 @@ permissions and the tests, not a folder with the same names in it.
 | P1·1 | **Unternehmen** — `Organisation` + a real `Office`, and the website's `offices` derived from the table |
 | P1·5 | **Security policy** — four kinds of security number, and only one of them is a setting. Clamped on read, so a policy can tighten an invariant and never loosen it |
 | P2·9 | **Aktive Sitzungen** — no migration; a live session is one unrevoked `RefreshToken` row. Own sessions under `/auth/sessions` with no permission at all, somebody else's under `/users/:id/sessions` behind two new keys |
+| P3·2 | **Zwei-Faktor-Authentisierung** — four tables, AES-256-GCM at rest, a challenge that issues nothing, ten single-use recovery codes, and a re-authentication window that is not MFA-specific. The brief that commissioned it calls it *P2.2*; the roadmap has always called it P3-2 |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -237,14 +238,32 @@ permissions — wait a minute, or run the suite in one invocation. And a run
 **wipes `test-results/` on start**, so copy a trace somewhere else before
 re-running or the evidence for the failure you are investigating is gone.
 
-**`e2e:security` and `e2e:budgets` need a seed that ordinary development does
-not.** The first needs the seven role accounts (`SEED_TEST_USERS=true` plus
-`SEED_TEST_PASSWORD`, both in `server/.env`) — six until `administrator` was
+**`e2e:security`, `e2e:budgets` and `mfa.spec.ts` need a seed that ordinary
+development does not.** The first needs the role accounts (`SEED_TEST_USERS=true`
+plus `SEED_TEST_PASSWORD`, both in `server/.env`) — six until `administrator` was
 added for the `organisation.updateLegal` gate, and the seventh is what pushed
 the sign-in total against its limit. The second is only meaningful with rows —
 `SEED_LOAD_PROJECTS=500 npm run server:seed` creates them. Each **skips with a
 message** rather than failing when its data is absent, because a red suite on a
 machine that has not opted in is one people learn to ignore.
+
+**The eighth account, `mfa@iem.test`, exists for one spec and must stay that
+way.** `mfa.spec.ts` enables and disables a real second factor on a live
+account, and MFA state is persistent and cross-cutting: doing that to
+`gast@iem.test` breaks `sessions.spec.ts`, and doing it to the administrator
+breaks *everything*, because that is the account the shared browser context
+uses. It surfaces two files later as "Hauptnavigation not found" over a
+screenshot of the login form — the misdiagnosis recorded three times above,
+by a fourth route. The seed clears every test account's MFA rows on each run,
+so re-seeding is what fixes a spec interrupted halfway.
+
+**The API also needs `MFA_ENCRYPTION_KEY` in `server/.env`** before any of the
+second factor works; without it the application starts normally and every MFA
+route answers 503 naming the variable. Generate one with
+`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+It is deliberately **not** derived from `JWT_ACCESS_SECRET`: rotating that one
+is the documented way to sign everybody out, and if the two were linked, doing
+the ordinary thing would silently destroy every enrolled authenticator.
 
 **`e2e` is deliberately *not* in `verify`.** `verify` is the pre-commit gate: no
 servers, no database, a few seconds. Folding the browser pass in would make it
@@ -288,6 +307,35 @@ Three things about the Playwright suite that cost time to learn:
   it was mid-sleep, which reads as a hung fixture and is a remedy being cut
   off. A per-spec timeout would have fixed the one spec that happened to
   fail; the throttle can strike any of them.
+
+  **`mfa.spec.ts` is the exception that raises its own**, and it waits on
+  *two* real controls at once: the sign-in throttle paces it, and the
+  **replay guard** refuses a TOTP step at or below the one already accepted,
+  so any test that authenticates twice with the same credential waits out a
+  thirty-second step. The file sets three minutes and the full-journey test
+  five. It runs about **4.7 minutes** and is the slowest spec in the suite by
+  a distance.
+
+  **And a timeout there was a symptom twice, not a budget.** The journey hit
+  a six-minute ceiling and both times it was read as "this is legitimately
+  slow" and answered with a bigger number. It was not slow: `page.goto` to a
+  URL differing only in its **hash** is a *same-document* navigation, so the
+  SPA never rebooted after the cookies were cleared, the login form never
+  appeared, and a `fill` waited for it until the clock ran out. The
+  screenshot showed a perfectly healthy dashboard, which is the tell. The
+  test was passing through the part it exists to cover without executing it,
+  and the fix — `page.reload()` in `signInAs` — took it from six minutes
+  timing out to **sixty seconds passing**. Raising a timeout is what stops
+  you finding the cause.
+
+  **The MFA verification routes are a *separate* bucket from `/auth/login`.**
+  Nest keys a throttle by class, handler and tracker, so
+  `/auth/mfa/challenge`, `/auth/mfa/enroll/verify` and `/auth/reauthenticate`
+  each get their own ten a minute. `spendMfa()` in `fixtures.ts` paces all
+  three together and `login-budget.spec.ts` fails the build if a file reaches
+  one of them without calling it — because a spec that paces its sign-ins
+  perfectly and forgets this one meets a 429 that surfaces as *"the code is
+  wrong"* on a screen showing a code that was right.
 - **`channel: "chromium"`, not the headless shell.** The shell omits composited
   regions from `fullPage` screenshots at small viewports — an image renders
   correctly and photographs as a blank rectangle.
@@ -309,8 +357,9 @@ saying none existed. Three things about them are deliberate:
   that catch bugs and leaves style to Prettier. The React Compiler rules
   (`set-state-in-effect`, `refs`, `use-memo`) fire on patterns this codebase chose and commented,
   so they are warnings: a countable backlog, not a wall. **0 errors is the bar**, and that is the
-  number to watch — the warnings stood at 21 when this note was written, 35 at Wave 2 module 2
-  and **34 as of P2-9**, because the count grows and shrinks with the dashboard rather than
+  number to watch — the warnings stood at 21 when this note was written, 35 at Wave 2 module 2,
+  34 at P2-9 and **36 as of P3-2** (two more `set-state-in-effect`, both the reset-on-open that
+  `ConfirmDialog` in the same folder already uses), because the count grows and shrinks with the dashboard rather than
   with any decision. Treat a rise in *errors* as a regression and a move in warnings as
   arithmetic; the figure is worth re-reading from `npm run lint` rather than from this line,
   which is a snapshot and will be stale again.
@@ -552,6 +601,54 @@ workspace was a dialog that closes on save, so all three were invisible:
   reporting a conflict with itself. It must sit inside a `<Form>`; that is also what keeps
   Enter working, since a form with no submit button does not submit implicitly once it has
   more than one field.
+
+**A second factor issues nothing until it has been shown, and the type is what
+enforces that.** `AuthService.login` returns a discriminated union —
+`{ kind: "session", … }` or `{ kind: "mfa", challenge }` — rather than a
+`LoginResult` with an optional `challenge` beside an optional `accessToken`.
+The two outcomes have nothing in common: one carries a session and the other
+deliberately carries none, no access token and **no `Set-Cookie`**. With an
+optional-field shape a controller that forgot the branch would set a refresh
+cookie on the second, and a second factor that can be skipped by forgetting an
+`if` is not a second factor. The client mirrors it for the same reason.
+`e2e/mfa.spec.ts` asserts the absence of the header, which is the only place
+that can be checked.
+
+**The decision "does this account need a factor" reads the credential, never
+`User.mfaEnabled`.** The column is a denormalisation kept so the user list can
+show a boolean without a join; `MfaService.requiresFactor` counts `VERIFIED`
+rows. A `true` in the column with nothing behind it would lock somebody out of
+their own account, and a `false` would silently skip the factor. Only
+`MfaService` writes the column, and always in the same transaction as the
+credential it mirrors — except in `UsersService.remove`, which is a *soft*
+delete, so `onDelete: Cascade` does not fire and the credential, the recovery
+codes and the column are cleared by hand.
+
+**A `PENDING` credential is not a second factor.** Enrolment writes a row
+before the first code is checked, so somebody who opens the dialog, looks at
+the QR code and closes the tab must still sign in with their password alone.
+`requiresFactor` counts `VERIFIED` only. Enabling MFA because a QR code was
+drawn would lock out everyone who got as far as looking at it.
+
+**Both single-use guarantees in MFA are one statement, for the reason
+`updateIfUnchanged` is.** A recovery code is spent by
+`updateMany({ where: { userId, tokenHash, consumedAt: null } })` and the
+returned count is the answer; a TOTP step is claimed by an `updateMany` whose
+`where` names the step being beaten. Read-then-write looks equivalent and is
+not — two requests both read `null`, both proceed, and one code authenticates
+twice. Postgres's row lock is what decides. `userId` is in the recovery
+`where` as well as the hash: the hash is unique across the whole table, so
+without it another account's code would be **consumed** while the sign-in
+still failed, leaving them one code poorer for no visible reason.
+
+**The MFA card must never take its own data off screen, and this is the
+`invalidate` trap arriving somewhere expensive.** `MfaCard` renders a skeleton
+while it has no status, and the enrolment wizard is its *child* — so
+`invalidate(["mfa"])` after finishing an enrolment unmounts the dialog holding
+**ten recovery codes that cannot be fetched again**. Every mutation in
+`features/mfa/hooks/useMfa.ts` primes the known outcome instead; the server
+has just said what it did, so there is nothing to ask. Found by
+`e2e/mfa.spec.ts`, not by review.
 
 **`cn()` is plain `clsx`, with no tailwind-merge.** A `className` passed to a component is
 *appended*, so it cannot reliably override a `bg-` or `text-` in the base — stylesheet order
@@ -909,6 +1006,27 @@ Writes are guarded by `project.update` and friends, which are firm-wide — some
 directions, and counts a `permissions.has(...)` check inside a handler as enforcement — those are
 the row- and field-level `◐` rules in `docs/permissions.md` §4, and `settings.secrets` is one.
 
+**`user.resetMfa` exists and `user.readMfa` deliberately does not.** Clearing somebody
+else's second factor is an intervention — it removes a control from an account that is not
+the caller's and ends every session it holds — so it gets a key, the same argument that
+split `revokeSessions` from `readSessions`. *Reading* the flag does not: `mfaEnabled` is a
+boolean already on the row `GET /users` returns, and it reveals nothing the way a session's
+device, IP and working hours do, so a second key would be one whose removal changes nothing
+a reader could notice. `administrator` **holds** the reset key, unlike `organisation.updateLegal`
+below — clearing a lost authenticator is support work, it grants no access (the password is
+still required), and putting it behind the single Super Admin account is how a locked-out
+Geschäftsleitung ends up with somebody editing the database.
+
+**A permission is not the only gate on the security-weakening routes.** Disabling one's own
+factor, regenerating recovery codes and resetting somebody else's all additionally require a
+**re-authentication window** — `POST /auth/reauthenticate` with the password and, if the
+account has one, the second factor — presented in the request *body*. A key says who may; it
+does not say that the person holding the session is the one asking, and an unlocked laptop at
+a shared desk must not be a way to strip a colleague's second factor. `ReauthService` is
+deliberately not MFA-specific: backup restore, API secrets and destructive administration are
+its next callers. It is in the body rather than a header because a custom header would mean
+widening `allowedHeaders` in `main.ts` for one feature.
+
 **`organisation.updateLegal` and `office.delete` are withheld from `administrator` on purpose.**
 Changing the main telephone number and changing the UID are both writes to one row and are not
 the same authority: the second is what appears in the commercial register, on every invoice and
@@ -1046,6 +1164,33 @@ Opened by **Unternehmen**, and each is a deliberate stop rather than an oversigh
   `seoDescription`, `ogImageUrl` and `faviconUrl` are columns the `seo` content type does not
   fall back to yet. They are *not* marked `pending` the way a setting would be, because the
   section says in its own description that the content type remains authoritative.
+
+Opened by **Zwei-Faktor-Authentisierung** (P3-2), and each is a deliberate stop:
+
+- **MFA cannot be made compulsory.** There is no `security.mfaRequirement` setting, and
+  adding one without a **forced-enrolment flow** at sign-in would produce a row saying
+  "required for everyone" while everyone without it carries on signing in — a security
+  property an operator can read, believe, and not have, which is precisely what the
+  four-category split in `security.policy.ts` was written against. The seam is
+  `AuthService.login`, which already branches on `MfaService.requiresFactor`; nothing in
+  the module has to change. `docs/ENTERPRISE_ROADMAP.md` → P3-2b.
+- **`MFA_ENCRYPTION_KEY` is a new environment variable a deployment has to set.** Without
+  it the application boots normally and every MFA route answers 503 naming it — the right
+  direction, and still a step somebody has to take. Losing it is not recoverable by
+  generating a new one: the stored secrets become unreadable, enrolled users fall back to
+  their **recovery codes** (hashed, so unaffected), and anyone holding `user.resetMfa`
+  can clear a credential. Back it up *with* the database, never in it.
+- **TOTP is the only method.** `MfaMethod` is an enum with one value and `MfaCredential`
+  is keyed `(userId, type)` so WebAuthn is a value and a branch in `mfa.rules.ts` rather
+  than a second table — but nothing is built. A phone is the only second factor.
+- **Nothing tells anybody their factor changed.** Enabling, disabling and an administrative
+  reset are all audited and none of them sends an e-mail, which is the one notification a
+  security feature normally has. It waits on Notifications (Wave 2 module 9), the same stop
+  `minutesSentAt` and the Planversand make.
+- **`security.requireMfaForAdmins` is still a `pending` switch in the settings table** and
+  is read by nothing. It predates this module and is the placeholder P3-2b will replace;
+  it is left alone rather than deleted because removing a settings row is a migration and
+  the row is inert either way.
 
 `README.md` → *Known limitations* carries the product-level list (no MFA flow, local-disk media,
 placeholder legal pages, `CodeGate` is a display barrier and not security).

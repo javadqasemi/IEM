@@ -32,6 +32,31 @@ const ACTION_LABELS: Record<string, string> = {
   "auth.password_changed": "hat das Passwort geändert",
   "auth.password_reset_requested": "hat ein neues Passwort angefordert",
   "auth.password_reset_completed": "hat das Passwort zurückgesetzt",
+
+  /*
+    The second factor.
+
+    `auth.mfa_challenged` is not a failure and is the commonest of the group
+    by a distance — it is written on every sign-in of every enrolled account,
+    so it needs a phrase that does not read as an alarm beside the ones that
+    are. `auth.mfa_failed` covers a wrong code, a replayed one and a
+    challenge that was already spent: the user is told the same thing in all
+    three cases, and the row's own message is where they are distinguished.
+
+    `auth.mfa_reset_by_admin` is the only one in the group that is somebody
+    acting on an account that is not theirs, which is why it names the actor
+    in the phrase rather than leaving it to the column.
+  */
+  "auth.mfa_challenged": "hat das Passwort bestätigt — zweiter Faktor angefordert",
+  "auth.mfa_enrollment_started": "hat die Einrichtung der Zwei-Faktor-Authentisierung begonnen",
+  "auth.mfa_enabled": "hat die Zwei-Faktor-Authentisierung aktiviert",
+  "auth.mfa_failed": "Zweiter Faktor nicht akzeptiert",
+  "auth.mfa_recovery_used": "hat einen Wiederherstellungscode verwendet",
+  "auth.mfa_recovery_regenerated": "hat neue Wiederherstellungscodes erzeugt",
+  "auth.mfa_disabled": "hat die Zwei-Faktor-Authentisierung deaktiviert",
+  "auth.mfa_reset_by_admin": "hat den zweiten Faktor eines Kontos zurückgesetzt",
+  "auth.reauthenticated": "hat sich erneut bestätigt",
+  "auth.reauthentication_failed": "Erneute Bestätigung fehlgeschlagen",
   "content.created": "hat angelegt",
   "content.updated": "hat bearbeitet",
   "content.deleted": "hat gelöscht",

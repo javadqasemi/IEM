@@ -3,6 +3,9 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { JwtModule } from "@nestjs/jwt";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
+import { MfaController } from "./mfa.controller";
+import { MfaService } from "./mfa.service";
+import { ReauthService } from "./reauth.service";
 import { MailModule } from "../mail/mail.module";
 
 @Module({
@@ -25,10 +28,24 @@ import { MailModule } from "../mail/mail.module";
       }),
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService],
-  // `JwtModule` is exported because the global `JwtAuthGuard` verifies tokens
-  // and is constructed outside this module.
-  exports: [AuthService, JwtModule],
+  controllers: [AuthController, MfaController],
+  providers: [AuthService, MfaService, ReauthService],
+  /**
+   * `JwtModule` is exported because the global `JwtAuthGuard` verifies tokens
+   * and is constructed outside this module.
+   *
+   * `MfaService` and `ReauthService` are exported for `UsersModule`, which
+   * serves the administrative reset. That is a cross-feature **command** of
+   * the kind `users.module.ts` already documents for `AuthService`, and the
+   * alternative — `UsersService` writing to `MfaCredential` itself — would be
+   * a second writer of a security-critical table.
+   *
+   * There is no `forwardRef` here and there must not be one: `AuthService`
+   * depends on `MfaService`, `MfaService` depends on `ReauthService`, and
+   * nothing points back. A cycle would be the first sign that the boundary
+   * between "who may have a session" and "what a second factor is" has been
+   * lost.
+   */
+  exports: [AuthService, MfaService, ReauthService, JwtModule],
 })
 export class AuthModule {}

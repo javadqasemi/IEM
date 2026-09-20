@@ -40,7 +40,7 @@ and one of them is a deletion deadline for personal data.**
 | Verify gate | ✅ green — typecheck, lint (0 errors), 1'024 server tests, site tests |
 | Server modules | 19 controllers, ~173 route handlers |
 | Prisma models | 49 models, 38 enums, 12 migrations |
-| Permissions | 106 keys from 21 resources at the time of the audit; **116 today** (+8 for Unternehmen/Standorte in P1-1, +2 for sessions in P2-9). **14 enforced on no route**, unchanged — every key added since was enforced on the route that came with it |
+| Permissions | 106 keys from 21 resources at the time of the audit; **117 today** (+8 for Unternehmen/Standorte in P1-1, +2 for sessions in P2-9, +1 for `user.resetMfa` in P3-2). **14 enforced on no route**, unchanged — every key added since was enforced on the route that came with it |
 | Domain events | 75 names; audit derived from them |
 | Content types | 24 editable types covering all 38 keys of `SiteContent` |
 | Public site CMS coverage | effectively complete — see §4 |
@@ -163,10 +163,25 @@ explicit key list so a new column cannot widen it.
 constants in `auth.rules.ts` / `auth.service.ts`. Session lifetime *is* configurable
 (`security.sessionTimeoutMinutes`, clamped 1–240).
 
-**MFA is half-built**: `User.mfaSecret` and `User.mfaEnabled` exist, the `otpauth`
-dependency is installed, and `security.requireMfaForAdmins` is a stored switch marked
-`pending` — there is no enrolment or verification flow, and enforcing the switch would
-lock every administrator out. Marked honestly rather than hidden, which is the right call.
+~~**MFA is half-built**~~ — **built, as of P3-2.** The paragraph that stood here said
+`User.mfaSecret` and `User.mfaEnabled` existed, `otpauth` was installed and unused, and
+`security.requireMfaForAdmins` was a switch marked `pending`. The column is now **gone**,
+and that was the first change rather than an afterthought: a plaintext Base32 TOTP secret
+in the same row as the e-mail address it belongs to is readable by anyone with a database
+console or a backup, so it is not a head start on the feature — it is the thing the
+feature had to remove.
+
+What is there instead: four tables (`MfaCredential`, `MfaRecoveryCode`, `MfaChallenge`,
+`ReauthToken`), AES-256-GCM at rest with the key from `MFA_ENCRYPTION_KEY`, a sign-in that
+returns **no token and no cookie** until the factor is shown, ten single-use recovery
+codes stored as hashes, a per-challenge ceiling of five attempts, a ±1-step drift window
+with replay protection on the accepted step, and a re-authentication window guarding the
+two operations that weaken an account. `user.resetMfa` is the one new permission.
+
+**The switch is still not enforceable, and now says so for a better reason.** Making
+"required for everyone" true means refusing a session to somebody who has not enrolled,
+which needs a forced-enrolment flow at sign-in. A setting without that flow is a row an
+operator can read, believe, and not have — `docs/ENTERPRISE_ROADMAP.md` → P3-2b.
 
 ### 2.3 Data protection
 
@@ -314,7 +329,7 @@ SMTP password.
 | 6 E-mail | **Good** — configurable, environment fallback, secrets redacted, read per send. Missing: test send, templates, delivery status |
 | 7 Notifications | Missing — table exists, nothing reads it |
 | 8 Recruitment | Partial — notify address, retention, file size (see §5.1); no allowed-types or candidate-status configuration |
-| 9 Security | Partial — session timeout, lockout threshold, lockout duration and password length are all configurable and clamped (P1-5); active sessions are visible and revocable for oneself and, behind `user.readSessions`/`user.revokeSessions`, for another account (P2-9). Origins stay inert; MFA is still `pending` |
+| 9 Security | Partial — session timeout, lockout threshold, lockout duration and password length are all configurable and clamped (P1-5); active sessions are visible and revocable for oneself and, behind `user.readSessions`/`user.revokeSessions`, for another account (P2-9); **MFA is built and self-service** (P3-2), with an administrative reset behind `user.resetMfa`. Origins stay inert; the MFA *policy* switch stays `pending` until there is a forced-enrolment flow to make it true (P3-2b) |
 | 10 Integrations | Missing |
 | 11 Storage & media | Missing as configuration; real limits are constants |
 | 12 Backup & recovery | **Missing entirely** — no backup system exists |
@@ -402,7 +417,13 @@ Open items, in order:
 2. 14 permissions grantable in the role editor that guard nothing. The role editor is
    therefore making promises the server does not keep; harmless today because the routes
    do not exist, misleading the moment one does.
-3. No MFA flow (switch exists, inert).
+3. ~~No MFA flow (switch exists, inert).~~ **Closed 20 September 2026 (P3-2.)**
+   Enrolment, TOTP sign-in, recovery codes, self-service disable and an administrative
+   reset all work, and the plaintext `mfaSecret` column is gone. Two things are still
+   owed and both are deliberate: the **policy** switch cannot be enforced without a
+   forced-enrolment flow (P3-2b), and `MFA_ENCRYPTION_KEY` is a new environment variable
+   a deployment has to set — without it the application runs and the feature answers 503
+   naming it, which is the right direction but is a step somebody has to take.
 4. ~~No active-session management.~~ **Closed 20 September 2026 (P2-9.)** Both halves
    ship: a user sees and ends their own sessions, and an administrator ends another's
    without deleting the account. The one thing still owed is a *place* for the

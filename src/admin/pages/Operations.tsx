@@ -26,6 +26,7 @@ import { useDebounced, useMutation } from "@/shared/hooks";
 import { usePageActions } from "@/core/router";
 import { actionLabel } from "@/entities/audit";
 import { ActivityFeed } from "@/widgets/activity";
+import { MfaRoute } from "@/features/mfa";
 import { SessionsRoute } from "@/features/sessions";
 import { api } from "../lib/api";
 import { authRepository, useAuth } from "@/core/auth";
@@ -573,6 +574,23 @@ export function ProfilePage() {
           </form>
         </Card>
       </div>
+
+      {/*
+        Zwei-Faktor-Authentisierung — the feature's own slice, composed here.
+
+        Above Sitzungen on purpose: the two belong to one subject, and the
+        order is the order somebody thinks about it. "How is this account
+        protected" comes before "where is it signed in", and a reader who has
+        just noticed a session they do not recognise should already have met
+        the control that stops the next one.
+
+        `admin/pages` is the layer above both `features/` and `widgets/`, so
+        it is the only place allowed to import a feature — the same rule that
+        puts the project detail's embedded tabs in `ProjectPage.tsx`.
+      */}
+      <Suspense fallback={<Skeleton className="h-48 rounded-lg" />}>
+        <MfaRoute account={user.email} />
+      </Suspense>
 
       {/*
         Sitzungen — the feature's own slice, composed in here.

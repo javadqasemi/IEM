@@ -81,6 +81,32 @@ test.describe("the sign-in budget", () => {
     ).toEqual([]);
   });
 
+  /**
+   * The second factor's routes are budgeted too, and they are a *different*
+   * bucket.
+   *
+   * Nest keys a throttle by class, handler and tracker, so
+   * `/auth/mfa/challenge`, `/auth/mfa/enroll/verify` and
+   * `/auth/reauthenticate` each get their own ten a minute and none of them
+   * eats the sign-in's. That is why `spendMfa()` exists rather than
+   * `spendLogin()` being called twice — and it is why this assertion is
+   * separate: a file could pace its sign-ins perfectly and still walk into a
+   * 429 on the verification route, which would surface as "the code is
+   * wrong" on a screen showing a code that was right.
+   */
+  test("every path to an MFA verification route reserves an attempt first", () => {
+    const offenders = sources()
+      .filter(({ name }) => name !== "login-budget.spec.ts")
+      .filter(({ code }) => /auth\/mfa\/challenge|mfa\/enroll\/verify|auth\/reauthenticate/.test(code))
+      .filter(({ code }) => !/spendMfa\s*\(/.test(code))
+      .map(({ name }) => name);
+
+    expect(
+      offenders,
+      "these call a throttled MFA route without calling spendMfa() — see fixtures.ts",
+    ).toEqual([]);
+  });
+
   test("found the sign-in paths, so the assertions above are not vacuous", () => {
     // Guards against a regex that matched nothing, which would make both tests
     // above pass by comparing an empty list with itself.

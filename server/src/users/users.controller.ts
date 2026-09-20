@@ -51,6 +51,19 @@ export class SetRolesDto {
   @IsArray() @IsString({ each: true }) roleIds!: string[];
 }
 
+/**
+ * The proof that the administrator asking is at the keyboard.
+ *
+ * In the body rather than a header: a custom header would need
+ * `allowedHeaders` widened in `main.ts` for one feature. See `ReauthService`.
+ */
+export class ResetMfaDto {
+  @IsString()
+  @MinLength(1, { message: "Bitte zuerst das eigene Passwort bestätigen." })
+  @MaxLength(256)
+  reauthToken!: string;
+}
+
 export class ListUsersQuery {
   @IsOptional() @IsString() search?: string;
   @IsOptional() @IsIn(Object.values(UserStatus)) status?: UserStatus;
@@ -188,6 +201,43 @@ export class UsersController {
     @ClientIp() ip: string | null,
   ) {
     return this.users.revokeAllSessionsOf(id, user, this.ctx(req, ip));
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* The second factor — somebody else's                               */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Clears an account's second factor. Account recovery, and nothing else.
+   *
+   * `user.resetMfa` rather than `user.update`, for the reason
+   * `revokeSessions` is split from `readSessions`: this removes a security
+   * control from an account that is not the caller's. It grants no access —
+   * the password is still required afterwards — and the target's sessions
+   * are revoked rather than opened.
+   *
+   * **Behind the caller's own recent authentication as well as the
+   * permission**, which is the part a decorator cannot express: a permission
+   * says who may, and the re-authentication says that the person holding the
+   * session is the one asking. An administrator's laptop left unlocked at a
+   * shared desk must not be a way to strip a colleague's second factor. The
+   * proof travels in the body — see `ReauthService`.
+   *
+   * There is no route that *reads* a factor's secret, a code or a QR image,
+   * and there will not be one. An administrator can remove the credential;
+   * they can never hold it.
+   */
+  @Post(":id/mfa/reset")
+  @HttpCode(200)
+  @RequirePermissions("user.resetMfa")
+  resetMfa(
+    @Param("id") id: string,
+    @Body() dto: ResetMfaDto,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.users.resetMfaFor(id, user, dto.reauthToken, this.ctx(req, ip));
   }
 
   @Post(":id/send-password-reset")

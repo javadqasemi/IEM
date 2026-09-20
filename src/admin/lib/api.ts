@@ -112,6 +112,16 @@ export type UserRow = {
   name: string;
   avatarUrl: string | null;
   status: "INVITED" | "ACTIVE" | "SUSPENDED";
+  /**
+   * Whether this account has a verified second factor.
+   *
+   * A mirror of `MfaCredential` kept on `User` so the list does not need a
+   * join — the server writes it in the same transaction as the credential,
+   * and no *decision* is taken from it on either side. Under `user.read`
+   * rather than a key of its own: it reveals nothing the way a session's IP
+   * and device do. See `rbac/resources.ts`.
+   */
+  mfaEnabled: boolean;
   lastLoginAt: string | null;
   lockedUntil: string | null;
   createdAt: string;

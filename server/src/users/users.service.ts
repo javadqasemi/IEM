@@ -9,6 +9,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
 import { AuthService } from "../auth/auth.service";
+import { MfaService } from "../auth/mfa.service";
 import type { AuthUser } from "../common/decorators";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
@@ -34,6 +35,15 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly auth: AuthService,
+    /**
+     * The same cross-feature *command* arrangement `AuthService` is here for,
+     * and the alternative is the same: `UsersService` writing to
+     * `MfaCredential` itself, which would make two writers of a
+     * security-critical table — one of which understands the recovery codes
+     * and the open challenges that have to go with it, and one of which does
+     * not.
+     */
+    private readonly mfa: MfaService,
   ) {}
 
   async list(params: { search?: string; status?: UserStatus; roleKey?: string; page?: number; perPage?: number }) {
@@ -228,6 +238,11 @@ export class UsersService {
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      // The re-authentication window goes with the sessions, everywhere. A
+      // suspended account holding an open one would be an account that can
+      // still authorise a security change for five minutes after it lost the
+      // right to do anything at all.
+      await this.prisma.reauthToken.deleteMany({ where: { userId: id } });
     }
 
     this.audit.record({
@@ -266,6 +281,7 @@ export class UsersService {
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
+      this.prisma.reauthToken.deleteMany({ where: { userId: id } }),
     ]);
 
     const after = await this.get(id);
@@ -293,6 +309,9 @@ export class UsersService {
         data: {
           deletedAt: new Date(),
           status: "SUSPENDED",
+          // The mirror follows the credential deleted below, in the same
+          // transaction — the rule the column's own comment states.
+          mfaEnabled: false,
           // The address is freed for reuse and the original preserved in the
           // audit log — otherwise the unique index blocks re-inviting someone
           // who left and came back.
@@ -303,6 +322,15 @@ export class UsersService {
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
+      this.prisma.reauthToken.deleteMany({ where: { userId: id } }),
+      /*
+        The second factor goes with the account, and the recovery codes with
+        it. `onDelete: Cascade` does not fire here — this is a *soft* delete,
+        so the row stays and so would ten live one-time passwords and an
+        encrypted secret belonging to somebody who no longer works here.
+      */
+      this.prisma.mfaCredential.deleteMany({ where: { userId: id } }),
+      this.prisma.mfaRecoveryCode.deleteMany({ where: { userId: id } }),
     ]);
 
     this.audit.record({
@@ -313,6 +341,23 @@ export class UsersService {
       before,
       ...ctx,
     });
+  }
+
+  /**
+   * Clears somebody's second factor — account recovery.
+   *
+   * Thin, like `sessionsOf` above and for the same reason: `MfaService`
+   * already knows that clearing a credential means clearing its recovery
+   * codes and closing any half-finished sign-in, and a second
+   * implementation here would be a second place all three have to be
+   * remembered.
+   *
+   * `existing()` first, so an unknown id answers 404 rather than reporting a
+   * successful reset of nothing.
+   */
+  async resetMfaFor(id: string, actor: AuthUser, reauthToken: string, ctx: Ctx) {
+    await this.existing(id);
+    return this.mfa.resetFor(id, actor, reauthToken, ctx);
   }
 
   async resetPasswordFor(id: string, actor: AuthUser, ctx: Ctx) {

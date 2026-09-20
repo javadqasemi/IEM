@@ -454,6 +454,69 @@ account stops at the route guard and the field-level gate is unobservable.
 nothing more: the company's address is context they need while working, and
 changing it is not their job.
 
+## 3.13 The second factor — `user.resetMfa`, and the key that is not there
+
+Built with MFA (`docs/ENTERPRISE_ROADMAP.md` → P3-2). **One new key, and the
+absence of a second is the decision worth recording.**
+
+| Resource | Extra key | Notes |
+| --- | --- | --- |
+| `user` | `user.resetMfa` | Clears somebody else's second factor. Account recovery, and the only administrative operation the module has |
+
+**Why reset is its own key.** The same argument that split `revokeSessions`
+from `readSessions`: it is an *intervention*. It removes a security control
+from an account that is not the caller's, it ends every session that account
+holds, and it is the first thing an attacker holding an administrator session
+would reach for. It is not something every role that can edit a name should
+inherit with `user.update`.
+
+**Why there is no `user.readMfa`.** Sessions earned a read key because they
+expose a colleague's devices, their IP addresses and their working hours.
+`mfaEnabled` is a boolean that exposes none of that, it is already on the row
+`GET /users` returns, and stripping it conditionally would create a permission
+whose removal changes nothing a reader could notice — the dead-permission
+problem §2 exists to end. The audit log records a reset either way.
+
+**Why the caller's own factor carries no permission at all.**
+`/auth/mfa`, `/auth/mfa/enroll`, `…/enroll/verify`, `…/disable` and
+`…/recovery-codes` are operations on the caller's own account, like
+`/auth/me` and `/auth/sessions`. A key such as `mfa.manage` would be one every
+role had to be granted for the dashboard to work, which is a key that means
+nothing. The scope is the control: each route takes the account from the
+verified token and never from the request, so there is no parameter through
+which one account could reach another's factor.
+
+**A permission is not the only gate here.** `user.resetMfa` says *who may*;
+it does not say that the person holding the session is the one asking. Both
+administrative reset and the two self-service operations that weaken the
+account additionally require a **re-authentication window** — the caller's own
+password, plus their own second factor if they have one — opened at
+`POST /auth/reauthenticate` and presented in the body. An administrator's
+laptop left unlocked at a shared desk must not be a way to strip a colleague's
+second factor. That is not a `◐` rule (it is not about *which rows*), which is
+why it is here rather than in §4.
+
+### By role
+
+| Key | Super Admin | Mgmt | Admin | PM | Engineer | HR | Finance | Guest |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| `user.resetMfa` | ● | ○ | **●** | ○ | ○ | ○ | ○ | ○ |
+
+**`administrator` holds it and `management` does not**, which is the opposite
+way round from `organisation.updateLegal` two sections above, and the
+difference is what the key is *for*. Clearing a lost authenticator is support
+work — it is the answer to "my phone is in a river", it happens on a Tuesday
+morning, and putting it behind the single Super Admin account is how a
+locked-out Geschäftsleitung ends up with somebody editing the database. It
+also grants no access: the password is still required afterwards, and the
+account's sessions are revoked rather than opened. `administrator` already
+holds `user.update`, which can suspend the account outright — a strictly more
+disruptive act.
+
+`management` is the interesting refusal and the one `e2e/security.spec.ts`
+uses: it holds `user.read`, so the cell separates *"may look at the user
+list"* from *"may strip somebody's second factor"*.
+
 ## 4. Row-level rules (`◐`)
 
 The guard is coarse and the service is fine-grained. The `◐` cells resolve to

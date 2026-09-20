@@ -1,5 +1,5 @@
 import { refreshSession, request } from "@/core/api";
-import type { LoginResult, Session } from "./types";
+import type { LoginOutcome, LoginResult, RecentAuth, Session } from "./types";
 
 /**
  * The session endpoints.
@@ -10,8 +10,38 @@ import type { LoginResult, Session } from "./types";
  * "repository" that is not owned by a feature folder, and that is the reason.
  */
 export const authRepository = {
+  /**
+   * A correct password buys one of two things — see `LoginOutcome`.
+   *
+   * Where the account has a second factor this resolves with a challenge and
+   * **no token of any kind**. There is nothing here for a caller to
+   * accidentally treat as a session.
+   */
   login: (email: string, password: string) =>
-    request<LoginResult>("/auth/login", { body: { email, password } }),
+    request<LoginOutcome>("/auth/login", { body: { email, password } }),
+
+  /**
+   * The second half of a sign-in.
+   *
+   * One method for both a TOTP code and a recovery code, because the server
+   * takes one body and decides: the screen chooses which field it shows, and
+   * the two are the same act as far as the session is concerned.
+   */
+  verifyMfa: (challenge: string, input: { code?: string; recoveryCode?: string }) =>
+    request<LoginResult>("/auth/mfa/challenge", { body: { challenge, ...input } }),
+
+  /**
+   * Opens a re-authentication window for an operation that removes a
+   * security control.
+   *
+   * In `core/` rather than in `features/mfa` even though MFA is its only
+   * caller today: it is not about the second factor, it is about *this
+   * session's* freshness, and backup restore and API secrets are already
+   * named as the next users (`ReauthService` on the server). A feature that
+   * owns it would be a feature every later one has to import.
+   */
+  reauthenticate: (input: { password: string; code?: string; recoveryCode?: string }) =>
+    request<RecentAuth>("/auth/reauthenticate", { body: input }),
 
   /** Exchanges the `httpOnly` refresh cookie for a new access token. */
   refresh: refreshSession,

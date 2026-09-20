@@ -274,11 +274,24 @@ whether or not the address exists. Changing a password ends every other session.
 composition password policy (12 chars, no class rules, plus a short obvious-password list) — which is
 the correct modern choice.
 
-**Missing.** **MFA is not implemented.** `User.mfaSecret` and `User.mfaEnabled` columns exist,
-`security.requireMfaForAdmins` is a seeded setting, `otpauth` is a declared dependency — and there is
-no enrolment, no verification, no import of `otpauth` anywhere in `server/src`. The scaffolding
-reads as a feature that exists. It does not. No device/session list for the user, no "sign out this
-device", no SSO/OIDC, no API keys (`system.api` is a permission with no implementation).
+~~**Missing.** **MFA is not implemented.**~~ **Both halves of this paragraph have since been
+built, and it is left in place with its corrections because the *shape* of the finding is
+what was right about it.** It read: `User.mfaSecret` and `User.mfaEnabled` columns exist,
+`security.requireMfaForAdmins` is a seeded setting, `otpauth` is a declared dependency — and
+there is no enrolment, no verification, no import of `otpauth` anywhere in `server/src`. The
+scaffolding reads as a feature that exists. It does not. No device/session list for the user,
+no "sign out this device".
+
+- **MFA** shipped as P3-2 (20 September 2026). The `mfaSecret` column is **gone** — a
+  plaintext TOTP secret beside the e-mail address it belongs to was not scaffolding, it was
+  the first thing the feature had to remove. `otpauth` is now imported, by `auth/mfa.rules.ts`.
+  `security.requireMfaForAdmins` is still `pending` and now says why: the factor works, the
+  *compulsion* needs a forced-enrolment flow (P3-2b).
+- **The session list** shipped as P2-9, for oneself and, behind two permissions, for
+  another account.
+
+Still missing, and unchanged: no SSO/OIDC, no API keys (`system.api` is a permission with no
+implementation).
 
 **Bugs.** None functional. Two pieces of dead code that mislead — **F-09** and **F-10**.
 

@@ -51,6 +51,44 @@
  *
  * ---
  *
+ * ## Where the second factor's numbers went, and the one that is missing
+ *
+ * P2-2 added seven and every one of them is an **invariant**, declared in
+ * `mfa.rules.ts` rather than here: the TOTP algorithm, digit count and period
+ * are interoperability constraints (an authenticator that shows a code the
+ * server rejects is indistinguishable from a broken enrolment); the drift
+ * window is a *detector's* tolerance in the same sense `REFRESH_GRACE_MS` is;
+ * and the enrolment lifetime, the challenge lifetime and the per-challenge
+ * attempt ceiling are brute-force bounds. None of the seven is a preference,
+ * and a form that could widen the drift window to ten minutes would be a form
+ * that can switch the factor off without saying so.
+ *
+ * `MFA_ENCRYPTION_KEY` is **environment** — a secret belonging to the
+ * deployment, never readable or writable through the API.
+ *
+ * **What is deliberately not here is an organisation policy**, and the
+ * omission is the interesting part. The obvious third-category setting is
+ * `security.mfaRequirement` — *optional* / *required for privileged roles* /
+ * *required for everyone* — and it is not implemented because the enforcement
+ * it promises does not exist yet. Making it *true* means refusing a session to
+ * somebody who has not enrolled, which means a **forced-enrolment flow** at
+ * sign-in: a screen that appears instead of the dashboard, that cannot be
+ * skipped, and that has to survive an account whose authenticator is broken
+ * without locking the firm out of its own system.
+ *
+ * Shipping the setting without that flow would produce a row saying "MFA is
+ * required for everyone" while everyone without it carries on signing in — a
+ * security property an operator can read, believe, and not have. That is
+ * precisely the failure this file was written against, so it waits for the
+ * flow rather than arriving before it (`docs/ENTERPRISE_ROADMAP.md` → P2-2b).
+ *
+ * Nothing in the MFA module has to change to add it. The seam is
+ * `AuthService.login`, which already branches on `MfaService.requiresFactor`
+ * and already has a shape for "the password was right and you are not signed
+ * in yet".
+ *
+ * ---
+ *
  * **The rule that makes the third kind safe: a policy may tighten an
  * invariant and may not loosen it.** That is what lets the lockout threshold
  * be answerable to an incident without letting it be answerable to an

@@ -171,6 +171,60 @@ export async function spendLogin(): Promise<void> {
 }
 
 /* ================================================================== */
+/* The second-factor budget                                           */
+/* ================================================================== */
+
+/**
+ * The three MFA verification routes allow **ten a minute per IP each**, and
+ * the suite paces itself against them the way it paces sign-ins.
+ *
+ * ---
+ *
+ * **They are separate buckets from `/auth/login`.** Nest keys a throttle by
+ * class, handler and tracker, so `/auth/mfa/challenge`,
+ * `/auth/mfa/enroll/verify` and `/auth/reauthenticate` each have their own
+ * ten and none of them eats the sign-in's. That is worth knowing before
+ * reading the number below, because it is why this exists at all rather than
+ * being folded into `spendLogin`.
+ *
+ * **One pacer for all three, deliberately conservative.** The three buckets
+ * are independent on the server and shared here, so a run that spends eight
+ * on challenges and eight on re-authentications waits once when it did not
+ * strictly have to. That trade is taken on purpose: `mfa.spec.ts` is the only
+ * heavy user, its worst minute is about six calls across all three, and the
+ * alternative is three near-identical pacers whose only difference is a
+ * string — which is three places for the next author to forget one.
+ *
+ * `CEILING` is eight rather than ten for the same reason `spendLogin`'s is:
+ * two attempts of headroom for what this module cannot see — a browser
+ * retrying a submit, or a developer with the dashboard open in another tab.
+ *
+ * **Call it immediately before every request to one of the three, including
+ * the ones expected to fail.** A refused code costs the same against the
+ * throttle as an accepted one, and `login-budget.spec.ts` fails the build if
+ * a file reaches those routes without calling it.
+ */
+const MFA_WINDOW_MS = 60_000;
+const MFA_CEILING = 8;
+
+const mfaAttempts: number[] = [];
+
+export async function spendMfa(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    while (mfaAttempts.length && now - mfaAttempts[0] >= MFA_WINDOW_MS) {
+      mfaAttempts.shift();
+    }
+    if (mfaAttempts.length < MFA_CEILING) {
+      mfaAttempts.push(now);
+      return;
+    }
+    const waitMs = MFA_WINDOW_MS - (now - mfaAttempts[0]) + 250;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
+/* ================================================================== */
 /* The refresh budget                                                  */
 /* ================================================================== */
 

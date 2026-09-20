@@ -5,6 +5,7 @@ import { Checkbox, Field, Input, SearchInput, Select, Textarea } from "@/shared/
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { type Column, DataView } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
+import { UserMfaRoute } from "@/features/mfa";
 import { UserSessionsRoute } from "@/features/sessions";
 import { api, type RoleRow, type UserRow } from "../lib/api";
 import { authRepository, useAuth } from "@/core/auth";
@@ -75,6 +76,34 @@ export function UsersPage() {
       className: "w-32",
       sortValue: (r) => r.status,
       render: (r) => <UserStatusBadge user={r} />,
+    },
+    {
+      /*
+        Whether the account has a second factor, on the list rather than only
+        in the dialog.
+
+        It is the column somebody scans when they want to know how far the
+        firm has got with it, and that question is asked of the *whole list*
+        — one row at a time through a dialog is how it stops being asked.
+        The value is already on the row, so it costs no request.
+
+        Off is `—` rather than a badge: most accounts will be off for a
+        while, and a column of warning chips would make the list read as a
+        list of problems. The absence is visible without being loud.
+      */
+      key: "mfa",
+      header: "2FA",
+      className: "w-20",
+      secondary: true,
+      sortValue: (r) => (r.mfaEnabled ? "1" : "0"),
+      render: (r) =>
+        r.mfaEnabled ? (
+          <Badge tone="energy">Aktiv</Badge>
+        ) : (
+          <span className="text-muted" title="Keine Zwei-Faktor-Authentisierung">
+            —
+          </span>
+        ),
     },
     {
       key: "lastLogin",
@@ -423,6 +452,29 @@ function EditUserDialog({
           Beim Ändern von Rollen werden die offenen Sitzungen dieser Person beendet, damit die
           neuen Rechte sofort und vollständig greifen.
         </p>
+
+        {/*
+          Zwei-Faktor-Authentisierung — the feature's administrative slice.
+
+          Gated on `user.read` only for the *status*, which is already on the
+          row this dialog was opened from; the reset button inside is gated
+          on `user.resetMfa`, which is the key that actually withholds
+          something. The panel is rendered for everybody who can open this
+          dialog because "is this account protected" is part of reading a
+          user record, and hiding it would leave an administrator unable to
+          answer the question they came here to ask.
+        */}
+        <div className="border-t border-line pt-5">
+          <Suspense fallback={<Skeleton className="h-16 rounded-lg" />}>
+            <UserMfaRoute
+              userId={user.id}
+              userName={user.name}
+              enabled={user.mfaEnabled}
+              canReset={can("user.resetMfa")}
+              onReset={onDone}
+            />
+          </Suspense>
+        </div>
 
         {/*
           Sitzungen — the feature's administrative slice, composed in here.

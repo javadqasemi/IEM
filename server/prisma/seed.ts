@@ -1913,6 +1913,34 @@ const TEST_USERS = [
      */
     personnelNumber: null,
   },
+  {
+    email: "mfa@iem.test",
+    name: "Mia Faktor (Test)",
+    /**
+     * A second `guest`, and the duplication is the point.
+     *
+     * `e2e/mfa.spec.ts` enrols a real second factor, signs in through it,
+     * spends a recovery code and disables it again — on a live account. It
+     * cannot do that to `gast@iem.test`, because `sessions.spec.ts` signs
+     * that account in expecting a password to be sufficient, and it cannot
+     * do it to the administrator, because that is the account the **shared
+     * browser context** uses: leaving MFA on there would break every
+     * subsequent spec as *"Hauptnavigation not found"* over a screenshot of
+     * the login form, which is the misdiagnosis CLAUDE.md records three
+     * times.
+     *
+     * MFA state is persistent and cross-cutting, so a teardown that fails
+     * once poisons the rest of the run. An account nothing else touches is
+     * the only arrangement where that cannot happen.
+     *
+     * `guest` because the role is irrelevant here — what is being tested is
+     * authentication, not authorisation — and `guest` is the floor, so this
+     * account can never be mistaken for one the permission matrix relies on.
+     * No employee record, for the same reason as `gast`.
+     */
+    role: "guest",
+    personnelNumber: null,
+  },
 ] as const;
 
 async function seedTestUsers() {
@@ -1951,6 +1979,26 @@ async function seedTestUsers() {
 
     await prisma.userRole.deleteMany({ where: { userId: user.id } });
     await prisma.userRole.create({ data: { userId: user.id, roleId: role.id } });
+
+    /*
+      The second factor is cleared on every run, for the same reason the
+      password hash is rewritten: these accounts exist so the suite can sign
+      in, and a credential left behind by an interrupted `mfa.spec.ts` makes
+      the *next* run fail at sign-in with an error that looks like a
+      permissions bug rather than like leftover state.
+
+      It is the seed's job rather than the spec's because a teardown only
+      runs when the run got that far. Re-seeding is the thing a developer
+      does when the suite is behaving oddly, so it has to be the thing that
+      fixes this.
+    */
+    await prisma.mfaCredential.deleteMany({ where: { userId: user.id } });
+    await prisma.mfaRecoveryCode.deleteMany({ where: { userId: user.id } });
+    await prisma.mfaChallenge.deleteMany({ where: { userId: user.id } });
+    await prisma.reauthToken.deleteMany({ where: { userId: user.id } });
+    if (user.mfaEnabled) {
+      await prisma.user.update({ where: { id: user.id }, data: { mfaEnabled: false } });
+    }
 
     if (spec.personnelNumber) {
       await prisma.employee.update({

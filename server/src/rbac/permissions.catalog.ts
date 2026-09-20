@@ -102,6 +102,15 @@ export const SYSTEM_ROLES: RoleDef[] = [
         person who lost it.
       */
       "user.readSessions", "user.revokeSessions",
+      /*
+        Clearing a lost authenticator, and it belongs here rather than with
+        the two keys withheld two blocks below. It is support work — the
+        answer to "my phone is in a river" — and it grants no access: the
+        password is still required afterwards and the account's sessions are
+        revoked rather than opened. Behind a re-authentication either way, so
+        an administrator's unattended laptop is not a way to do it.
+      */
+      "user.resetMfa",
       "role.read",
       "application.read", "application.update", "application.download", "application.export",
       "settings.read", "settings.update",

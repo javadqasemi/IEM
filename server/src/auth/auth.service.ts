@@ -12,6 +12,8 @@ import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
 import { SettingsService } from "../core/settings/settings.service";
 import { afterFailedLogin, isLockedOut, judgeRefresh } from "./auth.rules";
+import { MfaService, type FactorOutcome } from "./mfa.service";
+import { ReauthService } from "./reauth.service";
 import {
   POLICY_BOUNDS,
   POLICY_SETTING_KEYS,
@@ -28,6 +30,26 @@ export type TokenPair = {
   refreshToken: string;
   expiresIn: number;
 };
+
+/**
+ * What a correct password buys, which is now two different things.
+ *
+ * A discriminated union rather than an optional `challenge` beside an
+ * optional `accessToken`, because the two outcomes have **nothing in
+ * common**: one carries a session and the other deliberately carries none.
+ * An optional-field shape would let the controller set a refresh cookie on
+ * the second by forgetting a branch, and forgetting a branch there means the
+ * second factor is not a factor.
+ */
+export type LoginOutcome =
+  | ({ kind: "session"; user: unknown } & TokenPair)
+  /**
+   * The password was right and the factor has not been shown.
+   *
+   * No token of any kind is issued here. The challenge grants nothing except
+   * the right to present a code against one account within five minutes.
+   */
+  | { kind: "mfa"; challenge: string; expiresIn: number };
 
 type Ctx = {
   ip?: string | null;
@@ -49,6 +71,14 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
+    /**
+     * The dependency points one way — `AuthService` → `MfaService` — and that
+     * is what keeps `AuthModule` free of a `forwardRef`. This service knows
+     * how to issue a session and asks the other whether it may; the other
+     * knows what a factor is and issues nothing.
+     */
+    private readonly mfa: MfaService,
+    private readonly reauth: ReauthService,
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -77,7 +107,25 @@ export class AuthService {
   /* Sign in                                                           */
   /* ---------------------------------------------------------------- */
 
-  async login(email: string, password: string, ctx: Ctx): Promise<TokenPair & { user: unknown }> {
+  /**
+   * Email and password, and then possibly a second step.
+   *
+   * **Nothing is issued before the factor passes.** Where the account has a
+   * verified credential this returns a challenge and no tokens at all — not a
+   * restricted access token, not a refresh cookie — because a partial session
+   * is a session, and every route that forgot to check its restriction would
+   * be a way past the factor. The only thing the browser holds between the
+   * two steps is an opaque string that can do exactly one thing.
+   *
+   * The lockout counters are cleared here rather than after the factor,
+   * because they count *password* failures and the password was right. What
+   * is deliberately **not** written yet is `lastLoginAt` and the
+   * `INVITED → ACTIVE` promotion: neither is true until somebody is actually
+   * signed in, and a "last seen" that moved when a stranger typed the right
+   * password and then failed the factor would hide the one event worth
+   * noticing.
+   */
+  async login(email: string, password: string, ctx: Ctx): Promise<LoginOutcome> {
     const now = new Date();
     const user = await this.prisma.user.findFirst({
       where: { email: email.toLowerCase().trim(), deletedAt: null },
@@ -157,9 +205,72 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: user.id },
+      data: { failedLogins: 0, lockedUntil: null },
+    });
+
+    if (await this.mfa.requiresFactor(user.id)) {
+      const challenge = await this.mfa.createChallenge(user.id, ctx);
+      this.audit.record({
+        action: "auth.mfa_challenged",
+        resource: "user",
+        resourceId: user.id,
+        actor: { id: user.id, email: user.email } as AuthUser,
+        message: "Passwort akzeptiert, zweiter Faktor angefordert.",
+        ...ctx,
+      });
+      return {
+        kind: "mfa",
+        challenge: challenge.token,
+        expiresIn: Math.round((challenge.expiresAt.getTime() - Date.now()) / 1000),
+      };
+    }
+
+    return { kind: "session", ...(await this.completeSignIn(user, ctx)) };
+  }
+
+  /**
+   * Finishes a sign-in that was interrupted by the second factor.
+   *
+   * Here rather than in `MfaService` because issuing a session is this
+   * service's business and nothing else's — the other one decides whether the
+   * factor held and returns an account id.
+   *
+   * `outcome` travels back to the controller so the dashboard can say *"noch
+   * 2 Wiederherstellungscodes"* on the screen the reader is already looking
+   * at. Somebody who has just spent a code is exactly the person who needs to
+   * be told how many are left, and a notification a week later is a
+   * notification nobody reads.
+   */
+  async completeMfaChallenge(
+    challenge: string,
+    input: { code?: string; recoveryCode?: string },
+    ctx: Ctx,
+  ): Promise<TokenPair & { user: unknown } & FactorOutcome> {
+    const result = await this.mfa.completeChallenge(challenge, input, ctx);
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: result.userId } });
+    return {
+      ...(await this.completeSignIn(user, ctx)),
+      usedRecoveryCode: result.usedRecoveryCode,
+      remainingRecoveryCodes: result.remainingRecoveryCodes,
+    };
+  }
+
+  /**
+   * The last three things every successful sign-in does, whatever route it
+   * took to get here.
+   *
+   * One method rather than two copies, because the copy is where the two
+   * paths would drift — an `INVITED` user who enrolled a second factor and
+   * then signed in would stay `INVITED` for ever if only the password path
+   * promoted them.
+   */
+  private async completeSignIn(
+    user: User,
+    ctx: Ctx,
+  ): Promise<TokenPair & { user: unknown }> {
+    await this.prisma.user.update({
+      where: { id: user.id },
       data: {
-        failedLogins: 0,
-        lockedUntil: null,
         lastLoginAt: new Date(),
         // An invited user becomes active the first time they sign in.
         status: user.status === "INVITED" ? "ACTIVE" : user.status,
@@ -176,6 +287,92 @@ export class AuthService {
 
     const tokens = await this.issue(user, ctx);
     return { ...tokens, user: await this.profile(user.id) };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Re-authentication                                                 */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Proves, again, that the person at the keyboard is the account holder.
+   *
+   * The password **and**, where the account has one, the second factor. Both,
+   * not either: a re-authentication that a password alone satisfies is worth
+   * nothing against the threat MFA was enrolled for, and one that only takes
+   * a code would let somebody who watched a phone screen turn the factor off.
+   *
+   * Audited in both directions. A burst of failures here is somebody trying
+   * passwords against a session they already hold, which is a different and
+   * more interesting event than a failed sign-in.
+   *
+   * It is **not** a way to sign in: the caller is already authenticated, the
+   * account comes from the verified token, and a wrong password costs nothing
+   * but an audit row. It is therefore deliberately outside the account
+   * lockout — locking an account out of its own settings screen would be a
+   * denial of service somebody could aim at a colleague from a shared desk.
+   * The route's own throttle is what bounds it.
+   */
+  async reauthenticate(
+    actor: AuthUser,
+    input: { password: string; code?: string; recoveryCode?: string },
+    ctx: Ctx,
+  ): Promise<{ token: string; expiresAt: string }> {
+    const deny = () =>
+      new UnauthorizedException("Passwort oder Code stimmt nicht.");
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: actor.id, deletedAt: null, status: "ACTIVE" },
+    });
+    if (!user?.passwordHash || !(await this.verifyPassword(user.passwordHash, input.password))) {
+      this.audit.record({
+        actor,
+        action: "auth.reauthentication_failed",
+        resource: "user",
+        resourceId: actor.id,
+        outcome: AuditOutcome.FAILURE,
+        message: "Falsches Passwort bei der erneuten Bestätigung.",
+        ...ctx,
+      });
+      throw deny();
+    }
+
+    if (await this.mfa.requiresFactor(user.id)) {
+      const outcome = await this.mfa.verifyFactor(user.id, input);
+      if (!outcome) {
+        this.audit.record({
+          actor,
+          action: "auth.reauthentication_failed",
+          resource: "user",
+          resourceId: actor.id,
+          outcome: AuditOutcome.FAILURE,
+          message: "Zweiter Faktor bei der erneuten Bestätigung nicht akzeptiert.",
+          ...ctx,
+        });
+        throw deny();
+      }
+      if (outcome.usedRecoveryCode) {
+        this.audit.record({
+          actor,
+          action: "auth.mfa_recovery_used",
+          resource: "user",
+          resourceId: actor.id,
+          message:
+            `Wiederherstellungscode zur erneuten Bestätigung verwendet; ` +
+            `${outcome.remainingRecoveryCodes} verbleiben.`,
+          ...ctx,
+        });
+      }
+    }
+
+    const { token, expiresAt } = await this.reauth.open(user.id);
+    this.audit.record({
+      actor,
+      action: "auth.reauthenticated",
+      resource: "user",
+      resourceId: actor.id,
+      ...ctx,
+    });
+    return { token, expiresAt: expiresAt.toISOString() };
   }
 
   /* ---------------------------------------------------------------- */
@@ -552,6 +749,11 @@ export class AuthService {
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    // The re-authentication window goes with the sessions. This is one of the
+    // moments where "the same person is still there" stops being something
+    // the server may assume, and a surviving window would be a standing
+    // capability to switch a second factor off.
+    await this.reauth.closeAll(userId);
     this.audit.record({
       action: "auth.logout_all",
       resource: "user",
@@ -686,6 +888,9 @@ export class AuthService {
         where: { userId: row.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
+      // As in `logoutAll`: whoever set this password is not necessarily
+      // whoever opened the window, so the window closes with the sessions.
+      this.prisma.reauthToken.deleteMany({ where: { userId: row.userId } }),
     ]);
 
     this.audit.record({

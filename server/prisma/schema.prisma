@@ -50,8 +50,18 @@ model User {
   name         String
   avatarUrl    String?
   status       UserStatus @default(INVITED)
-  /// Base32 TOTP secret. Null means MFA is not enrolled.
-  mfaSecret    String?
+  /// Whether a **verified** second factor exists — a mirror of
+  /// `MfaCredential`, kept for the user list and `/auth/me`.
+  ///
+  /// It is a denormalisation and therefore a drift risk, so two rules hold it
+  /// down: `MfaService` is the only writer, and every write happens in the
+  /// same transaction as the credential it mirrors. Nothing *decides*
+  /// anything from this column — the sign-in path reads the credential row,
+  /// because a `true` here with no credential behind it would lock somebody
+  /// out of their own account and a `false` would silently skip the factor.
+  ///
+  /// The plaintext `mfaSecret` that used to sit beside it is gone. A secret
+  /// an operator can read out of `psql` is a secret; see `MfaCredential`.
   mfaEnabled   Boolean    @default(false)
   locale       String     @default("de-CH")
   lastLoginAt  DateTime?
@@ -65,6 +75,10 @@ model User {
   roles             UserRole[]
   refreshTokens     RefreshToken[]
   passwordResets    PasswordReset[]
+  mfaCredentials    MfaCredential[]
+  mfaRecoveryCodes  MfaRecoveryCode[]
+  mfaChallenges     MfaChallenge[]
+  reauthTokens      ReauthToken[]
   auditLogs         AuditLog[]
   createdEntries    ContentEntry[]    @relation("EntryCreatedBy")
   updatedEntries    ContentEntry[]    @relation("EntryUpdatedBy")
@@ -183,6 +197,165 @@ model PasswordReset {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// ---------------------------------------------------------------------
+// Second factor
+//
+// Four tables rather than three columns on `User`, and each of the four is
+// answering a question the others cannot:
+//
+// - `MfaCredential` is **what the person has**. One row per method per user.
+// - `MfaRecoveryCode` is **what they fall back to**, ten rows, hashed, each
+//   spendable once.
+// - `MfaChallenge` is **a sign-in halfway through** — the password was right
+//   and the second factor has not been shown yet.
+// - `ReauthToken` is **"I proved it again just now"**, which is a different
+//   claim from "I am signed in" and is what guards the operations that can
+//   switch the second factor off.
+//
+// The shape the brief warned against is a `mfaSecret` column on `User`, which
+// is what this repository had: a plaintext Base32 secret, readable by anybody
+// with a database console or a backup, in the same row as the e-mail address
+// it belongs to. It is gone.
+// ---------------------------------------------------------------------
+
+enum MfaMethod {
+  /// RFC 6238, the only one implemented. WebAuthn is the reason this is an
+  /// enum rather than an assumption — a second method adds a value and a
+  /// branch in `mfa.rules.ts`, not a second table.
+  TOTP
+}
+
+enum MfaCredentialStatus {
+  /// Enrolment has begun: a secret exists and a QR code has been shown, and
+  /// **the factor is not active**. A credential in this state protects
+  /// nothing and is never consulted at sign-in — `expiresAt` sweeps it away.
+  PENDING
+  /// A code from this credential has been checked against it. Only now does
+  /// the account require a second factor.
+  VERIFIED
+}
+
+/// One second factor belonging to one person.
+///
+/// **The secret is encrypted at rest** (`core/crypto`, AES-256-GCM, key from
+/// `MFA_ENCRYPTION_KEY`) and is never returned by any route once enrolment is
+/// complete. It is shown exactly once, during enrolment, because there is no
+/// other way to put it into an authenticator app by hand.
+///
+/// `lastUsedStep` is the replay guard and is the reason this is a row rather
+/// than a column: a TOTP code is valid for a whole time step, so the same six
+/// digits can be presented twice inside thirty seconds. Recording the step
+/// that was accepted and refusing anything at or below it means a code
+/// observed over somebody's shoulder is spent by the time it is retyped.
+model MfaCredential {
+  id              String              @id @default(cuid())
+  userId          String
+  type            MfaMethod           @default(TOTP)
+  status          MfaCredentialStatus @default(PENDING)
+  /// `v1.<iv>.<tag>.<ciphertext>`, base64url. See `EncryptionService`.
+  encryptedSecret String
+  /// What the authenticator app shows — the account label at enrolment time.
+  /// Kept so a reset can say which entry to delete from the phone.
+  label           String?
+  /// When a `PENDING` row stops being usable. Null once `VERIFIED`: an active
+  /// credential does not expire.
+  expiresAt       DateTime?
+  verifiedAt      DateTime?
+  lastUsedAt      DateTime?
+  /// The highest TOTP time step already accepted. Replay protection.
+  ///
+  /// `BigInt` because it is `floor(unixSeconds / 30)` and the arithmetic
+  /// should not depend on how long this system stays in service.
+  lastUsedStep    BigInt?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One credential per method per person, which is what makes restarting an
+  /// enrolment an upsert rather than a pile of abandoned secrets.
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+/// One single-use recovery code, stored as a hash and never otherwise.
+///
+/// Hashed rather than encrypted, unlike the TOTP secret, and the difference
+/// is not an inconsistency: a TOTP secret has to be *read back* to compute the
+/// expected code, whereas a recovery code only ever has to be *compared* — so
+/// the weaker-at-rest form is the wrong tool for one and the right tool for
+/// the other. sha256 rather than Argon2 because the code is 100+ bits of
+/// system-chosen entropy, not a password somebody invented.
+model MfaRecoveryCode {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// A sign-in that has passed the password and not yet passed the factor.
+///
+/// A row rather than a signed JWT, for the reason `RefreshToken` gives: it has
+/// to be revocable and it has to be *countable*. A stateless challenge cannot
+/// enforce "five wrong codes and this attempt is over", and it cannot be
+/// consumed — so the same challenge would be replayable for its whole lifetime
+/// by anyone who saw it.
+///
+/// Nothing in it identifies the user to the browser. The token is opaque
+/// random bytes; the `userId` lives here, on the server, which is what stops a
+/// caller substituting somebody else's account into a half-finished sign-in.
+model MfaChallenge {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  /// Set when the challenge is spent — by a success, or by running out of
+  /// attempts. A consumed challenge is refused, which is the replay guard.
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Proof that the holder authenticated again a moment ago.
+///
+/// "Recent authentication" as a thing the system has, rather than as an
+/// argument each sensitive route invents. A stale browser session must not be
+/// able to switch the second factor off, and the same will be true of
+/// restoring a backup, revealing an API secret and deleting an organisation —
+/// so the token is deliberately not MFA-specific.
+///
+/// It is a **window, not a ticket**: presenting it does not consume it, so a
+/// person who disables MFA and then changes something else is not asked twice
+/// inside five minutes. It is destroyed whenever the account's sessions are —
+/// a password change, a sign-out-everywhere — because those are the moments
+/// where "the same person is still there" stops being true.
+model ReauthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  /// Informational: the last sensitive operation this window was used for.
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // =====================================================================
