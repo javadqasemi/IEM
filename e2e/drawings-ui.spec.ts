@@ -40,8 +40,53 @@ type Drawing = {
 
 const made: string[] = [];
 
+/**
+ * Removes what the test created, and **fails if it cannot**.
+ *
+ * The first version was `await admin.delete(...)` with the result ignored,
+ * and that silence cost a red suite twice. `DELETE /drawings/:id` refuses an
+ * **ISSUED** plan — *"Ein ausgegebener Plan wird zurückgezogen, nicht
+ * gelöscht — er ist bei den Empfängern"* — which is correct: a plan in a
+ * contractor's hands is somebody else's record too. Several tests here issue
+ * their fixtures, so several of them were undeletable, the cleanup swallowed
+ * the 400, and the plans stayed.
+ *
+ * They accumulated to **111 issued drawings on P-2026-001**. The Planversand
+ * dialog deliberately fetches one page of a hundred (it needs a revision id
+ * per plan and will not join on every row of the register), so past that
+ * point a freshly created fixture is simply not on the page the test looks
+ * at — and two tests failed with "element not found" for a row that existed.
+ * Nothing about that pointed at cleanup.
+ *
+ * So: withdraw first where the delete is refused — the documented path for a
+ * plan that has gone out — and then assert. A leak that announces itself is
+ * a five-minute fix; a silent one is a fortnight of somebody else's time.
+ */
 test.afterEach(async () => {
-  while (made.length) await admin.delete(`${API}/drawings/${made.pop()!}`);
+  const leaked: string[] = [];
+
+  while (made.length) {
+    const id = made.pop()!;
+    let response = await admin.delete(`${API}/drawings/${id}`);
+
+    if (!response.ok()) {
+      // The only refusal this hits is ISSUED. Withdrawing needs a reason —
+      // `DrawingWithdrawn.reason` is non-nullable, which is the catalogue
+      // deciding that a plan cannot be pulled back without saying why.
+      await admin.put(`${API}/drawings/${id}/status`, {
+        data: { status: "WITHDRAWN", reason: "Testaufräumen" },
+      });
+      response = await admin.delete(`${API}/drawings/${id}`);
+    }
+
+    if (!response.ok()) leaked.push(`${id} (HTTP ${response.status()})`);
+  }
+
+  expect(
+    leaked,
+    "Fixtures blieben liegen — sie sammeln sich an, bis der Planversand-Dialog " +
+      "sie nicht mehr auf seiner ersten Seite von 100 findet.",
+  ).toEqual([]);
 });
 
 async function projectId(): Promise<string> {

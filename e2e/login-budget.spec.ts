@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { expect, test } from "./fixtures";
 
 /**
@@ -22,7 +22,16 @@ import { expect, test } from "./fixtures";
  * eleventh. Reading the files is the only check that fails in the right place.
  */
 
-const E2E = __dirname;
+/**
+ * `process.cwd()`, not `__dirname`.
+ *
+ * The package is ESM, so `__dirname` does not exist at runtime — and
+ * `@types/node` declares it as a global regardless, so it **typechecks
+ * cleanly and throws on the first run**. `tsconfig.e2e.json` cannot catch
+ * this one; `screens.spec.ts` resolves its screenshot folder the same way for
+ * the same reason. Playwright is always invoked from the repository root.
+ */
+const E2E = resolve(process.cwd(), "e2e");
 
 /** Every spec and helper in the suite, with its comments stripped. */
 function sources(): { name: string; code: string }[] {

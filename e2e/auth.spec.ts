@@ -1,6 +1,14 @@
 ﻿import { request, type APIRequestContext, type APIResponse } from "@playwright/test";
 import { REFRESH_GRACE_MS } from "../server/src/auth/auth.rules";
-import { ADMIN_EMAIL, ADMIN_PASSWORD, API, expect, spendLogin, test } from "./fixtures";
+import {
+  ADMIN_EMAIL,
+  ADMIN_PASSWORD,
+  API,
+  TEST_PASSWORD,
+  expect,
+  spendLogin,
+  test,
+} from "./fixtures";
 
 /**
  * Sign-in, rotation and session restore, **against the live API and a real
@@ -40,6 +48,30 @@ test.describe.configure({ mode: "serial" });
 let shared = "";
 
 /**
+ * The account whose sessions this spec is allowed to destroy.
+ *
+ * **Not the administrator, and that is the whole point.** Reuse detection
+ * revokes *every* live refresh token the account has — `updateMany({ where: {
+ * userId, revokedAt: null } })` — which is exactly the property the test
+ * below exists to prove. Run against the administrator, it also revoked the
+ * **shared browser context** every other spec signs in with, because that is
+ * the same user.
+ *
+ * The failure that produced was perfectly opaque: the worker context keeps
+ * working until something needs a *refresh*, so nothing broke here. It broke
+ * later, in whichever spec first opened a fresh page — `budgets.spec.ts` —
+ * as `Hauptnavigation not found` over a screenshot of the login form, with no
+ * throttle error on it. Three separate investigations blamed the rate limit.
+ * The audit log is what settled it: `auth.refresh_reuse_detected` — *"alle
+ * Sitzungen beendet"* — immediately followed by two `auth.refresh_revoked`.
+ *
+ * Using a different account isolates the surgery without weakening it: the
+ * revocation is per user, so the assertion is unchanged. `/auth/refresh` and
+ * `/auth/me` need no permissions, so the guest account is enough.
+ */
+const SURGERY_EMAIL = "gast@iem.test";
+
+/**
  * Signs in and returns the cookie the browser would have been given.
  *
  * A bare context per sign-in, so each test owns its own session and one test
@@ -48,11 +80,26 @@ let shared = "";
  * IP, and this spec is one of six paths that reach it. Reacting to a 429
  * afterwards is what that replaced; see the note on `spendLogin`.
  */
+/**
+ * Skipped, not failed, when the role accounts are not seeded.
+ *
+ * The same opt-in `security.spec.ts` uses: a red suite on a machine that has
+ * not run `SEED_TEST_USERS=true npm run server:seed` is one people learn to
+ * ignore. The browser tests below need no test account and still run.
+ */
+function requireSurgeryAccount(): void {
+  test.skip(
+    !TEST_PASSWORD,
+    "SEED_TEST_PASSWORD ist nicht gesetzt — `SEED_TEST_USERS=true npm run server:seed` " +
+      "legt das Konto an, dessen Sitzungen dieser Test beenden darf.",
+  );
+}
+
 async function signIn(): Promise<{ refreshToken: string; accessToken: string }> {
   await spendLogin();
   const anonymous = await request.newContext();
   const response = await anonymous.post(`${API}/auth/login`, {
-    data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+    data: { email: SURGERY_EMAIL, password: TEST_PASSWORD },
   });
   expect(response.ok(), `sign-in failed with HTTP ${response.status()}`).toBe(true);
 
@@ -142,6 +189,7 @@ async function meWith(accessToken: string): Promise<number> {
 
 test.describe("refresh-token rotation", () => {
   test.beforeAll(async () => {
+    requireSurgeryAccount();
     shared = (await signIn()).refreshToken;
   });
 
@@ -247,6 +295,7 @@ test.describe("signing out", () => {
    * because a sign-out already took it.
    */
   test("refuses the cookie it just cleared", async () => {
+    requireSurgeryAccount();
     const { refreshToken, accessToken } = await signIn();
 
     const context = await request.newContext({
@@ -350,4 +399,5 @@ test.describe("the dashboard in a browser", () => {
     await context.close();
   });
 });
+
 
