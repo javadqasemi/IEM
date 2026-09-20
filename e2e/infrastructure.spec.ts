@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+﻿import { ADMIN_EMAIL, ADMIN_PASSWORD, apiToken, expect, test } from "./fixtures";
 
 /**
  * The cross-cutting infrastructure, checked through the real API.
@@ -50,11 +50,16 @@ test.describe("request context and audit", () => {
    * every link held: middleware, queue, flush, listener, column.
    */
   test("a status change writes an audit row nobody asked it to write", async ({ request }) => {
-    const auth = { authorization: "" };
-    const login = await request.post("http://localhost:3100/api/v1/auth/login", {
-      data: { email: "admin@iem.ch", password: "Admin#2026IEMAG" },
-    });
-    auth.authorization = `Bearer ${(await login.json()).data.accessToken}`;
+    /*
+      The shared token, not a sign-in of its own.
+
+      This used to `POST /auth/login` with the administrator's credentials
+      typed into the file — one more attempt against a limit of ten a minute,
+      and a second place the seed password had to be kept in step. `apiToken`
+      is memoised per worker, so this now costs **no** attempt at all, and the
+      credentials come from the environment like everywhere else.
+    */
+    const auth = { authorization: `Bearer ${await apiToken(ADMIN_EMAIL, ADMIN_PASSWORD)}` };
 
     const list = await request.get("http://localhost:3100/api/v1/applications?perPage=1", {
       headers: auth,
@@ -122,15 +127,17 @@ test.describe("the list contract", () => {
     await signIn();
   });
 
-  const auth = async (request: import("@playwright/test").APIRequestContext) => {
-    const login = await request.post("http://localhost:3100/api/v1/auth/login", {
-      data: { email: "admin@iem.ch", password: "Admin#2026IEMAG" },
-    });
-    return { authorization: `Bearer ${(await login.json()).data.accessToken}` };
-  };
+  /**
+   * The shared token again — see the note in the describe above. It takes no
+   * `request` any more because it makes no request: `apiToken` memoises the
+   * administrator's sign-in for the whole worker.
+   */
+  const auth = async () => ({
+    authorization: `Bearer ${await apiToken(ADMIN_EMAIL, ADMIN_PASSWORD)}`,
+  });
 
   test("sorts on the server and refuses a field that is not allowed", async ({ request }) => {
-    const headers = await auth(request);
+    const headers = await auth();
 
     const asc = await request.get(
       "http://localhost:3100/api/v1/applications?sort=lastName:asc&perPage=25",
@@ -151,7 +158,7 @@ test.describe("the list contract", () => {
   });
 
   test("the export contains exactly what the same filter returns", async ({ request }) => {
-    const headers = await auth(request);
+    const headers = await auth();
     const filter = "filter%5Bstatus%5D=eq:NEW";
 
     const list = await request.get(
@@ -175,7 +182,7 @@ test.describe("the list contract", () => {
   });
 
   test("a saved view survives a reload and is restored by deleting it", async ({ request }) => {
-    const headers = await auth(request);
+    const headers = await auth();
     const url = "http://localhost:3100/api/v1/list-preferences/application";
 
     await request.put(url, { headers, data: { hidden: ["files"] } });
@@ -190,3 +197,4 @@ test.describe("the list contract", () => {
     expect((await after.json()).data).toEqual({});
   });
 });
+

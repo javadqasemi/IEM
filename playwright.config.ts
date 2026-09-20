@@ -85,8 +85,18 @@ const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/, /drawings-ui\.spec\.ts/, /auth\
  */
 const MUTATES = [/organisation\.spec\.ts/];
 
+/**
+ * Suites that assert about the *repository* rather than about the running
+ * application, and are therefore width-independent by construction.
+ *
+ * `login-budget.spec.ts` reads the other spec files and checks that every
+ * path to `/auth/login` reserves an attempt first. Running that three times
+ * would read the same files three times and report the same answer.
+ */
+const SOURCE_ASSERTIONS = [/login-budget\.spec\.ts/];
+
 /** What the two narrower projects skip. */
-const RUN_ONCE = [...API_ONLY, ...SIGNS_IN_TWICE, ...MUTATES];
+const RUN_ONCE = [...API_ONLY, ...SIGNS_IN_TWICE, ...MUTATES, ...SOURCE_ASSERTIONS];
 
 export default defineConfig({
   testDir: "./e2e",

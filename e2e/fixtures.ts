@@ -99,23 +99,87 @@ export const API_ORIGIN =
 
 export const API = `${API_ORIGIN}/api/v1`;
 
+/* ================================================================== */
+/* The sign-in budget                                                  */
+/* ================================================================== */
+
+/**
+ * `/auth/login` allows **ten attempts a minute per IP**, and the suite has to
+ * live inside that without the production limit moving.
+ *
+ * ---
+ *
+ * **Why memoising was not enough.** Every account already signs in once per
+ * worker and the whole run needs about eleven attempts across fifteen
+ * minutes — nowhere near ten a minute *on average*. The failures were never
+ * about the total; they were about **clustering**. `security.spec.ts` signs
+ * seven roles in back to back in a couple of seconds, `auth.spec.ts` spends
+ * attempts deliberately on wrong passwords, and three more browser sessions
+ * follow. Six independent code paths reached `/auth/login` and **none of them
+ * knew what the others had spent**, so whichever one happened to be eleventh
+ * inside some sixty-second window failed — and it failed two screens away,
+ * as `Hauptnavigation not found` over a screenshot of the login page.
+ *
+ * That is the misdiagnosis CLAUDE.md records three times. Reacting to the 429
+ * afterwards, which is what this used to do, turns a deterministic limit into
+ * a coin flip: the retry helps only if the window has rolled, and a suite that
+ * sometimes waits 61 seconds and sometimes fails is not a suite anybody
+ * trusts.
+ *
+ * **So the budget is spent deliberately rather than discovered.** Every path
+ * that can reach `/auth/login` calls `spendLogin()` first; it records the
+ * attempt and, when the window is full, waits exactly long enough for the
+ * oldest one to fall out of it. No retries, no 429s, no flake — the suite
+ * paces itself against the real policy instead of testing whether it got
+ * lucky.
+ *
+ * `CEILING` is eight rather than ten on purpose. Two attempts of headroom
+ * cover the ones this module cannot see: a browser that retries a submit, a
+ * `forgot-password` flow sharing the bucket, or a developer with the
+ * dashboard open in another tab while the suite runs.
+ */
+const LOGIN_WINDOW_MS = 60_000;
+const LOGIN_CEILING = 8;
+
+/** Timestamps of the attempts this worker has made, newest last. */
+const loginAttempts: number[] = [];
+
+/**
+ * Reserves one sign-in attempt, waiting if the window is already full.
+ *
+ * **Call it immediately before every request to `/auth/login`** — including
+ * the ones expected to *fail*, because a rejected password costs the same
+ * against the throttle as an accepted one. `auth.spec.ts` is the spec that
+ * makes that distinction matter.
+ */
+export async function spendLogin(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    // Drop everything that has aged out of the window.
+    while (loginAttempts.length && now - loginAttempts[0] >= LOGIN_WINDOW_MS) {
+      loginAttempts.shift();
+    }
+    if (loginAttempts.length < LOGIN_CEILING) {
+      loginAttempts.push(now);
+      return;
+    }
+    // Wait for the oldest to expire, plus a little, then re-check: another
+    // caller may have taken the slot while this one slept.
+    const waitMs = LOGIN_WINDOW_MS - (now - loginAttempts[0]) + 250;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
 /**
  * One API sign-in per account, shared by every spec in the worker.
  *
- * **Memoised because `/auth/login` allows ten attempts a minute per IP**, and
- * the API-level suites together wanted twelve: `security.spec.ts` signs in
- * seven roles, `versioning.spec.ts` and `budgets.spec.ts` each signed in the
- * administrator again, and three browser sessions follow. The eleventh got a
- * 429 that reads as a permissions bug.
+ * Memoised on top of the budget above: the pacing stops the suite exceeding
+ * the limit, and the memo stops it spending attempts it does not need.
+ * `versioning.spec.ts` and `budgets.spec.ts` both want the administrator and
+ * between them cost one.
  *
- * The alternative repairs were both wrong. Raising the limit would weaken a
- * real control to suit a test — and a throttle the tests do not exercise is a
- * throttle nobody notices breaking. Dropping a role would shrink the matrix
- * that is the point of the suite. Signing in once and sharing the token is what
- * a person does.
- *
- * Lives here rather than in a spec because module state is per worker, and this
- * runs with one worker: three files importing this get one token each.
+ * Lives here rather than in a spec because module state is per worker, and
+ * this runs with one worker: every file importing this shares one token each.
  */
 const tokens = new Map<string, string>();
 
@@ -123,21 +187,17 @@ export async function apiToken(email: string, password: string): Promise<string>
   const cached = tokens.get(email);
   if (cached) return cached;
 
+  await spendLogin();
   const anonymous = await request.newContext();
-  let response = await anonymous.post(`${API}/auth/login`, { data: { email, password } });
-
-  // Ridden out rather than raised — see above. Sixty seconds, only on a re-run
-  // inside the window, and a security suite can afford it.
-  if (response.status() === 429) {
-    await new Promise((resolve) => setTimeout(resolve, 61_000));
-    response = await anonymous.post(`${API}/auth/login`, { data: { email, password } });
-  }
+  const response = await anonymous.post(`${API}/auth/login`, { data: { email, password } });
 
   if (!response.ok()) {
     await anonymous.dispose();
     throw new Error(
       `${email} konnte sich nicht anmelden (HTTP ${response.status()}). ` +
-        `Für die Rollenkonten: SEED_TEST_USERS=true npm run server:seed`,
+        (response.status() === 429
+          ? "429 trotz Anmelde-Budget — es gibt einen Anmeldeweg, der spendLogin() nicht aufruft."
+          : "Für die Rollenkonten: SEED_TEST_USERS=true npm run server:seed"),
     );
   }
 
@@ -244,52 +304,26 @@ export const test = base.extend<
       const context = await browser.newContext();
       const page = await context.newPage();
 
-      /**
-       * Signs in, and **rides out the login throttle** rather than failing on
-       * it — the same remedy `apiToken` above applies to the API contexts,
-       * finally applied to the browser half as well.
-       *
-       * The limit is 10 sign-ins a minute and it is a real control worth
-       * keeping. The API suites share one token per account through
-       * `apiToken`, so the marginal cost of a role is one attempt — but the
-       * total across a full run sits close enough to ten that *adding a
-       * seventh account to the security matrix was enough to tip it*, and the
-       * failure landed here, in a `budgets.spec.ts` warm-up, as
-       * `element(s) not found` while the page showed the login form.
-       *
-       * That is the misdiagnosis CLAUDE.md records twice already: it reads as
-       * a broken shell and is a rate limit. The two wrong repairs are raising
-       * the limit (weakening a control to suit a test) and dropping a role
-       * (shrinking the matrix that is the point of the suite). Waiting is what
-       * a person does, it costs a minute once, and it only happens inside the
-       * window.
-       */
-      const attempt = async () => {
-        await page.goto("/admin.html#/");
-        await page.getByLabel(/E-Mail/i).fill(ADMIN_EMAIL);
-        await page.getByLabel(/Passwort/i).first().fill(ADMIN_PASSWORD);
-        await page.getByRole("button", { name: /^Anmelden$/ }).click();
-        return page
-          .getByRole("navigation", { name: "Hauptnavigation" })
-          .waitFor({ state: "visible", timeout: 30_000 })
-          .then(
-            () => true,
-            () => false,
-          );
-      };
+      /*
+        The browser sign-in goes through the same budget as the API ones.
 
-      if (!(await attempt())) {
-        // Only reached when the first try did not produce a shell. Sixty-one
-        // seconds, then exactly one more go — a second failure is a real one
-        // and `expect` below reports it with the screenshot.
-        await new Promise((resolve) => setTimeout(resolve, 61_000));
-        await attempt();
-      }
+        It is one attempt per worker, and it used to be the one that failed —
+        the form submits through `/auth/login` like everything else, and
+        nothing connected it to the seven the security matrix had just spent.
+        `spendLogin()` is the connection. Reacting to a 429 afterwards is what
+        this replaced: a retry only helps if the window has rolled, so the
+        suite either waited a minute or failed depending on timing.
+      */
+      await spendLogin();
+      await page.goto("/admin.html#/");
+      await page.getByLabel(/E-Mail/i).fill(ADMIN_EMAIL);
+      await page.getByLabel(/Passwort/i).first().fill(ADMIN_PASSWORD);
+      await page.getByRole("button", { name: /^Anmelden$/ }).click();
 
       await expect(
         page.getByRole("navigation", { name: "Hauptnavigation" }),
-        "Anmeldung im Worker-Kontext fehlgeschlagen — siehe den Screenshot: " +
-          "zeigt er das Anmeldeformular, war es die Ratenbegrenzung (10/min).",
+        "Anmeldung im Worker-Kontext fehlgeschlagen — siehe den Screenshot. " +
+          "Zeigt er „Too Many Requests“, hat ein Anmeldeweg spendLogin() nicht aufgerufen.",
       ).toBeVisible({ timeout: 30_000 });
 
       await page.close();
@@ -297,15 +331,14 @@ export const test = base.extend<
       await context.close();
     },
     /**
-     * Two minutes, against the suite's 45 seconds.
+     * Two minutes, against the suite's ninety seconds.
      *
-     * The ride-out above waits 61 seconds, which is longer than the default
-     * fixture timeout — so the first version "handled" the throttle by timing
-     * out in the middle of the wait, and reported `Fixture "workerContext"
-     * timeout of 45000ms exceeded` over a screenshot showing
-     * *ThrottlerException: Too Many Requests*. A remedy that cannot finish is
-     * not a remedy. It is only ever spent once per worker, and only inside
-     * the window.
+     * `spendLogin()` waits rather than fails when the window is full, and the
+     * longest it can wait is one window — so the fixture needs room for a
+     * sixty-second pause plus the sign-in itself. Budgeted deliberately: an
+     * earlier version left this at the default and reported
+     * `Fixture "workerContext" timeout of 45000ms exceeded` while it was
+     * mid-wait, which reads as a hung fixture and was a remedy being cut off.
      */
     { scope: "worker", timeout: 120_000 },
   ],

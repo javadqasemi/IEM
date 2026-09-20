@@ -1,6 +1,6 @@
-import { request, type APIRequestContext, type APIResponse } from "@playwright/test";
+﻿import { request, type APIRequestContext, type APIResponse } from "@playwright/test";
 import { REFRESH_GRACE_MS } from "../server/src/auth/auth.rules";
-import { ADMIN_EMAIL, ADMIN_PASSWORD, API, expect, test } from "./fixtures";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, API, expect, spendLogin, test } from "./fixtures";
 
 /**
  * Sign-in, rotation and session restore, **against the live API and a real
@@ -43,21 +43,17 @@ let shared = "";
  * Signs in and returns the cookie the browser would have been given.
  *
  * A bare context per sign-in, so each test owns its own session and one test
- * revoking a family cannot end another's. `/auth/login` allows ten attempts a
- * minute per IP, so this rides out a 429 the same way `fixtures.ts` does rather
- * than raising a limit that exists for a reason.
+ * revoking a family cannot end another's. `spendLogin()` reserves the attempt
+ * against the suite-wide budget first — `/auth/login` allows ten a minute per
+ * IP, and this spec is one of six paths that reach it. Reacting to a 429
+ * afterwards is what that replaced; see the note on `spendLogin`.
  */
 async function signIn(): Promise<{ refreshToken: string; accessToken: string }> {
+  await spendLogin();
   const anonymous = await request.newContext();
-  let response = await anonymous.post(`${API}/auth/login`, {
+  const response = await anonymous.post(`${API}/auth/login`, {
     data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
   });
-  if (response.status() === 429) {
-    await new Promise((resolve) => setTimeout(resolve, 61_000));
-    response = await anonymous.post(`${API}/auth/login`, {
-      data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-    });
-  }
   expect(response.ok(), `sign-in failed with HTTP ${response.status()}`).toBe(true);
 
   const body = (await response.json()) as { data: { accessToken: string } };
@@ -288,6 +284,7 @@ test.describe("the dashboard in a browser", () => {
     const context = await browser.newContext();
     const page = await context.newPage();
 
+    await spendLogin();
     await page.goto("/admin.html#/plaene");
     await page.getByLabel(/E-Mail/i).fill(ADMIN_EMAIL);
     await page.getByLabel(/Passwort/i).first().fill(ADMIN_PASSWORD);
@@ -319,6 +316,7 @@ test.describe("the dashboard in a browser", () => {
     const context = await browser.newContext();
     const first = await context.newPage();
 
+    await spendLogin();
     await first.goto("/admin.html#/");
     await first.getByLabel(/E-Mail/i).fill(ADMIN_EMAIL);
     await first.getByLabel(/Passwort/i).first().fill(ADMIN_PASSWORD);
@@ -352,3 +350,4 @@ test.describe("the dashboard in a browser", () => {
     await context.close();
   });
 });
+

@@ -1,5 +1,14 @@
 import type { APIRequestContext } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD, API, TEST_PASSWORD, apiAs, expect, test } from "./fixtures";
+import {
+  ADMIN_EMAIL,
+  ADMIN_PASSWORD,
+  API,
+  TEST_PASSWORD,
+  apiAs,
+  expect,
+  spendLogin,
+  test,
+} from "./fixtures";
 
 /**
  * Row-level security and the permission matrix, **against the live API**.
@@ -685,40 +694,34 @@ test.describe("the dashboard offers nothing the server would refuse", () => {
    * of them has a matching API assertion above, which is the part that matters.
    */
   async function signInAs(page: import("@playwright/test").Page, email: string) {
+    /*
+      Reserved against the suite-wide budget before the form is touched.
+
+      Three browser sign-ins follow seven API ones in this file alone, which
+      is what used to put the run over ten a minute. Two earlier versions
+      tried to *recover* from the resulting 429 and both were wrong in
+      opposite directions: the first matched the server's message ("Zu
+      viele …"), which the API is free to reword; the second probed for the
+      rail with a short timeout and treated its absence as "throttled" — but
+      six seconds is not always enough for a *successful* sign-in to render
+      the shell, so it waited a minute and clicked **Anmelden** again on a
+      page that no longer had one. The click hung and the test timed out at
+      two and a half minutes with the rail plainly visible in the trace.
+
+      Pacing removes the recovery path altogether: the attempt is only made
+      when there is room for it, so an absent rail means a real failure and
+      the message says so.
+    */
+    await spendLogin();
     await page.goto("/admin.html#/");
     await page.getByLabel(/E-Mail/i).fill(email);
     await page.getByLabel(/Passwort/i).first().fill(TEST_PASSWORD);
     await page.getByRole("button", { name: /^Anmelden$/ }).click();
 
-    /*
-      The same throttle, from the browser's side — and the retry fires only on a
-      real failure.
-
-      Two earlier versions were wrong in opposite directions. The first matched
-      the server's message ("Zu viele …"), which the API is free to reword. The
-      second probed for the rail with a short timeout and treated its absence as
-      "throttled" — but six seconds is not always enough for a *successful*
-      sign-in to render the shell, so it waited a minute and clicked **Anmelden**
-      again on a page that no longer had one. The click hung and the test timed
-      out at two and a half minutes with the rail plainly visible in the trace.
-
-      Waiting properly first is what makes the retry meaningful: twenty seconds
-      is generous for a sign-in that works, and only a genuine failure reaches
-      the catch.
-    */
-    const rail = page.getByRole("navigation", { name: "Hauptnavigation" });
-    try {
-      await expect(rail).toBeVisible({ timeout: 20_000 });
-    } catch {
-      await page.waitForTimeout(61_000);
-      await page
-        .getByRole("button", { name: /^Anmelden$/ })
-        .click()
-        .catch(() => undefined);
-      await expect(rail, `${email} konnte sich im Dashboard nicht anmelden`).toBeVisible({
-        timeout: 30_000,
-      });
-    }
+    await expect(
+      page.getByRole("navigation", { name: "Hauptnavigation" }),
+      `${email} konnte sich im Dashboard nicht anmelden`,
+    ).toBeVisible({ timeout: 30_000 });
   }
 
   test("an engineer gets no create button and no export", async ({ browser }) => {

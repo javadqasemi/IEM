@@ -1,0 +1,43 @@
+{
+  /**
+   * The browser suite's own program.
+   *
+   * **`e2e/` had no compile-time gate at all.** `tsconfig.json` is the
+   * application (browser types only) and `tsconfig.test.json` includes
+   * `src/**‍/*.test.ts` and nothing else, so twenty-odd Playwright files —
+   * fixtures, the security matrix, the budgets — were typechecked by nobody.
+   * Playwright transpiles without checking, so a mistake there surfaces as a
+   * runtime failure partway through a fifteen-minute run, in whichever spec
+   * happened to touch it.
+   *
+   * It is not hypothetical: the first run of this program found a
+   * `spendLogin` used in `security.spec.ts` and imported nowhere, which would
+   * have failed three browser tests with `spendLogin is not defined` after
+   * ten minutes of green.
+   *
+   * A third program rather than widening the second, for the reason the
+   * second exists: these files need `node` *and* `@playwright/test` globals,
+   * and letting the application share those would make `fs` and `process`
+   * typecheck inside a React component — where they resolve at compile time
+   * and are absent at runtime, so the mistake ships as a blank page.
+   *
+   * `auth.spec.ts` imports `REFRESH_GRACE_MS` from `server/src`, which is
+   * deliberate — a duplicated thirty seconds would go stale the first time
+   * somebody tuned it — so the server tree is reachable from here and is
+   * checked as part of this program.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    /*
+      The server is compiled by its own `tsc` with its own settings; this
+      program only needs to *read* the one constant `auth.spec.ts` imports.
+      Without this, its decorators and Nest types would be checked here under
+      the wrong options and report errors the server's own build does not.
+    */
+    "skipLibCheck": true
+  },
+  "include": ["e2e/**/*.ts", "playwright.config.ts"],
+  "exclude": []
+}
