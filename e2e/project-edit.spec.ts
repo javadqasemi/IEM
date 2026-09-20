@@ -91,6 +91,27 @@ async function record() {
 async function openDialog(page: Page) {
   await page.goto(`/admin.html#/projekte/${projectId}`);
   await expect(page.getByText("Seite wird geladen …")).toHaveCount(0, { timeout: 20_000 });
+
+  /*
+    Waited for explicitly before clicking, and that is about the *report*
+    rather than the timing.
+
+    `click()` auto-waits, but against the **test** timeout rather than the
+    expect timeout — so when the button never arrived, this hung for the full
+    ninety seconds and reported `Target page, context or browser has been
+    closed`, which describes the teardown rather than the problem. A bounded
+    wait fails in twenty seconds saying the button is missing, which is the
+    sentence somebody can act on.
+
+    The disappearance of the loading text is not sufficient on its own: it
+    means the lazy chunk resolved, while "Bearbeiten" needs the project's own
+    query to have landed and the route to have published its actions.
+  */
+  await expect(
+    page.getByRole("button", { name: "Bearbeiten" }),
+    "Die Projektansicht hat keine Bearbeiten-Schaltfläche gerendert — " +
+      "entweder ist die Detailabfrage fehlgeschlagen oder die Route hat ihre Aktionen nicht veröffentlicht.",
+  ).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: "Bearbeiten" }).click();
 
   const dialog = page.getByRole("dialog");
