@@ -179,6 +179,16 @@ fails on the new field until `npx prisma generate` has run in `server/`.
 wrong; `server/.env`, `main.ts` and `README.md` all say 3100, and `README.md` explains why 3000 was
 rejected.
 
+**Postgres is wherever `DATABASE_URL` says, and that is not necessarily 5432.** The
+`docker run … -p 5432` line in `server/.env.example` is a suggestion, not a fact: read the
+port out of `server/.env` before concluding the database is down, because a failed
+connection on 5432 looks identical whether the service is stopped or listening elsewhere.
+For ad-hoc SQL use `psql` rather than a throwaway Prisma script — this project is on
+**Prisma 7**, where `new PrismaClient()` without a driver adapter throws immediately. Strip
+the `?schema=public` off the URL (psql rejects it as an invalid URI parameter), and put the
+statement in a file for `-f`: every table name is PascalCase and therefore needs double
+quotes, which do not survive PowerShell's handling of `-c "…"`.
+
 ```bash
 # The gates. `verify` is what to run before a commit.
 npm run verify       # typecheck + lint + test, both halves. Needs nothing running.
@@ -196,11 +206,42 @@ npm run verify:all   # verify + e2e, for a release
 npm run e2e:security   # the role x verb x resource matrix, against the live API
 npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
+npm run e2e:install    # once per machine: downloads the browser
 ```
 
-**Both need a seed that ordinary development does not.** `e2e:security` needs
-the six role accounts (`SEED_TEST_USERS=true` plus `SEED_TEST_PASSWORD`, both in
-`server/.env`), and `e2e:budgets` is only meaningful with rows —
+```bash
+# One file, one test. Three toolchains, three spellings.
+npx vitest run src/core/api/client.test.ts            # site + dashboard
+npx vitest run src/core/api/client.test.ts -t "429"   # one case, by name
+cd server && npx vitest run src/auth/sessions.rules.test.ts   # the API
+npx playwright test sessions.spec.ts --project=desktop
+npx playwright test sessions.spec.ts:123 --project=desktop   # one test, by line
+```
+
+**The API's single-test run is the one that needs `cd server`**, which is the
+opposite of every other command here. `npm --prefix server exec -- vitest run
+src/…` looks right and answers *"No test files found"*: the prefix chooses the
+package but not the working directory, so the relative path and the root
+config's `exclude: ["server/**"]` both resolve against the wrong place.
+
+**Always pass `--project=desktop` to a single Playwright spec.** Without it the
+spec runs at all three widths, which for anything in `RUN_ONCE` is both
+meaningless and a way to spend the sign-in budget three times over.
+
+**Two Playwright cautions that have each cost an hour.** Running specs
+back-to-back as separate `npx playwright test` invocations exhausts
+`/auth/login`: the budget in `fixtures.ts` is per *process*, so a second
+invocation inside the same minute starts believing it has spent nothing and
+meets real 429s. The symptom is a mass failure that looks like broken
+permissions — wait a minute, or run the suite in one invocation. And a run
+**wipes `test-results/` on start**, so copy a trace somewhere else before
+re-running or the evidence for the failure you are investigating is gone.
+
+**`e2e:security` and `e2e:budgets` need a seed that ordinary development does
+not.** The first needs the seven role accounts (`SEED_TEST_USERS=true` plus
+`SEED_TEST_PASSWORD`, both in `server/.env`) — six until `administrator` was
+added for the `organisation.updateLegal` gate, and the seventh is what pushed
+the sign-in total against its limit. The second is only meaningful with rows —
 `SEED_LOAD_PROJECTS=500 npm run server:seed` creates them. Each **skips with a
 message** rather than failing when its data is absent, because a red suite on a
 machine that has not opted in is one people learn to ignore.
@@ -268,10 +309,11 @@ saying none existed. Three things about them are deliberate:
   that catch bugs and leaves style to Prettier. The React Compiler rules
   (`set-state-in-effect`, `refs`, `use-memo`) fire on patterns this codebase chose and commented,
   so they are warnings: a countable backlog, not a wall. **0 errors is the bar**, and that is the
-  number to watch — as of Wave 2 module 2 the warnings stand at 35 (28 compiler, 8
-  `exhaustive-deps`), up from the 21 this note recorded when it was written, because the count
-  grows with the dashboard rather than with any decision. Treat a rise in *errors* as a
-  regression and a rise in warnings as arithmetic.
+  number to watch — the warnings stood at 21 when this note was written, 35 at Wave 2 module 2
+  and **34 as of P2-9**, because the count grows and shrinks with the dashboard rather than
+  with any decision. Treat a rise in *errors* as a regression and a move in warnings as
+  arithmetic; the figure is worth re-reading from `npm run lint` rather than from this line,
+  which is a snapshot and will be stale again.
 - **Tests exist where a bug already got through**, not for coverage. `settings.dto.test.ts` runs the
   real `ValidationPipe` with the real options because the bug it guards was a missing decorator
   being silently stripped — asserting the decorator is present would not have caught it.
