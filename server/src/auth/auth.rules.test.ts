@@ -236,3 +236,51 @@ describe("judgeRefresh", () => {
     ).toBe("replayed");
   });
 });
+
+/**
+ * The lockout numbers are the organisation's, and the rule still holds.
+ *
+ * `afterFailedLogin` takes a resolved policy rather than reading the
+ * constants it used to, which is what let `security.policy.ts` make the
+ * threshold answerable to an incident without making it answerable to an
+ * attacker. These are the two things that could have broken in the move: the
+ * default has to stay what it was, and a supplied policy has to be the one
+ * that decides.
+ */
+describe("afterFailedLogin honours a configured policy", () => {
+  const tighter = { maxFailedLogins: 3, lockoutMs: 5 * 60_000 };
+
+  it("locks at the configured threshold rather than the default", () => {
+    const next = afterFailedLogin({ failedLogins: 2, lockedUntil: null }, NOW, tighter);
+    expect(next.failedLogins).toBe(3);
+    expect(next.lockedUntil).toEqual(new Date(NOW.getTime() + tighter.lockoutMs));
+  });
+
+  it("does not lock below it", () => {
+    const next = afterFailedLogin({ failedLogins: 1, lockedUntil: null }, NOW, tighter);
+    expect(next.lockedUntil).toBeNull();
+  });
+
+  it("locks for the configured duration", () => {
+    const longer = { maxFailedLogins: 5, lockoutMs: 60 * 60_000 };
+    const next = afterFailedLogin({ failedLogins: 4, lockedUntil: null }, NOW, longer);
+    expect(next.lockedUntil).toEqual(new Date(NOW.getTime() + longer.lockoutMs));
+  });
+
+  it("still behaves exactly as before when no policy is given", () => {
+    // The default has to remain five attempts and fifteen minutes, or the
+    // parameterisation quietly changed the product while refactoring it.
+    const next = afterFailedLogin({ failedLogins: 4, lockedUntil: null }, NOW);
+    expect(next.failedLogins).toBe(5);
+    expect(next.lockedUntil).toEqual(new Date(NOW.getTime() + 15 * 60_000));
+  });
+
+  it("restarts a served streak against the configured threshold too", () => {
+    // The bug this function exists for, re-checked on the configurable path:
+    // an expired lockout must not carry its count forward.
+    const served = { failedLogins: 3, lockedUntil: new Date(NOW.getTime() - 1_000) };
+    const next = afterFailedLogin(served, NOW, tighter);
+    expect(next.failedLogins).toBe(1);
+    expect(next.lockedUntil).toBeNull();
+  });
+});

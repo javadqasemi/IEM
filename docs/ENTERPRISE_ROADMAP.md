@@ -147,7 +147,7 @@ verbatim on failure. Audited, and rate-limited.
 **Acceptance.** A wrong host produces a named error in the UI within the request; a
 correct one produces a mail; the attempt appears in the audit log either way.
 
-### P1-5 ○ Security configuration is constant
+### P1-5 ◐ Security configuration is constant
 
 **Problem.** Lockout threshold, lockout duration and password minimum length are constants
 in `auth.rules.ts`. `security.allowedOrigins` is inert. There is no active-session view.
@@ -155,17 +155,39 @@ in `auth.rules.ts`. `security.allowedOrigins` is inert. There is no active-sessi
 **Business impact.** An incident cannot be responded to without a deploy, and neither a
 user nor an administrator can end a suspicious session short of deleting the account.
 
-**Solution.** Move the three constants behind clamped settings read through
-`auth.rules.ts` (keeping the rules pure — the numbers become arguments). Add a sessions
-list and a revoke action over `RefreshToken`. Leave CORS at bootstrap: making it dynamic
-costs a database read per preflight and locks the dashboard out of its own API when it is
-wrong — that is a deliberate deferral, not an oversight.
+**Solution.** The obvious repair — move all three into the settings table — is wrong in a
+way worth writing down: it turns every security property into something an operator can
+switch off, and an attacker holding a Super Admin session can then switch them off before
+doing anything else. So `server/src/auth/security.policy.ts` sorts every security number
+into four kinds and makes exactly one of them configurable:
 
-**Dependencies.** P0-1 for the clamps.
+| Kind | Where | Examples |
+| --- | --- | --- |
+| **Invariant** | Compile time, never configurable | `REFRESH_GRACE_MS`, `PASSWORD_FLOOR`, `PASSWORD_MAX_LENGTH`, the obvious-password deny-list, rotation and family revocation, the `@Throttle` limits |
+| **Environment** | Deployment and secrets, never readable through the API | `JWT_ACCESS_SECRET`, `REFRESH_TTL_DAYS`, `CORS_ORIGINS`, `REDIS_URL`, `SMTP_*` |
+| **Organisation policy** | Super Admin, validated, audited, **clamped** | `security.sessionTimeoutMinutes`, `maxFailedLogins`, `lockoutMinutes`, `passwordMinLength` |
+| **User** | The person's own | Their password, their sessions, their MFA enrolment |
 
-**Acceptance.** Changing the lockout threshold takes effect on the next attempt without a
-restart; a user can see and revoke their own sessions; an administrator can revoke
-another's; every revocation is audited.
+**The rule that makes the third kind safe: a policy may tighten an invariant and may not
+loosen it.** `resolvePasswordPolicy` clamps the configured minimum *up* to
+`PASSWORD_FLOOR`, so a row saying `4` resolves to `12`. The clamp is applied on **read**,
+not trusted from the write path — validation guards the API, and this covers every other
+way a row can come to hold a bad number: a migration, a hand-edit, a release from before
+the bound existed.
+
+**Done:** the four-layer split, the three new clamped settings, `afterFailedLogin` and
+`assertPasswordStrength` taking the policy as an argument so the rules stay pure, and the
+Sicherheit section of the settings workspace rendering them automatically — with bounds,
+units and a confirmation on each, because all three are declared `dangerous`. 55 auth
+tests, of which 29 are the policy.
+
+**Remaining:** the active-sessions view (P2-9 below, split out because it is a screen and
+an endpoint rather than a configuration question). `security.allowedOrigins` stays inert
+deliberately: making CORS dynamic costs a database read per preflight and locks the
+dashboard out of its own API when it is wrong.
+
+**Acceptance met so far.** Changing the lockout threshold takes effect on the next attempt
+without a restart; no policy value can weaken an invariant however it reaches the table.
 
 ### P1-6 ○ Fourteen permissions guard nothing
 
@@ -231,6 +253,17 @@ the `DataView`/`useListView` contract. `ContentEditor` also hand-writes a breadc
 router derives. **Acceptance:** each becomes a feature folder; `WITHOUT_METRICS` shrinks by
 the same number.
 
+### P2-9 ○ Active session management
+Split out of P1-5, because it is a screen and an endpoint rather than a configuration
+question. `RefreshToken` already stores `ip`, `userAgent`, `createdAt`, `expiresAt`,
+`revokedAt` and the rotation chain — everything a session list needs — and
+`POST /auth/logout-all` already exists. What is missing is `GET /auth/sessions`, a
+per-session revoke, the same under `Users → user → Sessions` for an administrator, and
+the two screens. **Never return the token or its hash**; the row's identity on the wire
+should be its id, not its secret. **Acceptance:** a user can see and revoke their own
+sessions, an administrator can revoke another's, the current session is marked as such,
+and every revocation is audited.
+
 ### P2-8 ○ Media library gaps
 Checksums are stored and indexed but duplicates are never surfaced; there is no
 replace-with-history UI, no bulk metadata edit, no orphan report. **Acceptance:** an upload
@@ -248,7 +281,9 @@ of an identical file offers the existing asset.
 | P3-4 ○ | **Lint backlog.** 0 errors is the bar and holds; 35 warnings (28 React-Compiler, 8 `exhaustive-deps`) are a countable backlog that grows with the dashboard. |
 | P3-5 ○ | **Prettier.** Configured, deliberately not run across the tree. A one-commit reformat is a decision to take once, on its own. |
 | P3-6 ○ | **Performance budgets over real volume.** `budgets.spec.ts` refuses to claim anything below 100 rows; `SEED_LOAD_PROJECTS=500` is opt-in. Making it the default for CI would turn the slope check into a standing regression gate. |
-| P3-7 ○ | **The e2e suite now sits at the login-throttle ceiling.** `/auth/login` allows 10/min per IP; a full run needs roughly that many, because `security.spec.ts` signs in one account per role and `auth.spec.ts` deliberately spends attempts on failures. The seventh role account (`adm@iem.test`, added for the `organisation.updateLegal` gate) is what closed the margin, and the 61-second ride-out in `apiToken`/`workerContext` now fires often enough to be felt. **Do not raise the limit** — it is a real control and CLAUDE.md records three separate misdiagnoses of it. The two honest levers are to run `auth.spec.ts` last so its deliberate failures do not starve the rest, or to drop the seventh account: `organisation.controller.test.ts` already covers the legal gate as a pure unit test, so only the `office.delete` route cell would be lost, and that one is a plain decorator the agreement test already checks. |
+| P3-7 ✅ | **The login throttle is now a budget the suite spends rather than one it discovers.** Six independent paths reached `/auth/login` and none knew what the others had spent, so whichever was eleventh inside a sixty-second window failed — two files away, as a missing rail over a screenshot of the login page. `spendLogin()` in `e2e/fixtures.ts` reserves an attempt before the request and waits when the window is full; every path calls it, including the ones expected to fail. `login-budget.spec.ts` asserts against the source that none opts out, because a bypass is unobservable at runtime except as somebody else's flake. `infrastructure.spec.ts` stopped signing in twice with a hardcoded password. **No production limit moved.** Superseded the paragraph below. |
+| P3-8 ✅ | **`e2e/` was typechecked by nobody.** `tsconfig.json` is the application and `tsconfig.test.json` covers `src/**/*.test.ts`; twenty-odd Playwright files were checked by neither, and Playwright transpiles without checking. `tsconfig.e2e.json` is a third program in `npm run typecheck`, and its first run found a `spendLogin` used in `security.spec.ts` and imported nowhere. |
+| P3-7 (old) ○ | **The e2e suite now sits at the login-throttle ceiling.** `/auth/login` allows 10/min per IP; a full run needs roughly that many, because `security.spec.ts` signs in one account per role and `auth.spec.ts` deliberately spends attempts on failures. The seventh role account (`adm@iem.test`, added for the `organisation.updateLegal` gate) is what closed the margin, and the 61-second ride-out in `apiToken`/`workerContext` now fires often enough to be felt. **Do not raise the limit** — it is a real control and CLAUDE.md records three separate misdiagnoses of it. The two honest levers are to run `auth.spec.ts` last so its deliberate failures do not starve the rest, or to drop the seventh account: `organisation.controller.test.ts` already covers the legal gate as a pure unit test, so only the `office.delete` route cell would be lost, and that one is a plain decorator the agreement test already checks. |
 
 ---
 

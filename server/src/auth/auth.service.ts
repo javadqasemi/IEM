@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   Injectable,
   UnauthorizedException,
@@ -11,7 +11,15 @@ import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
 import { SettingsService } from "../core/settings/settings.service";
-import { MAX_FAILED_LOGINS, afterFailedLogin, isLockedOut, judgeRefresh } from "./auth.rules";
+import { afterFailedLogin, isLockedOut, judgeRefresh } from "./auth.rules";
+import {
+  POLICY_BOUNDS,
+  POLICY_SETTING_KEYS,
+  resolveLockoutPolicy,
+  resolvePasswordPolicy,
+  type LockoutPolicy,
+  type PasswordPolicy,
+} from "./security.policy";
 import type { AuthUser } from "../common/decorators";
 
 export type TokenPair = {
@@ -109,10 +117,18 @@ export class AuthService {
 
     const ok = await this.verifyPassword(user.passwordHash, password);
     if (!ok) {
-      // The streak restarts once a lockout has been served — see
-      // `afterFailedLogin`, which is where the reason is written down and
-      // where every boundary of it is tested.
-      const next = afterFailedLogin(user, now);
+      /*
+        The streak restarts once a lockout has been served — see
+        `afterFailedLogin`, which is where the reason is written down and
+        where every boundary of it is tested.
+
+        The threshold and the duration are the organisation's policy now
+        rather than constants, resolved and clamped by `security.policy.ts`.
+        The clamp is what keeps this safe to configure: the numbers can be
+        tightened for an incident and cannot be loosened past the bounds.
+      */
+      const policy = await this.lockoutPolicy();
+      const next = afterFailedLogin(user, now, policy);
       await this.prisma.user.update({
         where: { id: user.id },
         data: next,
@@ -122,7 +138,7 @@ export class AuthService {
         resource: "user",
         resourceId: user.id,
         outcome: AuditOutcome.FAILURE,
-        message: `Fehlversuch ${next.failedLogins}/${MAX_FAILED_LOGINS}`,
+        message: `Fehlversuch ${next.failedLogins}/${policy.maxFailedLogins}`,
         ...ctx,
       });
       throw deny();
@@ -211,15 +227,54 @@ export class AuthService {
     const envTtl = this.config.get<string>("JWT_ACCESS_TTL") ?? "15m";
     try {
       const minutes = await this.settings.number(
-        "security.sessionTimeoutMinutes",
+        POLICY_SETTING_KEYS.sessionTimeoutMinutes,
         Math.max(1, Math.round(parseTtl(envTtl) / 60)),
-        1,
-        240,
+        POLICY_BOUNDS.sessionTimeoutMinutes.min,
+        POLICY_BOUNDS.sessionTimeoutMinutes.max,
       );
       return `${minutes}m`;
     } catch {
       // A settings read that fails must not stop anyone signing in.
       return envTtl;
+    }
+  }
+
+  /**
+   * The lockout numbers the organisation has set, clamped.
+   *
+   * Read per failed attempt rather than cached, for the same reason
+   * `accessTtl` is: a threshold tightened during an incident should apply to
+   * the next attempt, not after a restart. A failed sign-in is not a hot
+   * path — it is, by construction, something that should be rare.
+   *
+   * **A settings read that fails falls back to the defaults rather than to
+   * no lockout.** The failure mode of the other direction is the one that
+   * matters: a database hiccup must not quietly turn the brake off.
+   */
+  private async lockoutPolicy(): Promise<LockoutPolicy> {
+    try {
+      const raw = await this.settings.values([
+        POLICY_SETTING_KEYS.maxFailedLogins,
+        POLICY_SETTING_KEYS.lockoutMinutes,
+      ]);
+      return resolveLockoutPolicy({
+        maxFailedLogins: raw[POLICY_SETTING_KEYS.maxFailedLogins],
+        lockoutMinutes: raw[POLICY_SETTING_KEYS.lockoutMinutes],
+      });
+    } catch {
+      return resolveLockoutPolicy({});
+    }
+  }
+
+  /** The password policy, clamped so it can only be stricter than the floor. */
+  async passwordPolicy(): Promise<PasswordPolicy> {
+    try {
+      const raw = await this.settings.values([POLICY_SETTING_KEYS.passwordMinLength]);
+      return resolvePasswordPolicy({
+        passwordMinLength: raw[POLICY_SETTING_KEYS.passwordMinLength],
+      });
+    } catch {
+      return resolvePasswordPolicy({});
     }
   }
 
@@ -413,7 +468,7 @@ export class AuthService {
     if (!user.passwordHash || !(await this.verifyPassword(user.passwordHash, current))) {
       throw new BadRequestException("Das aktuelle Passwort ist falsch.");
     }
-    assertPasswordStrength(next);
+    assertPasswordStrength(next, await this.passwordPolicy());
 
     await this.prisma.user.update({
       where: { id: userId },
@@ -463,7 +518,7 @@ export class AuthService {
     if (!row || row.usedAt || row.expiresAt < new Date()) {
       throw new BadRequestException("Dieser Link ist abgelaufen oder wurde bereits verwendet.");
     }
-    assertPasswordStrength(password);
+    assertPasswordStrength(password, await this.passwordPolicy());
 
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -509,14 +564,29 @@ function sha256(value: string): string {
  */
 const OBVIOUS = ["passwort", "password", "12345678", "qwertz", "iemag", "admin123"];
 
-export function assertPasswordStrength(password: string): void {
-  if (password.length < 12) {
-    throw new BadRequestException("Das Passwort muss mindestens 12 Zeichen lang sein.");
+/**
+ * @param policy The organisation's, already clamped. Defaulted so a caller
+ * without one still gets the floor rather than no check — the direction that
+ * matters, since the failure of the other one is a password nobody checked.
+ */
+export function assertPasswordStrength(
+  password: string,
+  policy: PasswordPolicy = resolvePasswordPolicy({}),
+): void {
+  if (password.length < policy.minLength) {
+    throw new BadRequestException(
+      `Das Passwort muss mindestens ${policy.minLength} Zeichen lang sein.`,
+    );
   }
-  if (password.length > 256) {
+  if (password.length > policy.maxLength) {
     throw new BadRequestException("Das Passwort ist zu lang.");
   }
   const lower = password.toLowerCase();
+  /*
+    The deny-list is an invariant, not a policy — see `security.policy.ts`.
+    It stays in code because a list an operator can edit is a list that gets
+    emptied the first time somebody's chosen password is refused by it.
+  */
   if (OBVIOUS.some((o) => lower.includes(o))) {
     throw new BadRequestException("Dieses Passwort ist zu leicht zu erraten.");
   }
@@ -541,3 +611,4 @@ function parseTtl(ttl: string): number {
   const n = Number(m[1]);
   return n * { s: 1, m: 60, h: 3600, d: 86400 }[m[2] as "s" | "m" | "h" | "d"];
 }
+

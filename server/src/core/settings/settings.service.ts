@@ -157,6 +157,50 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     min: 1,
     max: 240,
   },
+  /*
+    The lockout and password numbers, which used to be constants in
+    `auth.rules.ts`.
+
+    Bounded here **and** clamped again on read in `security.policy.ts`. That
+    is not belt and braces for its own sake: validation guards the API, and
+    the clamp guards every other way a row can come to hold a number — a
+    migration, a hand-edit, a release before the bound existed. The lower end
+    of each is the security-relevant one, and `passwordMinLength` cannot be
+    set below the invariant floor of twelve however it is written.
+  */
+  {
+    key: "security.maxFailedLogins",
+    group: "Sicherheit",
+    type: "number",
+    value: 5,
+    description: "Fehlversuche bis zur Sperrung",
+    unit: "Versuche",
+    min: 3,
+    max: 10,
+  },
+  {
+    key: "security.lockoutMinutes",
+    group: "Sicherheit",
+    type: "number",
+    value: 15,
+    description: "Dauer der Sperrung nach zu vielen Fehlversuchen",
+    unit: "Minuten",
+    min: 5,
+    max: 1440,
+  },
+  {
+    key: "security.passwordMinLength",
+    group: "Sicherheit",
+    type: "number",
+    value: 12,
+    description: "Mindestlänge für Passwörter",
+    unit: "Zeichen",
+    // Twelve is the floor and not merely the default: `resolvePasswordPolicy`
+    // clamps up to it, so a lower value cannot take effect even if one
+    // reaches the table by another route.
+    min: 12,
+    max: 128,
+  },
   {
     key: "security.requireMfaForAdmins",
     group: "Sicherheit",
@@ -226,6 +270,15 @@ export const DANGEROUS_SETTINGS: Record<string, string> = {
   "security.sessionTimeoutMinutes":
     "Eine längere Gültigkeit bedeutet, dass ein entwendetes Zugriffstoken entsprechend " +
     "länger brauchbar bleibt.",
+  "security.maxFailedLogins":
+    "Mehr Versuche bedeuten mehr Spielraum zum Erraten eines Passworts. Die Sperrung ist " +
+    "die einzige Bremse gegen automatisiertes Durchprobieren.",
+  "security.lockoutMinutes":
+    "Eine kürzere Sperrung lässt Angreifer schneller weiterprobieren; eine sehr lange " +
+    "sperrt Mitarbeitende aus, die sich nur vertippt haben.",
+  "security.passwordMinLength":
+    "Eine kürzere Vorgabe wirkt nur auf neue Passwörter — bestehende bleiben gültig. " +
+    "Unter zwölf Zeichen ist sie ohnehin nicht wirksam.",
 };
 
 @Injectable()

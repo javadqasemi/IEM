@@ -18,7 +18,15 @@
  * Each is a function of a few columns and a clock — no database, no request, no
  * framework — which is what lets `auth.rules.test.ts` cover every branch and
  * every boundary.
+ *
+ * The lockout numbers are now **arguments** rather than constants read from
+ * this module: `security.policy.ts` resolves them from the organisation's
+ * settings and clamps them, and this file stays a function of its inputs.
+ * `REFRESH_GRACE_MS` below stays a constant, deliberately — see the note on
+ * it, and the invariants table in `security.policy.ts`.
  */
+
+import { POLICY_BOUNDS, type LockoutPolicy } from "./security.policy";
 
 /**
  * How long after a rotation the *old* token may still be presented without
@@ -57,9 +65,24 @@ export const REFRESH_GRACE_MS = 30_000;
  * Fifteen minutes after five attempts is slow enough to make online guessing
  * pointless and short enough that a person who mistyped their password twice
  * and then went to look it up is not calling support.
+ *
+ * **These are the defaults, not the policy.** They stayed constants here for
+ * a release and the roadmap's objection was fair: an incident cannot be
+ * responded to without a deploy. They are now the fallbacks behind
+ * `security.maxFailedLogins` and `security.lockoutMinutes`, which an operator
+ * sets and `security.policy.ts` clamps — *upwards only*, so the configuration
+ * can tighten the rule and cannot switch it off. `afterFailedLogin` takes the
+ * resolved policy as an argument rather than reading it, which is what keeps
+ * this file pure and exhaustively testable.
  */
-export const MAX_FAILED_LOGINS = 5;
-export const LOCKOUT_MS = 15 * 60 * 1000;
+export const MAX_FAILED_LOGINS = POLICY_BOUNDS.maxFailedLogins.fallback;
+export const LOCKOUT_MS = POLICY_BOUNDS.lockoutMinutes.fallback * 60_000;
+
+/** The default, for a caller that has no configured policy to hand. */
+const DEFAULT_LOCKOUT: LockoutPolicy = {
+  maxFailedLogins: MAX_FAILED_LOGINS,
+  lockoutMs: LOCKOUT_MS,
+};
 
 export type LockoutState = {
   failedLogins: number;
@@ -88,13 +111,24 @@ export function isLockedOut(state: LockoutState, now: Date): boolean {
  * is what makes five attempts mean five attempts every time rather than only the
  * first time.
  */
-export function afterFailedLogin(state: LockoutState, now: Date): LockoutState {
+export function afterFailedLogin(
+  state: LockoutState,
+  now: Date,
+  /**
+   * The resolved policy. Defaulted so every existing caller and test reads
+   * the same way, and so a caller that has not loaded settings still gets the
+   * documented behaviour rather than no lockout at all.
+   */
+  policy: LockoutPolicy = DEFAULT_LOCKOUT,
+): LockoutState {
   const served = state.lockedUntil !== null && !isLockedOut(state, now);
   const failedLogins = (served ? 0 : state.failedLogins) + 1;
   return {
     failedLogins,
     lockedUntil:
-      failedLogins >= MAX_FAILED_LOGINS ? new Date(now.getTime() + LOCKOUT_MS) : null,
+      failedLogins >= policy.maxFailedLogins
+        ? new Date(now.getTime() + policy.lockoutMs)
+        : null,
   };
 }
 
