@@ -76,6 +76,80 @@ export class UsersService {
     return user;
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Sessions — somebody else's                                        */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * An administrator's view of one account's live sessions.
+   *
+   * Thin on purpose: `AuthService` already builds this for `/auth/sessions`
+   * and it takes the account as an argument, so the administrative view is the
+   * same query asked about a different id. A second implementation here would
+   * be a second place the `tokenHash` allowlist has to be right.
+   *
+   * **`existing()` first, and it is not ceremony.** Without it an unknown or
+   * deleted id answers `200 []` — "this person has no sessions" — which is the
+   * same thing a real account with nobody signed in says. An administrator
+   * checking whether a suspicious session is still live would read the wrong
+   * answer to the question they actually asked.
+   *
+   * `presented` is the *caller's* refresh cookie, passed through rather than
+   * dropped. Against somebody else's rows it can never match, so nothing is
+   * marked current — which is correct. Against their own record it matches,
+   * and the screen can warn them before they end the session they are using.
+   * Both fall out of one line rather than needing a branch.
+   */
+  async sessionsOf(id: string, presented: string | undefined) {
+    await this.existing(id);
+    return this.auth.sessions(id, presented);
+  }
+
+  /**
+   * Ends one of them.
+   *
+   * Scoped to the named account twice over — `AuthService.revokeSession`
+   * takes the owner's id for its `where` *and* re-checks it in
+   * `refuseRevoke` — so an administrator cannot reach a session belonging to
+   * somebody other than the user whose page they are on, even by pasting an
+   * id from another account.
+   */
+  async revokeSessionOf(id: string, sessionId: string, actor: AuthUser, ctx: Ctx) {
+    await this.existing(id);
+    return this.auth.revokeSession(id, sessionId, actor, ctx);
+  }
+
+  /**
+   * Ends all of them — the incident response, and the reason the two keys are
+   * separate in the catalogue.
+   *
+   * `logoutAll` rather than `revokeOtherSessions`: an administrator acting on
+   * somebody else's account has no session of their own among these rows to
+   * keep, and "all except one I do not have" would be an odd thing to mean.
+   * The one case where it matters is an administrator doing this to
+   * *themselves*, where ending their own session is the honest outcome of the
+   * button they pressed — and the screen says so before they press it.
+   */
+  async revokeAllSessionsOf(id: string, actor: AuthUser, ctx: Ctx) {
+    await this.existing(id);
+    return this.auth.logoutAll(id, actor, ctx);
+  }
+
+  /**
+   * Asserts the account is real and not deleted, and returns nothing.
+   *
+   * Separate from `get` because the session routes need the *check* and not
+   * the record, and calling `get` for its exception would select eleven
+   * columns and a role join to throw them away.
+   */
+  private async existing(id: string): Promise<void> {
+    const found = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true },
+    });
+    if (!found) throw new NotFoundException("Benutzer nicht gefunden.");
+  }
+
   /**
    * Invites a user.
    *

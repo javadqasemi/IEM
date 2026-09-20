@@ -221,6 +221,65 @@ test.describe("the permission matrix, by verb", () => {
     // questions, and the engineer holds the second without the first.
     { who: "engineer", method: "GET", path: "/dashboard/system", expect: 200 },
     { who: "guest", method: "GET", path: "/dashboard/system", expect: 403 },
+
+    /*
+      Somebody else's sessions.
+
+      **`user.readSessions` is deliberately not `user.read`**, and these cells
+      are what stops the two being conflated by a later edit. Several roles
+      here hold `user.read` — they can see the user list — and every one of
+      them is refused, because a device, an IP address and a working pattern
+      are a different disclosure from a name and a role.
+
+      The id is **fabricated on purpose**, which is the opposite of the rule
+      the writes below follow, and for a reason worth stating. There the
+      concern was a 404 short-circuiting the permission check and passing
+      vacuously; here the 404 *is* the assertion. `@RequirePermissions` runs
+      before the handler, so a role without the key is refused at the guard
+      and never learns whether the id is real, while a role with it reaches
+      `existing()` and is told the user does not exist. **403 and 404 are
+      therefore the two halves of one proof**: the guard fires for the first
+      group and the handler for the second, and a route that answered 404 to
+      everybody would look like it worked while enforcing nothing.
+
+      It is also why `sessionsOf` calls `existing()` at all. Without it an
+      unknown id answers `200 []`, which is what a real account with nobody
+      signed in says — so these cells would read 200 and prove nothing.
+    */
+    { who: "superAdmin", method: "GET", path: "/users/cmzzzznotarealid0000/sessions", expect: 404 },
+    { who: "administrator", method: "GET", path: "/users/cmzzzznotarealid0000/sessions", expect: 404 },
+    { who: "management", method: "GET", path: "/users/cmzzzznotarealid0000/sessions", expect: 403 },
+    { who: "hr", method: "GET", path: "/users/cmzzzznotarealid0000/sessions", expect: 403 },
+    { who: "projectManager", method: "GET", path: "/users/cmzzzznotarealid0000/sessions", expect: 403 },
+    { who: "engineer", method: "GET", path: "/users/cmzzzznotarealid0000/sessions", expect: 403 },
+    { who: "guest", method: "GET", path: "/users/cmzzzznotarealid0000/sessions", expect: 403 },
+
+    // And the revoking half, which is a second key. The administrator holds
+    // both; nobody else holds either.
+    {
+      who: "administrator",
+      method: "POST",
+      path: "/users/cmzzzznotarealid0000/sessions/revoke-all",
+      expect: 404,
+    },
+    {
+      who: "management",
+      method: "POST",
+      path: "/users/cmzzzznotarealid0000/sessions/revoke-all",
+      expect: 403,
+    },
+    {
+      who: "hr",
+      method: "POST",
+      path: "/users/cmzzzznotarealid0000/sessions/revoke-all",
+      expect: 403,
+    },
+    {
+      who: "guest",
+      method: "DELETE",
+      path: "/users/cmzzzznotarealid0000/sessions/cmzzzznotarealsess00",
+      expect: 403,
+    },
   ];
 
   for (const cell of READS) {

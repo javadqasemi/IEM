@@ -20,6 +20,7 @@ import {
   type LockoutPolicy,
   type PasswordPolicy,
 } from "./security.policy";
+import { refuseRevoke, toSessionViews, type SessionView } from "./sessions.rules";
 import type { AuthUser } from "../common/decorators";
 
 export type TokenPair = {
@@ -28,7 +29,17 @@ export type TokenPair = {
   expiresIn: number;
 };
 
-type Ctx = { ip?: string | null; userAgent?: string | null };
+type Ctx = {
+  ip?: string | null;
+  userAgent?: string | null;
+  /**
+   * The refresh cookie this request carried, where a caller needs to know
+   * whether it acted on its *own* session. Only `revokeSession` reads it, and
+   * it is hashed before any comparison — the raw value never leaves the
+   * request.
+   */
+  presentedRefreshToken?: string;
+};
 
 @Injectable()
 export class AuthService {
@@ -396,9 +407,148 @@ export class AuthService {
     this.audit.record({ action: "auth.logout", resource: "user", resourceId: actor?.id, actor, ...ctx });
   }
 
-  /** "Sign out everywhere" — used from the profile page and on role changes. */
-  async logoutAll(userId: string, actor: AuthUser | null, ctx: Ctx): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
+  /* ---------------------------------------------------------------- */
+  /* Sessions                                                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * The live sessions of one account.
+   *
+   * `revokedAt: null` is the whole grouping: rotation revokes as it issues,
+   * so a live session is exactly one row. See the note at the top of
+   * `sessions.rules.ts` for why that is a consequence rather than a choice,
+   * and why this reports *last activity* rather than a sign-in time.
+   *
+   * `presented` is the caller's refresh cookie, hashed here so the comparison
+   * happens against the same column the server authenticates with — and so
+   * nothing but the hash is ever held. A caller with no cookie gets a list
+   * with no current session marked, which is true.
+   */
+  async sessions(userId: string, presented: string | undefined): Promise<SessionView[]> {
+    const rows = await this.prisma.refreshToken.findMany({
+      where: { userId, revokedAt: null },
+      // Explicit: the default would carry `tokenHash` and `replacedById` out
+      // of the repository, and the only thing standing between those and a
+      // response body would be somebody remembering to strip them.
+      select: {
+        id: true,
+        ip: true,
+        userAgent: true,
+        createdAt: true,
+        expiresAt: true,
+        tokenHash: true,
+      },
+    });
+
+    return toSessionViews(rows, presented ? sha256(presented) : null, new Date());
+  }
+
+  /**
+   * Ends one session.
+   *
+   * Scoped by `userId` in the `where` *and* checked by `refuseRevoke`. Two
+   * answers to one question on purpose: the scope is what makes another
+   * account's session unreachable, and the rule is what makes a mistake in
+   * the scope visible rather than silent.
+   */
+  async revokeSession(
+    userId: string,
+    sessionId: string,
+    actor: AuthUser | null,
+    ctx: Ctx,
+  ): Promise<{ revoked: boolean; wasCurrent: boolean }> {
+    const row = await this.prisma.refreshToken.findFirst({
+      where: { id: sessionId, revokedAt: null },
+      select: { id: true, userId: true, tokenHash: true },
+    });
+
+    const refusal = refuseRevoke(row, userId);
+    if (refusal) throw new BadRequestException(refusal);
+
+    await this.prisma.refreshToken.update({
+      where: { id: sessionId },
+      data: { revokedAt: new Date() },
+    });
+
+    this.audit.record({
+      action: "auth.session_revoked",
+      resource: "user",
+      resourceId: userId,
+      actor,
+      message: `Sitzung ${sessionId} beendet.`,
+      ...ctx,
+    });
+
+    const presented = ctx.presentedRefreshToken;
+    return {
+      revoked: true,
+      wasCurrent: Boolean(presented && row!.tokenHash === sha256(presented)),
+    };
+  }
+
+  /**
+   * Ends every session **except** the one asking.
+   *
+   * Distinct from `logoutAll`, which ends that one too. The difference is the
+   * whole point of the control: "sign out my other devices" is something you
+   * do *because* you intend to keep working here, and an implementation that
+   * signed the caller out as well would be indistinguishable from the sign-out
+   * button they did not press.
+   */
+  async revokeOtherSessions(
+    userId: string,
+    presented: string | undefined,
+    actor: AuthUser | null,
+    ctx: Ctx,
+  ): Promise<{ revoked: number }> {
+    const keep = presented ? sha256(presented) : null;
+
+    const { count } = await this.prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+        // `not: null` would be wrong when there is no cookie: it matches
+        // nothing, so a caller without one would revoke nothing and be told
+        // it worked. Omitting the clause revokes all of them, which is the
+        // correct reading of "everything other than a session I do not have".
+        ...(keep ? { tokenHash: { not: keep } } : {}),
+      },
+      data: { revokedAt: new Date() },
+    });
+
+    this.audit.record({
+      action: "auth.sessions_revoked_others",
+      resource: "user",
+      resourceId: userId,
+      actor,
+      message: `${count} weitere Sitzung(en) beendet.`,
+      ...ctx,
+    });
+
+    return { revoked: count };
+  }
+
+  /**
+   * "Sign out everywhere" — the profile page, a role change, and an
+   * administrator ending somebody else's sessions.
+   *
+   * `userId` is the account being ended and `actor` is whoever asked, which
+   * are the same person for the first two callers and deliberately not for the
+   * third. The audit row already recorded both, so an administrative
+   * revocation needs no separate action name: "who did it to whom" is the
+   * question the log has to answer and it answers it either way.
+   *
+   * Returns the count rather than `void` so a screen can say *how many* were
+   * ended. Nothing about the existing callers changes — they ignore it — but
+   * "3 Sitzungen beendet" and "nothing happened" are different outcomes and a
+   * `void` cannot tell them apart.
+   */
+  async logoutAll(
+    userId: string,
+    actor: AuthUser | null,
+    ctx: Ctx,
+  ): Promise<{ revoked: number }> {
+    const { count } = await this.prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
@@ -409,6 +559,7 @@ export class AuthService {
       actor,
       ...ctx,
     });
+    return { revoked: count };
   }
 
   /* ---------------------------------------------------------------- */

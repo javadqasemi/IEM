@@ -94,6 +94,26 @@ export const RESOURCES: ResourceDef[] = [
     delete: "Benutzer deaktivieren oder löschen",
     assign: "Rollen zuweisen",
     impersonate: "Als anderer Benutzer anmelden",
+    /*
+      Sessions are two keys rather than one, and separate from `user.read`.
+
+      Seeing where somebody is signed in means seeing their IP addresses, their
+      devices and their working hours — which is more than "may look at the
+      user list", and is why `manager` holds `user.read` and neither of these.
+
+      They are split from each other for the reason the catalogue splits
+      everything: reading is support work and revoking is an intervention that
+      interrupts somebody mid-task. A role that should be able to answer "is
+      this account signed in somewhere it should not be" does not have to be
+      the role that acts on the answer.
+
+      Nothing here duplicates the caller's own sessions. Those are on
+      `/auth/sessions` and carry no permission at all — they are the account's
+      own, like `/auth/me`, and a key every role had to be granted would mean
+      nothing.
+    */
+    readSessions: "Aktive Sitzungen eines Benutzers ansehen",
+    revokeSessions: "Sitzungen eines Benutzers beenden",
   }),
 
   resource("role", "Rollen", "Rollen", {

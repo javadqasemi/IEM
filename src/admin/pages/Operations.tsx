@@ -1,4 +1,4 @@
-﻿import { useId, useMemo, useState } from "react";
+﻿import { Suspense, useId, useMemo, useState } from "react";
 import { cn } from "@/shared/utils/cn";
 import { formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
 import {
@@ -26,6 +26,7 @@ import { useDebounced, useMutation } from "@/shared/hooks";
 import { usePageActions } from "@/core/router";
 import { actionLabel } from "@/entities/audit";
 import { ActivityFeed } from "@/widgets/activity";
+import { SessionsRoute } from "@/features/sessions";
 import { api } from "../lib/api";
 import { authRepository, useAuth } from "@/core/auth";
 import { THEME_CHOICES, useTheme } from "../lib/theme";
@@ -572,6 +573,25 @@ export function ProfilePage() {
           </form>
         </Card>
       </div>
+
+      {/*
+        Sitzungen — the feature's own slice, composed in here.
+
+        `admin/pages` is the layer above both `features/` and `widgets/`, so
+        it is the only place allowed to import a feature — the same rule that
+        puts the project detail's embedded tabs in `ProjectPage.tsx` rather
+        than inside either feature. `Suspense` because the card is behind a
+        `lazy()` boundary: it holds a table and two dialogs that every signed
+        in user would otherwise download and almost none of them open.
+
+        `onSignedOut` is the one thing the card cannot do for itself. Ending
+        your own session leaves this tab holding a refresh token the server
+        has already refused, and only the shell knows how to put the reader
+        back at the sign-in screen.
+      */}
+      <Suspense fallback={<Skeleton className="h-64 rounded-lg" />}>
+        <SessionsRoute onSignedOut={() => void authRepository.logout().then(reload)} />
+      </Suspense>
 
       <Card title="Ihre letzten Aktionen" bodyClassName="px-5 py-1">
         {activity.loading ? (

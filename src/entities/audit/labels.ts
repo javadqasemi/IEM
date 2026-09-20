@@ -18,6 +18,17 @@ const ACTION_LABELS: Record<string, string> = {
   "auth.login_locked": "Konto gesperrt nach Fehlversuchen",
   "auth.login_suspended": "Anmeldung eines gesperrten Kontos",
   "auth.refresh_reuse_detected": "Wiederverwendetes Sitzungstoken erkannt",
+  "auth.refresh_revoked": "Sitzungsfamilie widerrufen",
+  /**
+   * Not a failure, which is why it has a phrase of its own rather than
+   * sharing one with the line above. Two tabs booting together present the
+   * same cookie, and `REFRESH_GRACE_MS` serves the second on purpose — a
+   * reader meeting this in the log during an incident needs to be able to
+   * tell it apart from the reuse detection immediately above it.
+   */
+  "auth.refresh_concurrent": "Gleichzeitige Sitzungserneuerung (innerhalb der Toleranz)",
+  "auth.session_revoked": "hat eine Sitzung beendet",
+  "auth.sessions_revoked_others": "hat alle anderen Sitzungen beendet",
   "auth.password_changed": "hat das Passwort geändert",
   "auth.password_reset_requested": "hat ein neues Passwort angefordert",
   "auth.password_reset_completed": "hat das Passwort zurückgesetzt",

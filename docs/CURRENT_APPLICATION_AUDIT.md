@@ -40,7 +40,7 @@ and one of them is a deletion deadline for personal data.**
 | Verify gate | ✅ green — typecheck, lint (0 errors), 1'024 server tests, site tests |
 | Server modules | 19 controllers, ~173 route handlers |
 | Prisma models | 49 models, 38 enums, 12 migrations |
-| Permissions | 106 keys from 21 resources; **14 enforced on no route** |
+| Permissions | 106 keys from 21 resources at the time of the audit; **116 today** (+8 for Unternehmen/Standorte in P1-1, +2 for sessions in P2-9). **14 enforced on no route**, unchanged — every key added since was enforced on the route that came with it |
 | Domain events | 75 names; audit derived from them |
 | Content types | 24 editable types covering all 38 keys of `SiteContent` |
 | Public site CMS coverage | effectively complete — see §4 |
@@ -135,13 +135,33 @@ survivable in practice: a 30-second `REFRESH_GRACE_MS` window audited as
 `navigator.locks`. A three-valued `RefreshOutcome` distinguishes "refused" from
 "unreachable", so a proxy hiccup no longer signs people out.
 
+**And a 429 is now "unreachable" too** — the fourth side of that same mistake, found on
+20 September 2026 and the only one where the server did reply. `ThrottlerGuard` runs
+before the controller, so a rate-limited refresh never reaches `AuthService`: the cookie
+is not examined, nothing is revoked and no audit row is written. It was being read as a
+refusal and signing people out of live sessions. Reachable in production because the
+60/min limit is **per IP** and the firm shares one office address; found in the e2e suite,
+which peaks at 62 refreshes a minute because every `page.goto` reboots the SPA. Two
+regression tests in `client.test.ts`, and `spendRefresh` paces the suite rather than the
+limit being raised.
+
 Lockout: five attempts, cleared on expiry as well as on success. Password minimum 12
-characters. Login throttled 10/min; the public application form 5/hour/IP.
+characters. Login throttled 10/min; refresh 60/min; the public application form 5/hour/IP.
+
+**Active sessions are now visible and revocable** (P2-9, 20 September 2026), which is the
+one thing this section used to say was missing. `GET /auth/sessions` lists the caller's
+own — one unrevoked `RefreshToken` row per live session, since rotation revokes as it
+issues — with the current one marked by comparing the presented cookie's hash. A user
+ends one (`DELETE /auth/sessions/:id`) or all the others
+(`POST /auth/sessions/revoke-others`, distinct from `logout-all` because "sign out my
+other devices" presumes you are staying). An administrator holding `user.readSessions` /
+`user.revokeSessions` does the same for another account under `/users/:id/sessions`.
+No token, hash or `replacedById` ever reaches a response body — the view is built from an
+explicit key list so a new column cannot widen it.
 
 **Not configurable.** Lockout threshold, lockout duration and password length are
 constants in `auth.rules.ts` / `auth.service.ts`. Session lifetime *is* configurable
-(`security.sessionTimeoutMinutes`, clamped 1–240). There is no "active sessions" screen,
-although `RefreshToken` holds everything one needs.
+(`security.sessionTimeoutMinutes`, clamped 1–240).
 
 **MFA is half-built**: `User.mfaSecret` and `User.mfaEnabled` exist, the `otpauth`
 dependency is installed, and `security.requireMfaForAdmins` is a stored switch marked
@@ -294,7 +314,7 @@ SMTP password.
 | 6 E-mail | **Good** — configurable, environment fallback, secrets redacted, read per send. Missing: test send, templates, delivery status |
 | 7 Notifications | Missing — table exists, nothing reads it |
 | 8 Recruitment | Partial — notify address, retention, file size (see §5.1); no allowed-types or candidate-status configuration |
-| 9 Security | Partial — session timeout only; lockout, password policy and origins are constants or `pending`; no active-sessions view |
+| 9 Security | Partial — session timeout, lockout threshold, lockout duration and password length are all configurable and clamped (P1-5); active sessions are visible and revocable for oneself and, behind `user.readSessions`/`user.revokeSessions`, for another account (P2-9). Origins stay inert; MFA is still `pending` |
 | 10 Integrations | Missing |
 | 11 Storage & media | Missing as configuration; real limits are constants |
 | 12 Backup & recovery | **Missing entirely** — no backup system exists |
@@ -383,10 +403,14 @@ Open items, in order:
    therefore making promises the server does not keep; harmless today because the routes
    do not exist, misleading the moment one does.
 3. No MFA flow (switch exists, inert).
-4. No active-session management — a user cannot see or revoke their own sessions, and an
-   administrator cannot revoke someone else's except by deleting the account.
-5. Lockout and password policy are constants, so an incident cannot be responded to
-   without a deploy.
+4. ~~No active-session management.~~ **Closed 20 September 2026 (P2-9.)** Both halves
+   ship: a user sees and ends their own sessions, and an administrator ends another's
+   without deleting the account. The one thing still owed is a *place* for the
+   administrator's view — it is a panel inside the user dialog, because this application
+   has no user detail page yet (P2-7), so a user's sessions have no shareable URL.
+5. ~~Lockout and password policy are constants.~~ **Closed (P1-5.)** All four numbers are
+   settings now, validated on write and clamped on read so a policy can tighten an
+   invariant and never loosen it.
 6. `security.allowedOrigins` is inert; CORS is resolved once at bootstrap.
 
 None of 2–6 is a hole. They are the difference between *secure* and *operable under

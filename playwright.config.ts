@@ -83,7 +83,7 @@ const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/, /drawings-ui\.spec\.ts/, /auth\
  * workspace's sections at all three widths and runs axe over them, which is
  * where the responsive question is actually answered.
  */
-const MUTATES = [/organisation\.spec\.ts/];
+const MUTATES = [/organisation\.spec\.ts/, /sessions\.spec\.ts/];
 
 /**
  * Suites that assert about the *repository* rather than about the running

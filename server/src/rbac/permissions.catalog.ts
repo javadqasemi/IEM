@@ -93,6 +93,15 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "media.read", "media.upload", "media.update", "media.replace", "media.delete",
       "media.download", "media.folder",
       "user.read", "user.create", "user.update", "user.assign",
+      /*
+        Both session keys, and they cost the administrator no authority they
+        did not already have: `user.update` can set a status to SUSPENDED,
+        which ends every session the account holds. Revoking one session is
+        the *narrower* act, and it is the one an incident actually calls for —
+        "this laptop was left on a train" should not require deactivating the
+        person who lost it.
+      */
+      "user.readSessions", "user.revokeSessions",
       "role.read",
       "application.read", "application.update", "application.download", "application.export",
       "settings.read", "settings.update",

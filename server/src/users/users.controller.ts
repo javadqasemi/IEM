@@ -134,6 +134,62 @@ export class UsersController {
     return this.users.remove(id, user, this.ctx(req, ip));
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Sessions — somebody else's                                        */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Where this account is signed in.
+   *
+   * `user.readSessions` rather than `user.read`, because device, IP address
+   * and working hours are more than the user list shows — see the argument in
+   * `rbac/resources.ts`.
+   *
+   * The caller's own refresh cookie is passed through so that an administrator
+   * looking at *their own* record sees which row is the session they are
+   * using. Against anybody else's rows it cannot match, so nothing is marked
+   * and the honest answer falls out without a branch.
+   */
+  @Get(":id/sessions")
+  @RequirePermissions("user.readSessions")
+  sessions(@Param("id") id: string, @Req() req: AuthedRequest) {
+    const presented = (req as unknown as { cookies?: Record<string, string> }).cookies
+      ?.refresh_token;
+    return this.users.sessionsOf(id, presented);
+  }
+
+  /** Ends one. Audited against the target, with the administrator as actor. */
+  @Delete(":id/sessions/:sessionId")
+  @RequirePermissions("user.revokeSessions")
+  revokeSession(
+    @Param("id") id: string,
+    @Param("sessionId") sessionId: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.users.revokeSessionOf(id, sessionId, user, this.ctx(req, ip));
+  }
+
+  /**
+   * Ends all of them — "this account is compromised, lock it out now".
+   *
+   * `@Post` with an explicit 200 rather than `@Delete` on the collection: it
+   * is an act with a result worth reading (how many were ended), and the
+   * dashboard reports that number back.
+   */
+  @Post(":id/sessions/revoke-all")
+  @HttpCode(200)
+  @RequirePermissions("user.revokeSessions")
+  revokeAllSessions(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.users.revokeAllSessionsOf(id, user, this.ctx(req, ip));
+  }
+
   @Post(":id/send-password-reset")
   @HttpCode(202)
   @RequirePermissions("user.update")

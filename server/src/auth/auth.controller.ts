@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req, Res } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Throttle } from "@nestjs/throttler";
 import { IsEmail, IsString, MaxLength, MinLength } from "class-validator";
@@ -145,6 +145,80 @@ export class AuthController {
   @Get("me")
   me(@CurrentUser() user: AuthUser) {
     return this.auth.profile(user.id);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Sessions — one's own                                              */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * **No `@RequirePermissions`, deliberately.**
+   *
+   * These three are about the caller's *own* account, like `me` above and
+   * `change-password` below, and the codebase already treats that as needing
+   * authentication and nothing more — `/profil` carries no permission either.
+   * A key such as `session.readOwn` would be one every role had to be granted
+   * for the dashboard to work, which is a key that means nothing.
+   *
+   * The scope is the control instead: every one of them takes `user.id` from
+   * the verified token and never from the request, so there is no parameter
+   * through which one account could reach another's sessions.
+   */
+  @Get("sessions")
+  sessions(@Req() req: AuthedRequest, @CurrentUser() user: AuthUser) {
+    const presented = (req as unknown as { cookies?: Record<string, string> }).cookies
+      ?.refresh_token;
+    return this.auth.sessions(user.id, presented);
+  }
+
+  /**
+   * Ends one of them.
+   *
+   * The response says whether the caller just ended the session it is using,
+   * so the dashboard can sign itself out rather than carrying on with a
+   * refresh token that will fail at the next rotation — which would look like
+   * a random sign-out several minutes later.
+   */
+  @Delete("sessions/:id")
+  async revokeSession(
+    @Param("id") id: string,
+    @Req() req: AuthedRequest,
+    @Res({ passthrough: true }) res: Response,
+    @CurrentUser() user: AuthUser,
+    @ClientIp() ip: string | null,
+  ) {
+    const presented = (req as unknown as { cookies?: Record<string, string> }).cookies
+      ?.refresh_token;
+
+    const result = await this.auth.revokeSession(user.id, id, user, {
+      ip,
+      userAgent: req.headers["user-agent"] ?? null,
+      presentedRefreshToken: presented,
+    });
+
+    // Revoking your own session clears your own cookie in the same response.
+    // Leaving it set would hand the browser a credential the server has just
+    // refused, and the failure would arrive minutes later at the next refresh.
+    if (result.wasCurrent) {
+      res.clearCookie("refresh_token", { ...this.cookieOptions(), maxAge: undefined });
+    }
+    return result;
+  }
+
+  /** Everything except this one — see `revokeOtherSessions` for the split. */
+  @Post("sessions/revoke-others")
+  @HttpCode(200)
+  revokeOtherSessions(
+    @Req() req: AuthedRequest,
+    @CurrentUser() user: AuthUser,
+    @ClientIp() ip: string | null,
+  ) {
+    const presented = (req as unknown as { cookies?: Record<string, string> }).cookies
+      ?.refresh_token;
+    return this.auth.revokeOtherSessions(user.id, presented, user, {
+      ip,
+      userAgent: req.headers["user-agent"] ?? null,
+    });
   }
 
   @Post("change-password")

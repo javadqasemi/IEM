@@ -150,10 +150,12 @@ correct one produces a mail; the attempt appears in the audit log either way.
 ### P1-5 ◐ Security configuration is constant
 
 **Problem.** Lockout threshold, lockout duration and password minimum length are constants
-in `auth.rules.ts`. `security.allowedOrigins` is inert. There is no active-session view.
+in `auth.rules.ts`. `security.allowedOrigins` is inert. There was no active-session view —
+**that half is now P2-9 ✅**.
 
-**Business impact.** An incident cannot be responded to without a deploy, and neither a
-user nor an administrator can end a suspicious session short of deleting the account.
+**Business impact.** An incident cannot be responded to without a deploy. The second half
+of this — that neither a user nor an administrator could end a suspicious session short of
+deleting the account — is closed.
 
 **Solution.** The obvious repair — move all three into the settings table — is wrong in a
 way worth writing down: it turns every security property into something an operator can
@@ -181,10 +183,11 @@ Sicherheit section of the settings workspace rendering them automatically — wi
 units and a confirmation on each, because all three are declared `dangerous`. 55 auth
 tests, of which 29 are the policy.
 
-**Remaining:** the active-sessions view (P2-9 below, split out because it is a screen and
-an endpoint rather than a configuration question). `security.allowedOrigins` stays inert
-deliberately: making CORS dynamic costs a database read per preflight and locks the
-dashboard out of its own API when it is wrong.
+**Remaining:** nothing here but `security.allowedOrigins`, which stays inert deliberately:
+making CORS dynamic costs a database read per preflight and locks the dashboard out of its
+own API when it is wrong. The active-sessions view that used to be listed here shipped as
+**P2-9 ✅** below, split out because it was a screen and an endpoint rather than a
+configuration question.
 
 **Acceptance met so far.** Changing the lockout threshold takes effect on the next attempt
 without a restart; no policy value can weaken an invariant however it reaches the table.
@@ -253,16 +256,39 @@ the `DataView`/`useListView` contract. `ContentEditor` also hand-writes a breadc
 router derives. **Acceptance:** each becomes a feature folder; `WITHOUT_METRICS` shrinks by
 the same number.
 
-### P2-9 ○ Active session management
+### P2-9 ✅ Active session management
 Split out of P1-5, because it is a screen and an endpoint rather than a configuration
-question. `RefreshToken` already stores `ip`, `userAgent`, `createdAt`, `expiresAt`,
+question. `RefreshToken` already stored `ip`, `userAgent`, `createdAt`, `expiresAt`,
 `revokedAt` and the rotation chain — everything a session list needs — and
-`POST /auth/logout-all` already exists. What is missing is `GET /auth/sessions`, a
-per-session revoke, the same under `Users → user → Sessions` for an administrator, and
-the two screens. **Never return the token or its hash**; the row's identity on the wire
-should be its id, not its secret. **Acceptance:** a user can see and revoke their own
-sessions, an administrator can revoke another's, the current session is marked as such,
-and every revocation is audited.
+`POST /auth/logout-all` already existed, so **no migration was required**.
+
+**Acceptance, all four met.** A user sees and revokes their own sessions
+(`GET/DELETE /auth/sessions`, `POST /auth/sessions/revoke-others`, rendered as a card on
+*Mein Konto*); an administrator sees and revokes another's
+(`GET /users/:id/sessions`, `DELETE /users/:id/sessions/:sessionId`,
+`POST /users/:id/sessions/revoke-all`, rendered in the user dialog); the current session
+is marked; and every revocation is audited as `auth.session_revoked`,
+`auth.sessions_revoked_others` or `auth.logout_all`, each carrying the target as
+`resourceId` and the caller as `actor`.
+
+**Nothing secret leaves.** `toSessionViews` builds the response from an explicit key
+list, so adding a column to `RefreshToken` cannot widen it; `sessions.rules.test.ts`
+asserts the exact key set and `sessions.spec.ts` asserts it again against a real body.
+
+Four decisions worth keeping:
+
+| | |
+| --- | --- |
+| **A session is one row** | Rotation revokes as it issues, so a live session has exactly one unrevoked row — the grouping problem solved by a `where` clause instead of walking `replacedById`, which is unindexed. The cost is that `createdAt` is the *last rotation*, so the column is **"Zuletzt aktiv"** and never "Angemeldet seit": labelling a rotation as a sign-in would be a plausible-looking lie |
+| **The caller's own sessions carry no permission** | `/auth/sessions` is the account's own, like `/auth/me`. A `session.readOwn` would be a key every role had to be granted for the dashboard to work, which is a key that means nothing. The scope is the control: the account comes from the verified token, never from a parameter |
+| **`user.readSessions` is not `user.read`** | Several roles see the user list; none of them sees devices, addresses and working hours. Split again from `user.revokeSessions`, because answering "is this account signed in somewhere it should not be" and acting on the answer are different authorities. Both go to `administrator`, which costs it nothing new — `user.update` can already SUSPEND an account, which ends every session it has |
+| **An unknown user is 404, not `200 []`** | An empty list is what a real account with nobody signed in says. `sessionsOf` looks the user up first, and the security matrix uses a *fabricated* id deliberately: the guard answers 403 and the handler answers 404, so the two statuses together prove the guard fires rather than the route being uniformly unreachable |
+
+**Remaining, and deliberate:** the administrator's view is a panel inside `EditUserDialog`
+rather than a route, because there is no user *detail page* in this application at all —
+`/benutzer` is a list whose rows open a dialog. Building one is P2-7's job. The cost is
+that a user's sessions have no shareable URL; the panel is written to move onto that page
+unchanged when it exists.
 
 ### P2-8 ○ Media library gaps
 Checksums are stored and indexed but duplicates are never surfaced; there is no
@@ -296,9 +322,15 @@ P0-1  settings validation            ← blocks everything
        ├─ P1-3  system/storage/integrations panel
        └─ P1-4  mail test send
   └─ P1-5  security configuration
+       └─ P2-9  active sessions        ← the screen half of P1-5, done
 P2-1 jobs → P2-2 notifications → P2-3 publishing verbs → P2-4 SEO → P2-5 backup
 P2-6 departments · P2-7 screen migration · P2-8 media
 ```
+
+P2-9 is drawn under P1-5 rather than in the P2 chain because it is the same piece of work
+seen from the other side: P1-5 made the security *numbers* answerable without a deploy,
+and P2-9 made the security *state* visible and reversible without one. It needed no
+migration and nothing in the P2 chain depends on it, which is why it could go first.
 
 P1-1 comes before every P2 because five of them need somewhere to be configured, and
 because the alternative is each inventing its own.
@@ -316,7 +348,7 @@ not built rather than as empty forms.
 | --- | --- |
 | Database | `Organisation` (singleton, id `org`) and fifteen new columns on `Office`; `address` **renamed** to `street` rather than dropped, so the two existing rows kept their data. Migration `20260919000000_organisation_and_offices` |
 | API | `/organisation` (GET, PATCH, versions), `/offices` (full CRUD + archive), `POST /settings/mail/test`, `GET /dashboard/system` |
-| Permissions | `organisation` ×3 and `office` ×5 — 106 keys → 114, all eight enforced on a route. `KNOWN_UNENFORCED` is unchanged at 14 |
+| Permissions | `organisation` ×3 and `office` ×5 — 106 keys → 114, all eight enforced on a route. `KNOWN_UNENFORCED` is unchanged at 14. (P2-9 later took it to **116** with `user.readSessions` and `user.revokeSessions`, both enforced, the list still 14) |
 | Events | `OrganisationUpdated`, `OfficeCreated/Updated/Archived/Restored/Deleted`, `MailTested` — 75 → 82, all audited through `AuditListener` |
 | Single source of truth | The published document's `offices` is **injected from the `Office` table**; the `offices` content type is retired, its rows removed by the migration. The header phone, contact band, Standorte section and the `{telefonThun}` / `{standorte}` tokens all follow it, with no change to any site component |
 | Frontend | `features/organisation/` on the five-layer pattern, `entities/organisation/`, and two new shared primitives (`SideNav`, `SaveBar`). The old one-page settings screen left `pages/Operations.tsx` |

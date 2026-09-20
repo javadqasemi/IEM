@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
 import { Checkbox, Field, Input, SearchInput, Select, Textarea } from "@/shared/ui/forms";
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { type Column, DataView } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
+import { UserSessionsRoute } from "@/features/sessions";
 import { api, type RoleRow, type UserRow } from "../lib/api";
-import { useAuth } from "@/core/auth";
+import { authRepository, useAuth } from "@/core/auth";
 import { useDebounced, useMutation } from "@/shared/hooks";
 import { useAsync } from "../lib/useAsync";
 
@@ -338,7 +339,11 @@ function EditUserDialog({
   roles: RoleRow[];
   onDone: () => void;
 }) {
-  const { can } = useAuth();
+  // `reload` re-reads the session. Renamed at the destructure because the
+  // sessions panel below signs the administrator out of their *own* account
+  // when they end the session they are using, and `reload()` on its own reads
+  // like reloading the dialog.
+  const { can, reload: reloadSession } = useAuth();
   const [roleIds, setRoleIds] = useState<string[]>([]);
   const [status, setStatus] = useState<UserRow["status"]>("ACTIVE");
   const setRolesM = useMutation(api.setUserRoles);
@@ -418,6 +423,32 @@ function EditUserDialog({
           Beim Ändern von Rollen werden die offenen Sitzungen dieser Person beendet, damit die
           neuen Rechte sofort und vollständig greifen.
         </p>
+
+        {/*
+          Sitzungen — the feature's administrative slice, composed in here.
+
+          `admin/pages` is the layer above both `features/` and `widgets/`, so
+          it is the only place allowed to import a feature — the same rule
+          that puts the project detail's embedded tabs in `ProjectPage.tsx`.
+
+          Gated on `user.readSessions` rather than on `user.read`: seeing
+          where a colleague is signed in means seeing their devices, their
+          addresses and their hours, which is more than the user list shows.
+          The server refuses it either way; this stops the screen asking a
+          question it will be told off for.
+        */}
+        {can("user.readSessions") ? (
+          <div className="border-t border-line pt-5">
+            <Suspense fallback={<Skeleton className="h-32 rounded-lg" />}>
+              <UserSessionsRoute
+                userId={user.id}
+                userName={user.name}
+                canRevoke={can("user.revokeSessions")}
+                onSelfSignedOut={() => void authRepository.logout().then(reloadSession)}
+              />
+            </Suspense>
+          </div>
+        ) : null}
 
         {error ? (
           <p role="alert" className="text-[13px] font-medium text-brand-bronze">

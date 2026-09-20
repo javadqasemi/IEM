@@ -80,6 +80,8 @@ permissions and the tests, not a folder with the same names in it.
 | W2·3 | **Pläne und Planversand** — five tables, eleven events, `I` and `O` skipped, and a reissue that names who holds the old revision |
 | P0·1 | **Typed settings** — every setting declares a type and is validated on write; the one unclamped read is fixed |
 | P1·1 | **Unternehmen** — `Organisation` + a real `Office`, and the website's `offices` derived from the table |
+| P1·5 | **Security policy** — four kinds of security number, and only one of them is a setting. Clamped on read, so a policy can tighten an invariant and never loosen it |
+| P2·9 | **Aktive Sitzungen** — no migration; a live session is one unrevoked `RefreshToken` row. Own sessions under `/auth/sessions` with no permission at all, somebody else's under `/users/:id/sessions` behind two new keys |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -647,6 +649,22 @@ and only `rejected` signs anybody out; `App.tsx` renders a *"Server antwortet ni
 screen with a retry rather than a login form, because a login form is the one screen
 that cannot help when the API is unreachable.
 
+**A rate-limited refresh is not a refused session, and that was the fourth side of the
+same mistake.** `RefreshOutcome` is three-valued so that "the server refused this session"
+and "we could not ask" stop sharing a value; a 5xx and a thrown `fetch` were both moved to
+`offline` when that was fixed. **A 429 was not**, and it is the one case where the server
+does reply — so `if (!res.ok) return "rejected"` swallowed it and signed people out.
+`ThrottlerGuard` runs *before* the controller, so a throttled refresh never reaches
+`AuthService`: the cookie is never examined, nothing is revoked and **no audit row is
+written**. That absence is the fingerprint — a session that ended with a live, unrevoked
+token still in the table and nothing in the log did not end on the server's say-so.
+Reachable in production because `POST /auth/refresh` allows 60/min **per IP** and the firm
+shares one office address. The e2e suite reaches it reliably for a different reason: every
+`page.goto` reboots the SPA and every boot refreshes, which measured 16.3/minute average
+and **62 at peak**. It surfaced twice as `Hauptnavigation not found` over a screenshot of
+the login form, in two *different* specs, which is why it read as an unrelated flake both
+times. The suite is paced by `spendRefresh` in `e2e/fixtures.ts`; the limit was not raised.
+
 **An expired lockout used to keep its count.** `failedLogins` was cleared only by a
 successful sign-in, so an account locked once came back holding five: the first mistype
 after the fifteen minutes took it to six, six is still over the threshold, and it locked
@@ -970,10 +988,15 @@ Opened by **Unternehmen**, and each is a deliberate stop rather than an oversigh
 - **The application version is reported as absent.** Nothing stamps a build here, so
   `/dashboard/system` returns `version: null` with a reason rather than `package.json`'s `0.0.1`,
   which would be a number that never changes and looks like one that does.
-- **Lockout threshold, lockout duration and password length are still constants** in
-  `auth.rules.ts`. Session lifetime is configurable and clamped; these are not, so an incident
-  cannot be responded to without a deploy. `docs/ENTERPRISE_ROADMAP.md` → P1-5, together with the
-  active-sessions view `RefreshToken` already has the data for.
+- ~~**Lockout threshold, lockout duration and password length are still constants.**~~ **Both
+  halves of this are now closed** and the entry is kept because the shape of the answer is worth
+  finding again. `server/src/auth/security.policy.ts` (P1-5) sorts every security number into
+  four kinds — invariant, environment, organisation policy, user — and makes exactly *one* kind
+  configurable, because moving all of them into the settings table would turn every security
+  property into something an attacker holding a Super Admin session can switch off first. The
+  rule that makes it safe: **a policy may tighten an invariant and may not loosen it**, clamped
+  on *read* rather than trusted from the write path. The active-sessions view is P2-9, also done
+  — see below.
 - **`security.allowedOrigins` stays inert.** CORS is resolved once at bootstrap; making it
   dynamic costs a database read per preflight and locks the dashboard out of its own API when it
   is wrong. A deliberate deferral, not an oversight.
