@@ -1,5 +1,6 @@
 import { Global, Module } from "@nestjs/common";
 import { SettingsService } from "./settings.service";
+import { SecretSettingsService } from "./settings.secrets";
 
 /**
  * Settings, made reachable from anywhere.
@@ -16,9 +17,16 @@ import { SettingsService } from "./settings.service";
  * importing this into every feature module and re-importing it whenever a new
  * setting finds a consumer.
  */
+/**
+ * `SecretSettingsService` is provided here and exported, but almost nothing
+ * should inject it: `SettingsService` is the seam, and a caller that reaches
+ * past it to the cipher is a caller deciding for itself what counts as a
+ * credential. It is exported because the mail diagnostics ask whether secrets
+ * are *readable at all* — a question about the deployment, not about a value.
+ */
 @Global()
 @Module({
-  providers: [SettingsService],
-  exports: [SettingsService],
+  providers: [SettingsService, SecretSettingsService],
+  exports: [SettingsService, SecretSettingsService],
 })
 export class SettingsModule {}

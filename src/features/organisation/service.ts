@@ -26,7 +26,15 @@ import type { Office, Organisation, Setting, SettingGroup } from "@/entities/org
 export type SectionSource =
   | { kind: "organisation"; fields: readonly (keyof Organisation)[] }
   | { kind: "offices" }
-  | { kind: "settings"; groups: readonly string[] }
+  /**
+   * A group of settings, rendered from their declarations.
+   *
+   * `panel` asks for a supplied component *below* the form — the same
+   * `embedded` map, used additively rather than instead of. Introduced for
+   * E-Mail (P2-4), whose section is a form and an operations panel, and the
+   * shape Backup and Integrations will want for the same reason.
+   */
+  | { kind: "settings"; groups: readonly string[]; panel?: boolean }
   | { kind: "system" }
   /**
    * A section another feature owns, composed in from above.
@@ -175,9 +183,29 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     zone: "Betrieb",
     title: "E-Mail-Versand",
     description:
-      "SMTP-Zugang und Absender. Leere Felder fallen auf die Umgebungsvariablen zurück; ist auch dort nichts gesetzt, werden E-Mails nur protokolliert.",
+      "Zugang, Absender, Diagnose und Zustellprotokoll. Leere Felder fallen auf die Umgebungsvariablen zurück; ist auch dort nichts gesetzt, werden E-Mails nur protokolliert.",
     permissions: ["settings.read"],
-    source: { kind: "settings", groups: ["E-Mail"] },
+    /**
+     * A settings group **and** a panel beside it (P2-4).
+     *
+     * It was `kind: "settings"` alone until Email Operations, and neither
+     * half of the pair would have been right on its own:
+     *
+     * - The generic renderer draws the form from the declarations in
+     *   `core/settings/settings.service.ts`, which is what keeps adding a mail
+     *   setting a one-line change and keeps the save bar, the dirty guard and
+     *   the validation identical to every other settings group. Replacing it
+     *   with a hand-written form would have been a second implementation of
+     *   all four.
+     * - But a status verdict, two distinct diagnostics and a template
+     *   catalogue are not settings, and no declaration can express them.
+     *
+     * So `panel: true` asks the workspace to render the supplied component
+     * *underneath* the form. `SettingsPage.tsx` supplies it, for the reason
+     * that file exists: `features/organisation` may not import
+     * `features/mail`.
+     */
+    source: { kind: "settings", groups: ["E-Mail"], panel: true },
   },
   {
     slug: "bewerbungen",

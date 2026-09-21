@@ -1,6 +1,5 @@
-import type {
+﻿import type {
   Integration,
-  MailTestResult,
   Office,
   OfficeDraft,
   Organisation,
@@ -11,7 +10,6 @@ import type {
 } from "@/entities/organisation";
 import type {
   CreateOfficeBody,
-  MailTestDto,
   OfficeDto,
   OrganisationDto,
   SettingDto,
@@ -164,10 +162,6 @@ export function toSettingGroups(rows: SettingGroupDto[]): SettingGroup[] {
   return rows.map((row) => ({ group: row.group, settings: row.settings.map(toSetting) }));
 }
 
-export function toMailTestResult(dto: MailTestDto): MailTestResult {
-  return { ok: dto.ok, stub: dto.stub, host: dto.host, error: dto.error, to: dto.to };
-}
-
 /* ================================================================== */
 /* System                                                              */
 /* ================================================================== */
@@ -190,3 +184,4 @@ export function toSystemInfo(dto: SystemInfoDto): SystemInfo {
     integrations: dto.integrations.map((row): Integration => ({ ...row })),
   };
 }
+

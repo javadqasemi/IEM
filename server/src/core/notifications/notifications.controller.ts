@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, Req } from "@nestjs/common";
 import { NotificationDeliveryStatus, NotificationSeverity } from "@prisma/client";
 import { Type } from "class-transformer";
 import {
@@ -14,7 +14,13 @@ import {
   ValidateNested,
 } from "class-validator";
 import { NotificationsService } from "./notifications.service";
-import { CurrentUser, RequirePermissions, type AuthUser } from "../../common/decorators";
+import {
+  ClientIp,
+  CurrentUser,
+  RequirePermissions,
+  type AuthUser,
+  type AuthedRequest,
+} from "../../common/decorators";
 
 /* ---- DTOs -------------------------------------------------------- */
 /*
@@ -221,5 +227,36 @@ export class NotificationsController {
   @RequirePermissions("notification.readDeliveries")
   deliveries(@Query() query: ListDeliveriesQuery) {
     return this.notifications.deliveries(query);
+  }
+
+  /**
+   * Puts one finally-failed e-mail back in the queue.
+   *
+   * **`job.retry`, not a new `notification.*` key** (P2-4). The permission was
+   * declared with `core/jobs` in F10 and had been sitting in
+   * `KNOWN_UNENFORCED` ever since, waiting for the first route that re-runs
+   * failed background work — which is exactly what this is. Minting
+   * `notification.retryDelivery` beside it would have been a second name for
+   * one authority, and the role editor would show two checkboxes that a person
+   * has to hold together to be useful.
+   *
+   * `readDeliveries` is **not** additionally required, and that is deliberate
+   * rather than an omission: `@RequirePermissions` is AND, so demanding both
+   * would mean an operator who may re-run jobs cannot fix a stuck e-mail
+   * without also being granted the disclosure of who was told what. Retrying
+   * reveals nothing — the route takes an id and returns a status.
+   */
+  @Post("deliveries/:id/retry")
+  @RequirePermissions("job.retry")
+  retryDelivery(
+    @Param("id") id: string,
+    @CurrentUser() user: AuthUser,
+    @Req() req: AuthedRequest,
+    @ClientIp() ip: string | null,
+  ) {
+    return this.notifications.retryDelivery(id, user, {
+      ip,
+      userAgent: req.headers["user-agent"] ?? null,
+    });
   }
 }

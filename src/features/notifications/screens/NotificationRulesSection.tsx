@@ -8,6 +8,7 @@ import { useCan } from "@/core/auth";
 import {
   useDeliveries,
   usePreferenceMutations,
+  useRetryDelivery,
   useRules,
 } from "../hooks/useNotifications";
 import { DELIVERY_STATUS_OPTIONS, changedRows, deliveryStatus } from "../service";
@@ -168,6 +169,8 @@ function Deliveries() {
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const deliveries = useDeliveries({ status, page });
+  const { retry, retrying } = useRetryDelivery();
+  const toast = useToast();
 
   const columns: Column<Delivery>[] = [
     {
@@ -226,6 +229,45 @@ function Deliveries() {
         ) : (
           <span className="text-muted">—</span>
         ),
+    },
+    {
+      /*
+        The one action in this table, and it is offered on almost no row.
+
+        A retry is only meaningful for an e-mail that finally failed.
+        `DELIVERED` would send a second copy of a message that arrived —
+        which for a security alert is worse than the silence it was meant to
+        fix. `PENDING` and `PROCESSING` are already in hand. And `SKIPPED` is
+        a *deliberate* non-send, so retrying it would deliver a message the
+        recipient or the firm switched off.
+
+        The server refuses all four with `updateMany … where status: FAILED`,
+        so this is the courtesy half — but the courtesy matters here, because a
+        button that could only ever produce a 400 reads as an offer.
+      */
+      key: "action",
+      header: "",
+      className: "w-28",
+      render: (row) =>
+        row.channel === "EMAIL" && row.status === "FAILED" ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            busy={retrying === row.id}
+            onClick={() => {
+              void retry(row.id).then(
+                () =>
+                  toast.success(
+                    "Eingereiht",
+                    "Die E-Mail wurde erneut in die Warteschlange gestellt.",
+                  ),
+                (err: Error) => toast.error("Erneut senden fehlgeschlagen", err.message),
+              );
+            }}
+          >
+            Erneut senden
+          </Button>
+        ) : null,
     },
   ];
 

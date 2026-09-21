@@ -109,6 +109,23 @@ const SECOND_FACTOR = [/mfa\.spec\.ts/];
 const NOTIFICATIONS = [/notifications\.spec\.ts/];
 
 /**
+ * Email Operations, once, and for a reason the others do not have: it
+ * **mutates shared configuration and talks to a real SMTP server**.
+ *
+ * `mail.spec.ts` points `mail.smtpHost` at Mailpit for the duration of the
+ * file and restores it in `afterAll`. Running that at three widths means three
+ * projects writing the same settings rows through one database while three
+ * other copies of the acceptance test submit content and wait for mail —
+ * whichever finished last would restore the configuration under the two still
+ * running, and the failures would surface as `SKIPPED` deliveries in a spec
+ * that had configured SMTP correctly.
+ *
+ * Nothing is lost by running it once: every assertion is about an API
+ * response, a Mailpit message or a permission, and none is width-dependent.
+ */
+const MAIL = [/mail\.spec\.ts/];
+
+/**
  * Browser suites that run once for a **third** reason: they write.
  *
  * `organisation.spec.ts` edits the company record and tries to archive the
@@ -139,6 +156,7 @@ const RUN_ONCE = [
   ...SOURCE_ASSERTIONS,
   ...SECOND_FACTOR,
   ...NOTIFICATIONS,
+  ...MAIL,
 ];
 
 export default defineConfig({

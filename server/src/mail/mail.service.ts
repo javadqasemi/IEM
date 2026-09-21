@@ -1,9 +1,40 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import * as nodemailer from "nodemailer";
 import type { JobApplication } from "@prisma/client";
 import { SettingsService } from "../core/settings/settings.service";
 import { OrganisationService } from "../core/organisation/organisation.service";
+import { SmtpProvider } from "./smtp.provider";
+import type {
+  MailProvider,
+  MailProviderConfig,
+  MailProviderDescription,
+  MailSendResult,
+  MailSender,
+  MailVerifyResult,
+} from "./mail.provider";
+import { renderTestEmail } from "./mail.templates";
+import type { MailFailureCategory } from "./mail.failure";
+
+/** When `mail.timeoutSeconds` says nothing. Short enough to answer a button. */
+const DEFAULT_TIMEOUT_SECONDS = 10;
+
+/**
+ * What the probe reports, and the reason it is not a boolean.
+ *
+ * `stub` is a third outcome beside success and failure — "no SMTP server is
+ * configured, the message was written to the log" is true, useful, and not a
+ * fault. `category` is the sanitized classification and `error` its
+ * operator-readable sentence; neither is ever the provider's own text.
+ */
+export type MailTestOutcome = {
+  ok: boolean;
+  stub: boolean;
+  host: string;
+  durationMs: number;
+  messageId?: string | null;
+  category?: MailFailureCategory;
+  error?: string;
+};
 
 /**
  * The keys this service reads, in one place so the group read below is honest.
@@ -13,6 +44,12 @@ import { OrganisationService } from "../core/organisation/organisation.service";
  * name is a property of the firm, not a string under a settings key, and it
  * was one of the eight `company.*`/`brand.*` rows that nothing but this line
  * ever read.
+ *
+ * `mail.smtpPassword` is among them and comes back **decrypted**:
+ * `SettingsService.values` runs it through `SecretSettingsService`, and an
+ * unreadable one is simply absent from the result — which the fallback chain
+ * below already treats as "not configured", the correct behaviour for a
+ * credential that cannot be decrypted.
  */
 const MAIL_KEYS = [
   "mail.smtpHost",
@@ -22,16 +59,14 @@ const MAIL_KEYS = [
   "mail.smtpSecure",
   "mail.from",
   "mail.fromName",
+  "mail.replyTo",
+  "mail.timeoutSeconds",
 ];
 
-type MailConfig = {
-  host: string;
-  port: number;
-  secure: boolean;
-  user: string;
-  pass: string;
+type MailConfig = MailProviderConfig & {
   from: string;
   fromName: string;
+  replyTo: string;
 };
 
 /**
@@ -68,8 +103,8 @@ export class MailService {
   private readonly logger = new Logger(MailService.name);
 
   /** Rebuilt only when `resolve()` returns something different from last time. */
-  private transport: nodemailer.Transporter | null = null;
-  private transportKey = "";
+  private provider: MailProvider | null = null;
+  private providerKey = "";
   /** Logged once per distinct state, so a stubbed install does not flood the log. */
   private announced = "";
 
@@ -120,6 +155,7 @@ export class MailService {
     }
     const port = Number(stored["mail.smtpPort"]);
     const secure = stored["mail.smtpSecure"];
+    const timeout = Number(stored["mail.timeoutSeconds"]);
 
     return {
       host: str("mail.smtpHost", "SMTP_HOST"),
@@ -127,34 +163,85 @@ export class MailService {
       secure:
         typeof secure === "boolean" ? secure : this.config.get("SMTP_SECURE") === "true",
       user: str("mail.smtpUser", "SMTP_USER"),
-      pass: str("mail.smtpPassword", "SMTP_PASSWORD"),
+      password: str("mail.smtpPassword", "SMTP_PASSWORD"),
+      /*
+        Clamped rather than trusted, the way every arithmetic setting in this
+        codebase is read — a `0` here would mean "give up immediately" and make
+        mail look permanently broken, and the clamp costs nothing.
+      */
+      timeoutMs:
+        (Number.isFinite(timeout) ? Math.min(120, Math.max(1, timeout)) : DEFAULT_TIMEOUT_SECONDS) *
+        1000,
       from: str("mail.from", "MAIL_FROM", "noreply@iem.ch"),
       fromName: str("mail.fromName", "MAIL_FROM_NAME", company || "IEM AG"),
+      replyTo: str("mail.replyTo", "MAIL_REPLY_TO"),
     };
   }
 
-  /** The transport for a configuration, rebuilt only when that changes. */
-  private transportFor(mail: MailConfig): nodemailer.Transporter | null {
-    if (!mail.host) {
-      this.transport = null;
-      this.transportKey = "";
-      return null;
-    }
+  /** The sender identity, separated from the transport it travels over. */
+  private senderFor(mail: MailConfig): MailSender {
+    return {
+      address: mail.from,
+      name: mail.fromName,
+      replyTo: mail.replyTo.trim() || null,
+    };
+  }
 
-    const key = `${mail.host}:${mail.port}:${mail.secure}:${mail.user}:${mail.pass}`;
-    if (this.transport && key === this.transportKey) return this.transport;
+  /**
+   * The provider for a configuration, rebuilt only when that changes.
+   *
+   * The cache key includes the password, so replacing a credential takes
+   * effect on the next message without a restart — and `close()` runs on the
+   * superseded provider, or its pooled sockets stay open to a host nothing
+   * will send to again.
+   */
+  private providerFor(mail: MailConfig): MailProvider {
+    const key = [
+      mail.host,
+      mail.port,
+      mail.secure,
+      mail.user,
+      mail.password,
+      mail.timeoutMs,
+    ].join("\u0000");
+    if (this.provider && key === this.providerKey) return this.provider;
 
-    // `close()` on the superseded transport, or its pooled sockets stay open for
-    // a host nothing will send to again.
-    this.transport?.close();
-    this.transport = nodemailer.createTransport({
-      host: mail.host,
-      port: mail.port,
-      secure: mail.secure,
-      auth: mail.user ? { user: mail.user, pass: mail.pass } : undefined,
-    });
-    this.transportKey = key;
-    return this.transport;
+    this.provider?.close();
+    this.provider = new SmtpProvider(mail);
+    this.providerKey = key;
+    return this.provider;
+  }
+
+  /**
+   * Everything the diagnostics panel is allowed to know, in one read.
+   *
+   * Returns the provider's own description — which has no field a credential
+   * could occupy — beside the sender identity, which is not secret and is the
+   * thing an operator most often needs to check.
+   */
+  async describe(): Promise<
+    MailProviderDescription & { from: string; fromName: string; replyTo: string | null }
+  > {
+    const mail = await this.resolve();
+    const sender = this.senderFor(mail);
+    return {
+      ...this.providerFor(mail).describe(),
+      from: sender.address,
+      fromName: sender.name,
+      replyTo: sender.replyTo,
+    };
+  }
+
+  /**
+   * DNS, TCP, TLS and AUTH, with nothing sent.
+   *
+   * The operation an operator presses while still editing the form, which is
+   * exactly why it must not put a message in anybody's inbox — see
+   * `MailVerifyResult`.
+   */
+  async verifyConnection(): Promise<MailVerifyResult> {
+    const mail = await this.resolve();
+    return this.providerFor(mail).verify();
   }
 
   private get adminUrl(): string {
@@ -163,9 +250,9 @@ export class MailService {
 
   private async send(to: string, subject: string, text: string): Promise<void> {
     const mail = await this.resolve();
-    const transport = this.transportFor(mail);
+    const provider = this.providerFor(mail);
 
-    if (!transport) {
+    if (!provider.configured) {
       if (this.announced !== "stub") {
         this.announced = "stub";
         this.logger.warn(
@@ -182,16 +269,12 @@ export class MailService {
       this.logger.log(`E-Mail-Versand über ${mail.host}:${mail.port}.`);
     }
 
-    try {
-      await transport.sendMail({
-        from: `"${mail.fromName}" <${mail.from}>`,
-        to,
-        subject,
-        text,
-      });
-    } catch (err) {
-      // Logged, never rethrown — see the note at the top of the class.
-      this.logger.error(`Versand an ${to} fehlgeschlagen: ${(err as Error).message}`);
+    const result = await provider.send({ to, subject, text }, this.senderFor(mail));
+    if (result.status === "failed") {
+      // Logged, never rethrown — see the note at the top of the class. The
+      // sanitized category is what appears here; the provider has already
+      // written the raw text to its own logger.
+      this.logger.error(`Versand an ${to} fehlgeschlagen [${result.failure.category}].`);
     }
   }
 
@@ -209,37 +292,55 @@ export class MailService {
    * configured, the message was written to the log" is a true and useful
    * answer, and calling it "sent" would be a lie the form would repeat.
    */
-  async sendTest(to: string): Promise<{ ok: boolean; stub: boolean; host: string; error?: string }> {
+  async sendTest(to: string): Promise<MailTestOutcome> {
     const mail = await this.resolve();
-    const transport = this.transportFor(mail);
-    const body = [
-      "Diese Nachricht ist ein Test aus dem IEM-Dashboard.",
-      "",
-      `Absender:  "${mail.fromName}" <${mail.from}>`,
-      `Server:    ${mail.host || "— keiner konfiguriert —"}:${mail.port}`,
-      `TLS:       ${mail.secure ? "ab Verbindungsaufbau" : "STARTTLS oder keine"}`,
-      "",
-      "Kommt sie an, ist der Versand korrekt eingerichtet.",
-    ].join("\n");
+    const provider = this.providerFor(mail);
+    const sender = this.senderFor(mail);
+    /*
+      A **fixed** message, rendered from the configuration rather than from
+      anything the caller supplied.
 
-    if (!transport) {
-      this.logger.log(`[mail:stub] Test an ${to}\n${body}`);
-      return { ok: false, stub: true, host: "" };
+      There is no subject parameter and no body parameter, and that is what
+      keeps this endpoint from being an authenticated relay: the most an
+      administrator can do with it is cause one predetermined diagnostic note
+      to arrive somewhere. See `mail.templates.ts`.
+    */
+    const message = renderTestEmail({
+      to,
+      host: mail.host,
+      port: mail.port,
+      secure: mail.secure,
+      fromName: sender.name,
+      from: sender.address,
+      replyTo: sender.replyTo,
+    });
+
+    if (!provider.configured) {
+      this.logger.log(`[mail:stub] Test an ${to}\n${message.text}`);
+      return { ok: false, stub: true, host: "", durationMs: 0 };
     }
 
-    try {
-      await transport.sendMail({
-        from: `"${mail.fromName}" <${mail.from}>`,
-        to,
-        subject: "Testnachricht — IEM Dashboard",
-        text: body,
-      });
-      return { ok: true, stub: false, host: mail.host };
-    } catch (err) {
-      const error = (err as Error).message;
-      this.logger.warn(`Test-Versand an ${to} fehlgeschlagen: ${error}`);
-      return { ok: false, stub: false, host: mail.host, error };
+    const result: MailSendResult = await provider.send(message, sender);
+    if (result.status === "sent") {
+      return {
+        ok: true,
+        stub: false,
+        host: mail.host,
+        durationMs: result.durationMs,
+        messageId: result.messageId,
+      };
     }
+    if (result.status === "skipped") {
+      return { ok: false, stub: true, host: "", durationMs: 0 };
+    }
+    return {
+      ok: false,
+      stub: false,
+      host: mail.host,
+      durationMs: result.durationMs,
+      category: result.failure.category,
+      error: result.failure.message,
+    };
   }
 
   /**
@@ -271,28 +372,36 @@ export class MailService {
     to: string,
     subject: string,
     text: string,
-  ): Promise<{ ok: boolean; stub: boolean; error?: string }> {
+  ): Promise<{
+    ok: boolean;
+    stub: boolean;
+    error?: string;
+    category?: MailFailureCategory;
+    messageId?: string | null;
+  }> {
     const mail = await this.resolve();
-    const transport = this.transportFor(mail);
+    const provider = this.providerFor(mail);
 
-    if (!transport) {
+    if (!provider.configured) {
       this.logger.log(`[mail:stub] an ${to} — ${subject}\n${text}`);
       return { ok: false, stub: true };
     }
 
-    try {
-      await transport.sendMail({
-        from: `"${mail.fromName}" <${mail.from}>`,
-        to,
-        subject,
-        text,
-      });
-      return { ok: true, stub: false };
-    } catch (err) {
-      const error = (err as Error).message;
-      this.logger.warn(`Benachrichtigung an ${to} fehlgeschlagen: ${error}`);
-      return { ok: false, stub: false, error };
+    const result = await provider.send({ to, subject, text }, this.senderFor(mail));
+    if (result.status === "sent") {
+      return { ok: true, stub: false, messageId: result.messageId };
     }
+    if (result.status === "skipped") return { ok: false, stub: true };
+
+    /*
+      The **sanitized** message is what travels back, and it ends up in
+      `NotificationDelivery.detail` — a column an operator reads in a table
+      beside other people's recipients. Before P2-4 this was the raw provider
+      string, which routinely names the host, the username and the AUTH
+      mechanism. The raw text is in the server log, where the reader already
+      has shell access.
+    */
+    return { ok: false, stub: false, error: result.failure.message, category: result.failure.category };
   }
 
   sendPasswordReset(to: string, token: string): Promise<void> {

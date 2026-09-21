@@ -46,7 +46,33 @@ export type SettingDef = {
   type: SettingType;
   value: unknown;
   description: string;
-  /** Redacted in every read unless the caller holds `settings.secrets`. */
+  /**
+   * **Encrypted at rest and never readable through the API** (P2-4).
+   *
+   * This flag used to mean only "redacted unless the caller holds
+   * `settings.secrets`" — a mask over a column that held the SMTP password in
+   * plaintext, with a permission that handed the plaintext back to anybody
+   * holding it. Both halves were wrong, and the second was worse than the
+   * first: UI masking is not storage security, and an API that returns a
+   * credential is one screenshot away from leaking it.
+   *
+   * A `secret: true` setting now guarantees all of:
+   *
+   * 1. encrypted at rest through `SecretEncryptionService`;
+   * 2. plaintext accepted only on **write**;
+   * 3. plaintext never returned by any read route — `list` emits the fixed
+   *    `REDACTED` mask plus `configured`, never the value;
+   * 4. plaintext never written to the audit log (only the key is);
+   * 5. plaintext never logged;
+   * 6. plaintext never carried in an exception message;
+   * 7. a blank write means **keep**, never "delete" — see `classifySecretWrite`;
+   * 8. removal is an explicit, separately-audited action.
+   *
+   * `settings.secrets` survives as the permission to **manage** these — to
+   * replace and to remove one — which is what it is now named for in
+   * `rbac/resources.ts`. It no longer grants reading one back, because nothing
+   * does.
+   */
   secret?: boolean;
   /** Stored and editable, but read by no code yet. Rendered as such. */
   pending?: boolean;
@@ -67,8 +93,55 @@ export type SettingDef = {
   blankMeans?: string;
 };
 
-/** The mask a secret reads back as. Writing it unchanged is a no-op. */
+/**
+ * The mask a secret reads back as. Writing it unchanged is a no-op.
+ *
+ * A **constant**, not a length-preserving blob: `"••••••••"` for every secret
+ * whatever it holds, so the mask itself discloses nothing — not even how long
+ * the password is, which is the one thing a length-preserving mask hands to
+ * somebody reading over a shoulder.
+ */
 export const REDACTED = "••••••••";
+
+/**
+ * What a write to a secret setting means.
+ *
+ * Three outcomes and **no way to spell "delete"**, which is the whole point.
+ * The obvious design — empty string clears it — is the one that loses a
+ * working SMTP password to a settings form that posted every field it
+ * rendered, and the operator's next clue is mail silently not arriving.
+ * Removal is `SettingsService.removeSecret`, a separate route behind a
+ * separate confirmation.
+ */
+export type SecretWrite =
+  /** The mask came back, or the field was left blank. Change nothing. */
+  | { intent: "keep" }
+  /** A real value was typed. Encrypt it and store it. */
+  | { intent: "replace"; plaintext: string }
+  /** Not a string at all — a number or an object arrived under a secret key. */
+  | { intent: "refuse"; error: string };
+
+/**
+ * Reads a submitted value as one of those three.
+ *
+ * Pure and exported so `settings.rules.test.ts` can cover every spelling of
+ * "the user did not change the password": the mask, an empty string, spaces,
+ * and the mask with whitespace around it — because a form that trims on the
+ * way out and not on the way in produces the fourth, and storing `"••••••••"`
+ * as an SMTP password is a failure that only shows up at the next send.
+ */
+export function classifySecretWrite(def: SettingDef, value: unknown): SecretWrite {
+  if (typeof value !== "string") {
+    return {
+      intent: "refuse",
+      error: `„${def.description || def.key}“ erwartet Text.`,
+    };
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === "" || trimmed === REDACTED) return { intent: "keep" };
+  return { intent: "replace", plaintext: trimmed };
+}
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -154,22 +227,29 @@ function unit(def: SettingDef): string {
 }
 
 /**
- * Sorts a batch of updates into what to write and what to refuse.
+ * Sorts a batch of updates into what to write, what to encrypt, and what to
+ * refuse.
  *
- * Three outcomes rather than two, because a secret whose value comes back as
- * the mask is neither valid nor invalid — it is the form saying "I did not
- * change this", and treating it as a write would store the mask itself as the
- * SMTP password.
+ * Four outcomes rather than two. A secret is separated from `apply` rather
+ * than normalised into it because the two need different things from the
+ * caller: an ordinary value is written as it stands, and a secret has to go
+ * through `SecretEncryptionService` first. Keeping them in one list would mean
+ * the service re-deciding, per row, whether the value it is about to write is
+ * a credential — and the row it gets wrong is the row that stores an SMTP
+ * password in the clear.
  */
 export function planSettingUpdates(
   defs: Map<string, SettingDef>,
   updates: { key: string; value: unknown }[],
 ): {
   apply: { key: string; value: unknown }[];
+  /** Plaintext, to be encrypted by the caller. Never logged, never audited. */
+  secrets: { key: string; plaintext: string }[];
   unknown: string[];
   errors: string[];
 } {
   const apply: { key: string; value: unknown }[] = [];
+  const secrets: { key: string; plaintext: string }[] = [];
   const unknownKeys: string[] = [];
   const errors: string[] = [];
 
@@ -180,8 +260,19 @@ export function planSettingUpdates(
       continue;
     }
 
-    // The mask written back means "leave it alone".
-    if (def.secret && update.value === REDACTED) continue;
+    /*
+      A secret never reaches `refuseSettingValue` or `normalise`.
+
+      Both would be harmless today and neither is the point: the value is a
+      credential, and the fewer functions that hold one the shorter the list of
+      places it could be logged from. `classifySecretWrite` is the only reader.
+    */
+    if (def.secret) {
+      const write = classifySecretWrite(def, update.value);
+      if (write.intent === "refuse") errors.push(write.error);
+      if (write.intent === "replace") secrets.push({ key: def.key, plaintext: write.plaintext });
+      continue;
+    }
 
     /*
       An absent value is refused rather than written.
@@ -207,7 +298,7 @@ export function planSettingUpdates(
     apply.push({ key: update.key, value: normalise(def, update.value) });
   }
 
-  return { apply, unknown: unknownKeys, errors };
+  return { apply, secrets, unknown: unknownKeys, errors };
 }
 
 /**

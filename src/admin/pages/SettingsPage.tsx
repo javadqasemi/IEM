@@ -1,5 +1,6 @@
 import { SettingsRoute } from "@/features/organisation";
 import { NotificationRulesRoute } from "@/features/notifications";
+import { MailSection } from "@/features/mail";
 
 /**
  * Einstellungen, with the sections other features own composed into it.
@@ -23,6 +24,17 @@ import { NotificationRulesRoute } from "@/features/notifications";
  */
 const EMBEDDED = {
   benachrichtigungen: <NotificationRulesRoute />,
+  /**
+   * E-Mail is the first section to use the map **additively** (P2-4).
+   *
+   * Its declaration is `{ kind: "settings", groups: ["E-Mail"], panel: true }`,
+   * so the workspace renders the configuration form from the settings
+   * declarations and puts this panel underneath it. The form keeps the save
+   * bar, the dirty guard and the validation every other settings group has;
+   * the panel adds the status verdict, the two diagnostics and the template
+   * catalogue, none of which a setting declaration can express.
+   */
+  email: <MailSection />,
 };
 
 export function SettingsPage({ section }: { section?: string }) {

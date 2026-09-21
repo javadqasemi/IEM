@@ -386,6 +386,24 @@ Path alias `@/*` → `src/*`, configured in both `tsconfig.json` and `vite.confi
   *Einstellungen → Benachrichtigungen → Zustellprotokoll* rather than by guessing. Only
   two channels exist; SMS, push and webhooks are shapes the model allows and nothing
   implements.
+- **E-mail is manageable from the dashboard and proven from it.**
+  (`docs/ENTERPRISE_ROADMAP.md` → P2-4.) *Einstellungen → E-Mail* carries the SMTP
+  configuration, a status verdict, two separate diagnostics — a **connection test** that
+  sends nothing and a **test message** to an address you name — a catalogue of every
+  message the system can send with previews, and the failure classification an operator
+  acts on. The SMTP password is **encrypted at rest and never returned**: the screen says
+  *gesetzt* or *nicht gesetzt*, replacing it means typing a new one, and removing it is a
+  separate confirmed action, so no blank save can destroy a working credential.
+  It needs **`APP_SECRETS_ENCRYPTION_KEY` in `server/.env`** — without it the application
+  starts normally, secret settings read as unset, and the boot log says so by name. Back it
+  up *with* the database, never in it. Losing it costs a password somebody retypes; it is
+  deliberately **not** the same key as `MFA_ENCRYPTION_KEY`, losing which costs every
+  enrolled second factor.
+- **One provider: SMTP.** `MailProvider` is an interface and `SmtpProvider` is its only
+  implementation, so Microsoft 365, SendGrid, SES or Postmark is a second class rather than
+  a change to any business module. Nothing else is built. All mail is **plain text** by
+  design — transactional notes read in every client, with no images to block and no
+  tracking pixel — and templates live in code rather than in an editable table.
 - **MFA is built, and is not yet enforceable as a policy.** Enrolment, TOTP sign-in,
   recovery codes, self-service disable and an administrative reset all work
   (`docs/ENTERPRISE_ROADMAP.md` → P3-2). What is deliberately missing is the

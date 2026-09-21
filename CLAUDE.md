@@ -84,6 +84,7 @@ permissions and the tests, not a folder with the same names in it.
 | P2·9 | **Aktive Sitzungen** — no migration; a live session is one unrevoked `RefreshToken` row. Own sessions under `/auth/sessions` with no permission at all, somebody else's under `/users/:id/sessions` behind two new keys |
 | P3·2 | **Zwei-Faktor-Authentisierung** — four tables, AES-256-GCM at rest, a challenge that issues nothing, ten single-use recovery codes, and a re-authentication window that is not MFA-specific. The brief that commissioned it calls it *P2.2*; the roadmap has always called it P3-2 |
 | P2·2 | **Benachrichtigungen** — one platform, four tables, ten typed notifications, two channels, a bell, a centre, and the rule that **no business module sends an e-mail**. Nine domain events feed it and eight of them existed only on paper before it |
+| P2·4 | **E-Mail-Betrieb** — a `MailProvider` seam with SMTP as its one implementation, nine sanitized failure categories, a connection test beside the test send, a template catalogue with previews, and secrets encrypted at rest under a key of their own. No migration, no new permission, and the first route to enforce `job.retry` |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -209,6 +210,11 @@ npm run e2e:security   # the role x verb x resource matrix, against the live API
 npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
 npm run e2e:install    # once per machine: downloads the browser
+npm run e2e:mail       # Email Operations, incl. a real SMTP transaction
+
+# The development SMTP catcher. `e2e:mail` skips with a message without it.
+npm run mail:catcher:install   # once per machine, into the gitignored var/tools/
+npm run mail:catcher           # SMTP :1025, web UI and API on :8025
 ```
 
 ```bash
@@ -556,6 +562,69 @@ arithmetic.** Validation stops a bad value being *stored*; the clamp stops one a
 table — from a release before the type existed, from a migration, or typed straight into the
 database — being *read*.
 
+**A `secret: true` setting is encrypted at rest and readable by nothing that answers an
+HTTP request.** `secret` used to mean only "masked unless the caller holds
+`settings.secrets`" — a mask over a column holding the SMTP password in plaintext, beside a
+permission that handed the plaintext back. Both halves were wrong. Now
+`SettingsService.values()` decrypts for the *internal* consumer that needs the value
+(`MailService` and nothing else), `list()` emits a fixed mask plus `configured`, and
+`settings.secrets` means **manage** — replace and remove. The key was not renamed because a
+permission key is what roles are granted; the description in `resources.ts` is what changed.
+
+**A blank write to a secret means *keep*, and there is no spelling of "delete".** A settings
+form posts every field it rendered, and a password field renders empty once it is no longer
+readable — so "empty clears it" destroys a working credential on the next save of an
+unrelated field, and the operator's first clue is mail not arriving. Removal is
+`DELETE /settings/secrets/:key`, behind `settings.secrets` and a confirmation.
+`classifySecretWrite` is the one reader, and it treats `""`, whitespace and the mask alike.
+
+**`APP_SECRETS_ENCRYPTION_KEY` is a second key, not a second cipher.** One AES-256-GCM
+implementation (`KeyedCipher`), two purposes: `MFA_ENCRYPTION_KEY` for second factors, this
+for everything else the application stores and must read back. Separate because the recovery
+stories differ — losing this one costs a password somebody retypes, losing the other
+de-enrols every employee — and sharing would tie those together, so rotating after an
+integration credential leaked would sign the firm out. Same generator as the MFA key.
+
+**Encrypted secrets with no key to read them are reported, never silently empty.**
+`SettingsService.onModuleInit` migrates plaintext secrets, then calls `warnIfUnreadable`.
+Without the second half the application boots perfectly, the settings page reports the SMTP
+password as configured — because a row holding an envelope *is* configured — and mail stops
+arriving with the cause several layers from the symptom. `MailStatusService` surfaces the
+same fact as `secretsReadable: false`.
+
+**`smtp.provider.ts` is the only file allowed to import nodemailer**, and
+`server/src/architecture.test.ts` asserts it. Before P2-4 the library was imported straight
+into `MailService`, so its error shapes and option names became the vocabulary the
+notification platform, the settings screen and the audit log all spoke — and a second
+provider would then have meant translating it *into nodemailer's idiom*. `MailProvider` is
+the seam; `MailSendResult` and `MailFailure` are the only things that cross it.
+
+**A raw provider error goes to the server log and nowhere else.** `classifyMailError` maps
+it onto nine categories, and the sanitized sentence is what reaches the browser,
+`NotificationDelivery.detail` and the `MailTested` audit payload. This is not tidiness: a
+failed `AUTH PLAIN` echoes a base64 blob containing the username **and the password**, and
+before P2-4 that string went to all three. `mail.failure.test.ts` asserts no part of the
+input reaches the output.
+
+**`MailTested` sets both `payload` and `after`, and they are different fields.** `payload`
+is what a listener receives; `after` is what `AuditListener` writes into the row — and the
+audit row is the storage `MailStatusService` reads back for "last connection test" and "last
+test send". Setting only `payload` produced two `mail.tested` rows with an empty `after` and
+a status panel that said the probes had never run.
+
+**The two mail probes are their own throttle buckets, and `spendMailProbe` paces them.**
+`/settings/mail/verify` and `/settings/mail/test` allow three a minute each. `ThrottlerGuard`
+runs *before* `PermissionsGuard`, so an unpaced permission test asserting 403 meets **429**
+and never reaches the permission — which reads as a broken RBAC rule over a screenshot of a
+correct one. That is the sign-in-budget mistake arriving by a fourth route.
+
+**`e2e/mail.spec.ts` needs a real SMTP server and skips without one.** `npm run mail:catcher`
+starts Mailpit (SMTP 1025, HTTP 8025); `npm run mail:catcher:install` fetches it once into the
+gitignored `var/tools/`. The spec asserts against **Mailpit's own API**, because a resolved
+nodemailer promise proves a library call returned rather than that an SMTP transaction
+happened. It also rewrites `mail.smtpHost` for the duration and restores it in `afterAll` —
+leaving it set would make `notifications.spec.ts` attempt real sends.
+
 **The firm is an entity, and `Office` is the website's Standorte.** `Organisation` is a singleton
 whose id is the literal `org`, upserted on first read so no caller needs a null branch. The
 published document's `offices` key is **injected into `buildSnapshot`** from the `Office` table
@@ -826,6 +895,28 @@ wins, and a child that is not a single element is rendered untouched.
 **`useId` contains colons, so `#id` is not a selector.** React produces `:r1:`, a colon is a
 pseudo-class, and `#:r1:-error` matches nothing — Playwright reports it as an element that is not
 visible, which reads as a missing error message. Use `[id="…"]`.
+
+**A colour pair that is only *sometimes* on screen belongs in `theme.contrast.test.ts`, because
+the browser suite cannot be relied on to meet it.** The notification bell's unread badge was
+`text-inverse` on `bg-brand-bronze`, which is `#75683C` in the light theme and **`#CDB37A` in
+the dark one** — in dark mode the gold family is a *foreground* colour for dark surfaces, so
+white on it measures **2.03:1** against the 4.5:1 that 10px text needs. It shipped with P2-2
+and no axe run ever saw it, because the badge renders only when the count is non-zero and no
+spec had produced an unread notification. P2-4's acceptance test raises real ones, so it
+appeared — in `projects.spec.ts`, two specs away from anything to do with mail, as a contrast
+failure on a selector (`.-right-0\.5`) that names no component. The badge is `brand-navy` now,
+the pairing the primary button already uses, and the **pair is asserted in the unit suite** so
+the next person to change it is told in seconds rather than twenty minutes into a browser run.
+
+**`Pair` renders `<dt>`/`<dd>`, so its container must be a `<dl>`.** A grid of label/value
+rows is the shape that invites a `<div className="grid">`, and axe's `dlitem` rule is
+*serious*. Two of the three blocks on the mail status card were copied from the first and
+kept its classes while losing its element.
+
+**`Badge` tints itself against the *card*, so a `Badge` inside a `bg-surface-2` pill is a
+different colour pair than the one that was checked.** `theme.contrast.test.ts` says so in its
+own comment, and the mail status card's count pills were the first place it mattered: the same
+`disc-energy` badge that clears AA on a card fell below it on the raised step.
 
 **A scrollable region needs keyboard access, and axe only says so when the region has nothing
 focusable in it.** `DataTable`'s pane is `overflow-x-auto`, which for a table wider than the
@@ -1165,14 +1256,17 @@ string, and adding a module would mean editing the table as well as `screens/tab
 
 Documented in the audit performed on this repo, still open:
 
-- **14 permissions in the catalogue are enforced on no route**, and they are a list rather than a
+- **13 permissions in the catalogue are enforced on no route**, and they are a list rather than a
   paragraph: `KNOWN_UNENFORCED` in `server/src/rbac/permissions.agreement.test.ts`, one line each
   with what it is waiting for. A new one fails the build, and so does an entry that has started
   being enforced and was left on the list. (The audit said twelve; the test found a thirteenth on
   its first run and it was a false positive — `settings.secrets` is checked inside the handler
-  rather than by a decorator, which is the documented `◐` pattern. `job.read`, `job.retry` and
-  `job.cancel` were added with `core/jobs` and have no routes yet.) **The prose in that file still
-  says "a thirteenth entry fails the build" and is one behind** — the list is what counts.
+  rather than by a decorator, which is the documented `◐` pattern. `job.read` and `job.cancel`
+  were added with `core/jobs` and have no routes yet.) **`job.retry` left the list in P2-4**:
+  `POST /notifications/deliveries/:id/retry` re-runs a failed e-mail delivery, which is exactly
+  "re-run failed background work" — so the key was reused rather than a `notification.*` twin
+  being minted beside it. **The prose in that file still says "a thirteenth entry fails the
+  build" and is one behind** — the list is what counts.
 - `ContentEntry.scheduledAt` is read and cleared by the publish job but set by nothing — no
   endpoint, no UI. Scheduled publishing is half built.
 - ~~The `Notification` and `Redirect` Prisma models have tables and no implementation at all.~~
@@ -1304,10 +1398,11 @@ Opened by **Zwei-Faktor-Authentisierung** (P3-2), and each is a deliberate stop:
 - **TOTP is the only method.** `MfaMethod` is an enum with one value and `MfaCredential`
   is keyed `(userId, type)` so WebAuthn is a value and a branch in `mfa.rules.ts` rather
   than a second table — but nothing is built. A phone is the only second factor.
-- **Nothing tells anybody their factor changed.** Enabling, disabling and an administrative
-  reset are all audited and none of them sends an e-mail, which is the one notification a
-  security feature normally has. It waits on Notifications (Wave 2 module 9), the same stop
-  `minutesSentAt` and the Planversand make.
+- ~~**Nothing tells anybody their factor changed.**~~ **Closed twice over.** P2-2 gave the
+  four MFA facts real notifications — `subject` strategy, `mandatory`, so the in-app copy
+  cannot be switched off by the firm or by the person. P2-4 closed the other half: with an
+  SMTP server configured the e-mail copy now actually leaves the building, which until then
+  resolved to `SKIPPED` on every machine in existence.
 - **`security.requireMfaForAdmins` is still a `pending` switch in the settings table** and
   is read by nothing. It predates this module and is the placeholder P3-2b will replace;
   it is left alone rather than deleted because removing a settings row is a migration and

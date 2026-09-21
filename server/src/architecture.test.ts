@@ -145,6 +145,52 @@ describe("a feature does not reach into another feature's service", () => {
   });
 });
 
+describe("the mail provider is the only thing that knows about SMTP", () => {
+  /**
+   * P2-4's boundary, enforced rather than asserted in a comment.
+   *
+   * `nodemailer` was imported directly into `MailService`, so its error
+   * shapes, its option names and its `verify()` semantics became the
+   * vocabulary that the notification platform, the settings screen and the
+   * audit log all ended up speaking. Adding a second provider — Microsoft 365,
+   * SES, Postmark — would then have meant translating it *into nodemailer's
+   * idiom*, which is how an abstraction ends up shaped like whichever
+   * implementation came first.
+   *
+   * The interface in `mail.provider.ts` is the seam and `smtp.provider.ts` is
+   * the one implementation allowed behind it. This test is what stops the
+   * next person who needs "just one more option" from reaching past it,
+   * because nothing else would fail when they did.
+   */
+  it("imports nodemailer in exactly one file", () => {
+    const importers: string[] = [];
+    for (const file of sources(SRC)) {
+      if (/from "nodemailer"|require\("nodemailer"\)/.test(read(file))) importers.push(rel(file));
+    }
+    expect(importers).toEqual(["mail/smtp.provider.ts"]);
+  });
+
+  /**
+   * The other half: a provider-specific type must not appear in a signature
+   * anything upstream reads. `MailSendResult` and `MailFailure` are the only
+   * vocabulary that crosses.
+   *
+   * Matched on **`nodemailer.`** rather than on the bare word, because these
+   * files discuss the library in prose — `mail.provider.ts` opens by explaining
+   * that nodemailer used to be imported into `MailService` and why that was the
+   * problem. The first version of this test asserted the word was absent and
+   * failed on its own rationale, which is a test forbidding the comment that
+   * justifies it.
+   */
+  it("keeps nodemailer types out of the shared mail contracts", () => {
+    for (const name of ["mail.provider.ts", "mail.failure.ts", "mail.templates.ts"]) {
+      const source = read(join(SRC, "mail", name));
+      expect(source, `${name} imports nodemailer`).not.toMatch(/from "nodemailer"/);
+      expect(source, `${name} names a nodemailer type`).not.toMatch(/nodemailer\./);
+    }
+  });
+});
+
 describe("the layers, on the server", () => {
   /**
    * The rule `projects.service.ts` opens with, enforced rather than asserted in

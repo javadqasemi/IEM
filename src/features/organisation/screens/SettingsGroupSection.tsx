@@ -1,11 +1,11 @@
-import { useId, useMemo, useState } from "react";
-import { Badge, Button, Card } from "@/shared/ui/primitives";
+﻿import { useId, useMemo, useState } from "react";
+import { Badge, Card } from "@/shared/ui/primitives";
 import { Field, Form, Input, SaveBar, Select, Textarea, Toggle } from "@/shared/ui/forms";
 import { ConfirmDialog } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
 import { useUnsavedGuard } from "@/shared/hooks";
 import type { Setting, SettingGroup } from "@/entities/organisation";
-import { useSaveSettings, useTestMail } from "../hooks/useOrganisation";
+import { useSaveSettings } from "../hooks/useOrganisation";
 import { dangerousEdits, pendingSettingUpdates, settingsFor, type SettingsSection } from "../service";
 
 /**
@@ -122,7 +122,20 @@ export function SettingsGroupSection({
         )}
       </Card>
 
-      {section.slug === "email" ? <MailTestCard canTest={canEdit} /> : null}
+      {/*
+        The mail test card stood here and is **gone** (P2-4).
+
+        It was one button that sent a real message to the caller's own address
+        and reported the provider's raw error. Email Operations replaced it
+        with two distinct operations — a connection test that sends nothing and
+        a test send that takes a recipient — both reporting a sanitized
+        classification, and both in `features/mail`, which also owns the status
+        verdict and the template catalogue they belong beside.
+
+        The section now declares `panel: true`, so the workspace renders that
+        panel underneath this form. Leaving this card as well would put two
+        "Testnachricht senden" buttons on one screen, doing different things.
+      */}
 
       {canEdit ? (
         <SaveBar
@@ -291,83 +304,3 @@ function SettingControl({
   );
 }
 
-/**
- * Proving that mail works, which until now nothing could.
- *
- * `MailService` degrades to logging when unconfigured — deliberately, because
- * a stored job application must not be lost to a refused relay — and the cost
- * of that property is that a wrong password and a correct one look identical.
- * This is the one send that reports its failure.
- *
- * The recipient is the caller's own address and is **not** a field: an
- * endpoint that sends mail from the firm's domain to any address a caller
- * names is an open relay with a permission check in front of it.
- */
-function MailTestCard({ canTest }: { canTest: boolean }) {
-  const test = useTestMail();
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<
-    { tone: "ok" | "warn" | "fail"; message: string } | null
-  >(null);
-
-  async function run() {
-    setBusy(true);
-    setResult(null);
-    try {
-      const outcome = await test();
-      if (outcome.stub) {
-        setResult({
-          tone: "warn",
-          message:
-            "Kein SMTP-Server konfiguriert — die Nachricht wurde nur ins Serverprotokoll " +
-            "geschrieben. Trage oben einen Server ein oder setze SMTP_HOST in der Umgebung.",
-        });
-      } else if (outcome.ok) {
-        setResult({
-          tone: "ok",
-          message: `Über ${outcome.host} an ${outcome.to} versendet. Kommt sie nicht an, liegt es am Empfang — nicht an dieser Konfiguration.`,
-        });
-      } else {
-        setResult({ tone: "fail", message: `Der Server hat abgelehnt: ${outcome.error}` });
-      }
-    } catch (err) {
-      setResult({
-        tone: "fail",
-        message: err instanceof Error ? err.message : "Unbekannter Fehler.",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card
-      className="mt-6"
-      title="Versand prüfen"
-      description="Sendet eine Testnachricht an die eigene Adresse, mit den gespeicherten Werten."
-      action={
-        <Button variant="secondary" busy={busy} disabled={!canTest} onClick={() => void run()}>
-          Testnachricht senden
-        </Button>
-      }
-    >
-      {result ? (
-        <p
-          role="status"
-          className={
-            result.tone === "fail"
-              ? "text-[13px] leading-relaxed font-medium text-brand-bronze"
-              : "text-[13px] leading-relaxed text-muted"
-          }
-        >
-          {result.message}
-        </p>
-      ) : (
-        <p className="text-[13px] leading-relaxed text-muted">
-          Ungespeicherte Änderungen oben werden dabei nicht berücksichtigt — geprüft wird, was
-          gespeichert ist.
-        </p>
-      )}
-    </Card>
-  );
-}

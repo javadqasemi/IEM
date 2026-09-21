@@ -11,14 +11,39 @@ import {
 /**
  * Symmetric encryption at rest, for the whole application.
  *
- * **One service, not one per caller.** MFA is the first thing here that has to
- * store a value it must later read back in the clear — a TOTP secret cannot be
- * hashed, because the server has to recompute the code from it. API keys,
- * stored SMTP credentials and integration tokens are the same shape and are
- * coming; a `mfa.crypto.ts` would be the first of four incompatible answers to
- * one question.
+ * **One implementation, several keys.** MFA was the first thing here that had
+ * to store a value it must later read back in the clear — a TOTP secret cannot
+ * be hashed, because the server has to recompute the code from it. Stored SMTP
+ * credentials, provider API keys, webhook signing secrets and integration
+ * tokens are the same shape, and P2-4 is where the second one arrived.
+ *
+ * What that second caller settled is the shape of this file: the AES-GCM code
+ * is written **once**, in `KeyedCipher`, and the services below differ only in
+ * which environment variable they read and what they say when it is missing.
+ * The alternative — a `settings.crypto.ts` beside `mfa.crypto.ts` — is two
+ * implementations of one primitive, and the day they disagree about the
+ * envelope format is the day a value stops being readable.
  *
  * ---
+ *
+ * ## Why the keys are separate, when the code is not
+ *
+ * `MFA_ENCRYPTION_KEY` and `APP_SECRETS_ENCRYPTION_KEY` are different
+ * variables on purpose, because the two hold values with different recovery
+ * stories:
+ *
+ * - **Losing the MFA key** is survivable per user: recovery codes are hashed
+ *   rather than encrypted so they still work, and `user.resetMfa` clears a
+ *   credential. The blast radius is "enrolled users must re-enrol".
+ * - **Losing the app-secrets key** means the SMTP password has to be typed in
+ *   again — annoying, and nothing worse. It must **not** also mean every
+ *   second factor in the firm is gone.
+ *
+ * Sharing one key would tie those two consequences together, so that rotating
+ * the key after an integration credential leaked would sign out and de-enrol
+ * every employee. That is the same argument that keeps either of them from
+ * being derived from `JWT_ACCESS_SECRET`, which `.env.example` documents as
+ * the way to sign everybody out.
  *
  * ## What it is
  *
@@ -31,59 +56,35 @@ import {
  * The stored form is `v1.<iv>.<tag>.<ciphertext>`, each part base64url. The
  * version prefix is not decoration — it is what makes a key rotation or an
  * algorithm change a migration rather than a data loss, and `decrypt` refuses
- * a prefix it does not know instead of guessing.
+ * a prefix it does not know instead of guessing. It is also what
+ * `isEncrypted` reads, which is what makes the plaintext migration in
+ * `settings.secrets.ts` idempotent.
  *
- * ## Where the key comes from
- *
- * `MFA_ENCRYPTION_KEY`, 32 bytes, as base64 or hex. **Environment, not
- * settings** — `security.policy.ts` sorts security numbers into four kinds and
- * this is squarely the second: it belongs to the deployment, it is a secret,
- * and a settings screen that can print it is a settings screen that has
- * already lost.
- *
- * **It is deliberately not derived from `JWT_ACCESS_SECRET`.** That would make
- * the two rotate together, and rotating the JWT secret is documented in
- * `.env.example` as the way to sign everybody out — an operator doing the
- * ordinary thing would silently destroy every enrolled second factor.
- *
- * ## When it is missing
+ * ## When a key is missing
  *
  * The application still boots. Every other feature works, and anything that
- * needs encryption refuses with a message naming the variable — see
+ * needs that particular key refuses with a message naming the variable — see
  * `assertAvailable`. Failing the bootstrap instead would take an installation
  * that has never used MFA offline over a feature it does not use.
- *
- * Failing *closed* is the right direction for the callers, and it has a cost
- * worth stating plainly: if the key is lost, enrolled users cannot complete a
- * sign-in with their authenticator. Their **recovery codes still work** —
- * those are hashed, not encrypted — and an administrator holding
- * `user.resetMfa` can clear the credential. That is the operational recovery
- * procedure, and it is in `docs/ENTERPRISE_ROADMAP.md` as well as here.
  */
-@Injectable()
-export class EncryptionService {
-  private readonly logger = new Logger(EncryptionService.name);
-  private readonly key: Buffer | null;
+export abstract class KeyedCipher {
+  protected readonly key: Buffer | null;
 
-  constructor(private readonly config: ConfigService) {
-    this.key = readKey(this.config.get<string>("MFA_ENCRYPTION_KEY"), (message) =>
-      this.logger.error(message),
-    );
-    if (!this.key) {
-      // Logged once at construction rather than on every refusal: an operator
-      // reading the boot log should see why a feature is unavailable before a
-      // user finds out by pressing the button.
-      this.logger.warn(
-        "MFA_ENCRYPTION_KEY ist nicht gesetzt — Zwei-Faktor-Authentisierung ist deaktiviert. " +
-          'Schlüssel erzeugen mit: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"',
-      );
-    }
+  protected constructor(
+    raw: string | undefined,
+    protected readonly envVar: string,
+    logger: Logger,
+  ) {
+    this.key = readKey(raw, (message) => logger.error(message), envVar);
   }
 
-  /** Whether anything encrypted can be written or read at all. */
+  /** Whether anything encrypted with this key can be written or read at all. */
   get available(): boolean {
     return this.key !== null;
   }
+
+  /** What a caller is told when this key is not configured. */
+  protected abstract get unavailableMessage(): string;
 
   /**
    * Refuses with an operator-readable message when no key is configured.
@@ -94,10 +95,7 @@ export class EncryptionService {
    */
   assertAvailable(): void {
     if (!this.key) {
-      throw new ServiceUnavailableException(
-        "Die Zwei-Faktor-Authentisierung ist auf diesem Server nicht eingerichtet. " +
-          "Es fehlt der Schlüssel MFA_ENCRYPTION_KEY.",
-      );
+      throw new ServiceUnavailableException(this.unavailableMessage);
     }
   }
 
@@ -129,13 +127,105 @@ export class EncryptionService {
   }
 }
 
+/**
+ * The second factor's secrets — TOTP seeds and challenge material.
+ *
+ * Losing this key does not lock anybody out permanently: recovery codes are
+ * hashed rather than encrypted, so they still work, and an administrator
+ * holding `user.resetMfa` can clear a credential. That is the operational
+ * recovery procedure, and it is in `docs/ENTERPRISE_ROADMAP.md` as well as
+ * here.
+ */
+@Injectable()
+export class EncryptionService extends KeyedCipher {
+  constructor(config: ConfigService) {
+    const logger = new Logger(EncryptionService.name);
+    super(config.get<string>("MFA_ENCRYPTION_KEY"), "MFA_ENCRYPTION_KEY", logger);
+    if (!this.available) {
+      // Logged once at construction rather than on every refusal: an operator
+      // reading the boot log should see why a feature is unavailable before a
+      // user finds out by pressing the button.
+      logger.warn(
+        "MFA_ENCRYPTION_KEY ist nicht gesetzt — Zwei-Faktor-Authentisierung ist deaktiviert. " +
+          `Schlüssel erzeugen mit: ${KEYGEN_HINT}`,
+      );
+    }
+  }
+
+  protected get unavailableMessage(): string {
+    return (
+      "Die Zwei-Faktor-Authentisierung ist auf diesem Server nicht eingerichtet. " +
+      "Es fehlt der Schlüssel MFA_ENCRYPTION_KEY."
+    );
+  }
+}
+
+/**
+ * Everything else the application stores and must read back in the clear.
+ *
+ * The SMTP password is the first; provider API credentials, webhook signing
+ * secrets and storage credentials are the ones this exists for rather than a
+ * second `MailEncryptionService` being written when each arrives. A caller
+ * never reaches this directly — `SettingsService` is the seam, and a setting
+ * declared `secret: true` is what routes a value through it.
+ */
+@Injectable()
+export class SecretEncryptionService extends KeyedCipher {
+  constructor(config: ConfigService) {
+    const logger = new Logger(SecretEncryptionService.name);
+    super(
+      config.get<string>("APP_SECRETS_ENCRYPTION_KEY"),
+      "APP_SECRETS_ENCRYPTION_KEY",
+      logger,
+    );
+    if (!this.available) {
+      logger.warn(
+        "APP_SECRETS_ENCRYPTION_KEY ist nicht gesetzt — geheime Einstellungen " +
+          `(z. B. das SMTP-Passwort) können weder gespeichert noch gelesen werden. Schlüssel erzeugen mit: ${KEYGEN_HINT}`,
+      );
+    }
+  }
+
+  protected get unavailableMessage(): string {
+    return (
+      "Geheime Einstellungen sind auf diesem Server nicht eingerichtet. " +
+      "Es fehlt der Schlüssel APP_SECRETS_ENCRYPTION_KEY."
+    );
+  }
+}
+
 const ALGORITHM = "aes-256-gcm";
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const VERSION = "v1";
 
+/** The one-liner every "key is missing" message ends with. */
+const KEYGEN_HINT =
+  'node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"';
+
 const b64 = (buf: Buffer): string => buf.toString("base64url");
 const unb64 = (value: string): Buffer => Buffer.from(value, "base64url");
+
+/**
+ * Whether a stored value is one of ours rather than a plaintext left over from
+ * before the column was encrypted.
+ *
+ * A **prefix test, not a decryption attempt**, and the difference is what makes
+ * the migration in `settings.secrets.ts` idempotent: running it twice must
+ * re-encrypt nothing, and deciding that by trying to decrypt would need a key
+ * the migration might not have. It is also why `encrypt` writes a version
+ * prefix at all.
+ *
+ * A plaintext SMTP password that happened to begin with `v1.` and contain
+ * three more dot-separated base64url parts would be misread — which is a
+ * password nobody has, and the failure is a refusal to decrypt rather than a
+ * wrong value being served.
+ */
+export function isEncrypted(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const parts = value.split(".");
+  return parts.length === 4 && parts[0] === VERSION;
+}
 
 /**
  * The configured key, or `null` with a reason logged.
@@ -145,8 +235,18 @@ const unb64 = (value: string): Buffer => Buffer.from(value, "base64url");
  * length is rejected rather than stretched: `createCipheriv` would throw
  * anyway, and it would throw at the first *use* — which is a deployment
  * discovering its configuration is wrong when somebody tries to enrol.
+ *
+ * `envVar` names the variable in the message. It is the third parameter with a
+ * default rather than the first without one, because two callers now share
+ * this function and the message has to name the one the operator actually set
+ * wrong — "ist 16 Byte lang" against the wrong variable sends somebody to
+ * re-generate a key that was fine.
  */
-export function readKey(raw: string | undefined, onError: (message: string) => void): Buffer | null {
+export function readKey(
+  raw: string | undefined,
+  onError: (message: string) => void,
+  envVar = "Der Schlüssel",
+): Buffer | null {
   const value = raw?.trim();
   if (!value) return null;
 
@@ -159,7 +259,7 @@ export function readKey(raw: string | undefined, onError: (message: string) => v
 
   if (buffer.length !== KEY_BYTES) {
     onError(
-      `MFA_ENCRYPTION_KEY ist ${buffer.length} Byte lang, erwartet sind ${KEY_BYTES} ` +
+      `${envVar} ist ${buffer.length} Byte lang, erwartet sind ${KEY_BYTES} ` +
         "(32 Byte als Base64 oder 64 Zeichen Hex). Der Schlüssel wird ignoriert.",
     );
     return null;

@@ -80,6 +80,24 @@ export const notificationRepository = {
     request<DeliveryPageDto>("/notifications/deliveries", {
       query: { status: query.status || undefined, page: query.page, perPage: query.perPage },
     }),
+
+  /**
+   * Re-queues one finally-failed e-mail delivery (P2-4).
+   *
+   * Behind **`job.retry`** on the server, not a `notification.*` key: the
+   * permission was declared with `core/jobs` in F10 and this is the first
+   * route that re-runs failed background work, which is what it was named for.
+   *
+   * It lives in *this* repository rather than in `features/mail` because the
+   * Zustellprotokoll lives here, and a feature may not import another feature.
+   * That constraint is right: a second delivery table over the same rows is
+   * exactly the duplication the rule exists to prevent.
+   */
+  retryDelivery: (id: string) =>
+    request<{ id: string; status: string }>(
+      `/notifications/deliveries/${encodeURIComponent(id)}/retry`,
+      { method: "POST", body: {} },
+    ),
 };
 
 export type NotificationRepository = typeof notificationRepository;

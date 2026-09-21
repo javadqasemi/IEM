@@ -224,6 +224,50 @@ export async function spendMfa(): Promise<void> {
   }
 }
 
+/**
+ * The mail diagnostics, which are their own bucket again (P2-4).
+ *
+ * `POST /settings/mail/verify` and `POST /settings/mail/test` each allow
+ * **three a minute**, and that limit is deliberate rather than incidental:
+ * both reach a third party over the network, and a settings page does not need
+ * more. Nest keys a throttle by class, handler and tracker, so the two share
+ * neither each other's budget nor `/auth/login`'s — but every test in the suite
+ * runs from one IP, so they share it with *each other's tests*.
+ *
+ * The failure without this is the one recorded three times against the sign-in
+ * budget, arriving by a fourth route: a permission test asserting 403 gets
+ * **429**, because `ThrottlerGuard` runs before `PermissionsGuard` and never
+ * reaches the permission at all. It reads as a broken RBAC rule, and the
+ * screenshot shows a perfectly correct one.
+ *
+ * Two buckets rather than one, because the routes genuinely have two — pacing
+ * them together would make the spec twice as slow as it needs to be for no
+ * protection.
+ *
+ * **Call it immediately before every request to either route, including the
+ * ones expected to be refused.** A 403 costs the same against the throttle as
+ * a success.
+ */
+const PROBE_WINDOW_MS = 60_000;
+/** Two, not three: one attempt of headroom for anything this cannot see. */
+const PROBE_CEILING = 2;
+
+const probeAttempts: Record<"verify" | "test", number[]> = { verify: [], test: [] };
+
+export async function spendMailProbe(kind: "verify" | "test"): Promise<void> {
+  const attempts = probeAttempts[kind];
+  for (;;) {
+    const now = Date.now();
+    while (attempts.length && now - attempts[0] >= PROBE_WINDOW_MS) attempts.shift();
+    if (attempts.length < PROBE_CEILING) {
+      attempts.push(now);
+      return;
+    }
+    const waitMs = PROBE_WINDOW_MS - (now - attempts[0]) + 250;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
 /* ================================================================== */
 /* The refresh budget                                                  */
 /* ================================================================== */
@@ -775,7 +819,14 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
     name: "settings-offices",
     heading: /im Kopf, im Kontaktfeld/i,
   },
-  { path: "/einstellungen/email", name: "settings-mail", heading: /Versand prüfen/i },
+  /*
+    `Versand prüfen` until P2-4, which removed the one-button test card the
+    phrase belonged to. The section is now the settings form plus an operations
+    panel, so the text that identifies it is the panel's own heading — and
+    "Diagnose" is the better anchor anyway: it names what the screen is *for*
+    rather than a control that might move.
+  */
+  { path: "/einstellungen/email", name: "settings-mail", heading: /Diagnose/i },
   /*
     Was the `unbuilt` placeholder until P2-3; it is now the organisation's
     rules plus the delivery log. The entry was *replaced* rather than added

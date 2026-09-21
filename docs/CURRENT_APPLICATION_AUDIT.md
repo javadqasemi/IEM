@@ -313,9 +313,18 @@ JSON* — a boolean gets a toggle, a number a numeric input, an array a comma li
   screen says so with a badge, which is the honest handling of a half-built feature, but
   it means well under half the page does anything.
 
-Secrets are handled correctly: redacted on read behind a separate `settings.secrets`
+~~Secrets are handled correctly: redacted on read behind a separate `settings.secrets`
 permission, and writing the mask back is a no-op so saving the form does not blank the
-SMTP password.
+SMTP password.~~
+
+**This paragraph was wrong on its central claim, and P2-4 is the correction.** Redaction
+is a *display* property; the value was stored in the clear, and `settings.secrets` existed
+precisely so that a holder could read it back. UI masking is not storage security, and an
+API that returns a credential is one screenshot away from leaking it. A `secret: true`
+setting is now encrypted at rest under `APP_SECRETS_ENCRYPTION_KEY`, returned by no route
+at all, and `settings.secrets` means *manage* rather than *read*. The one part that was
+right is still true and is now load-bearing: a blank write means **keep**, and removal is a
+separate confirmed action.
 
 ### 5.4 Against the brief's thirteen groups
 
@@ -326,7 +335,7 @@ SMTP password.
 | 3 Offices & locations | **Missing as a module.** Table with no API; CMS copy with no relationship |
 | 4 Contact & communication | Scattered — `contactEmail` (CMS), `applications.notifyEmail` (setting), office phones (CMS), socials (CMS). No single source |
 | 5 Website defaults | Partial — the `seo` content type covers title/description/OG/robots well; no fallback pattern, no favicon wiring |
-| 6 E-mail | **Good** — configurable, environment fallback, secrets redacted, read per send. Missing: test send, templates, delivery status |
+| 6 E-mail | **Built (P2-4)** — a `MailProvider` seam with SMTP as its one implementation, the password encrypted at rest and readable by nothing, a connection test *and* a test send with sanitized nine-category diagnostics, a template catalogue with previews, and a status panel whose figures are all measured. The delivery log is the notification platform's and is reused rather than duplicated. The row that stood here called the old state "Good" and named three gaps; the fourth — that the SMTP password was stored in plaintext — is the one it missed |
 | 7 Notifications | **Built (P2-2)** — organisation rules under Einstellungen, personal preferences in the notification centre, and the two kept deliberately apart: one is governance, the other is a personal choice |
 | 8 Recruitment | Partial — notify address, retention, file size (see §5.1); no allowed-types or candidate-status configuration |
 | 9 Security | Partial — session timeout, lockout threshold, lockout duration and password length are all configurable and clamped (P1-5); active sessions are visible and revocable for oneself and, behind `user.readSessions`/`user.revokeSessions`, for another account (P2-9); **MFA is built and self-service** (P3-2), with an administrative reset behind `user.resetMfa`, and every security change now **notifies the account holder** (P2-2). Origins stay inert; the MFA *policy* switch stays `pending` until there is a forced-enrolment flow to make it true (P3-2b) |

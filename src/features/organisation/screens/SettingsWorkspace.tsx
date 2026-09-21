@@ -148,13 +148,34 @@ export function SettingsWorkspace({
       case "settings": {
         if (settings.error) return <ErrorState message={settings.error} onRetry={settings.refetch} />;
         if (!settings.data) return <SectionSkeleton />;
-        return (
+        const form = (
           <SettingsGroupSection
             section={section}
             groups={settings.data}
             canEdit={can("settings.update")}
             canSeeSecrets={can("settings.secrets")}
           />
+        );
+        /*
+          A panel below the form, where the section asks for one.
+
+          Additive rather than an alternative: the form keeps its save bar, its
+          unsaved-changes guard and its validation, and the panel adds what no
+          declaration can express — a status verdict, a diagnostic, a template
+          catalogue. E-Mail is the first; Backup and Integrations are next.
+
+          A section that declares `panel` and is supplied nothing renders the
+          form alone. That is the right failure: the settings still work, and
+          the missing half is a wiring fault in `SettingsPage.tsx` rather than
+          something that should blank the screen.
+        */
+        const panel = section.source.panel ? embedded?.[section.slug] : null;
+        if (!panel) return form;
+        return (
+          <div className="flex flex-col gap-6">
+            {form}
+            <Suspense fallback={<SectionSkeleton />}>{panel}</Suspense>
+          </div>
         );
       }
 

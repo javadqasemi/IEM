@@ -1,9 +1,16 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  type OnModuleInit,
+} from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import type { AuthUser } from "../../common/decorators";
 import { REDACTED, planSettingUpdates, type SettingDef } from "./settings.rules";
+import { SecretSettingsService } from "./settings.secrets";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
 
@@ -109,6 +116,30 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     type: "boolean",
     value: false,
     description: "TLS ab Verbindungsaufbau",
+  },
+  {
+    key: "mail.replyTo",
+    group: "E-Mail",
+    type: "email",
+    value: "",
+    description: "Antwortadresse (Reply-To)",
+    blankMeans: "keine — Antworten gehen an die Absenderadresse",
+  },
+  {
+    key: "mail.timeoutSeconds",
+    group: "E-Mail",
+    type: "number",
+    value: 10,
+    description: "Zeitlimit für Verbindung und Versand",
+    unit: "Sekunden",
+    /*
+      Bounded, because an unbounded timeout is the setting that makes mail look
+      broken rather than slow: a `0` gives up before the handshake and a very
+      large one leaves a durable job occupying a worker while a firewall drops
+      packets in silence. `settings.rules.test.ts` fails an unbounded number.
+    */
+    min: 1,
+    max: 120,
   },
 
   /*
@@ -315,27 +346,71 @@ export const DANGEROUS_SETTINGS: Record<string, string> = {
     "Unter zwölf Zeichen ist sie ohnehin nicht wirksam.",
 };
 
+/**
+ * The keys whose values are credentials, from the declarations themselves.
+ *
+ * Derived rather than listed, so adding `secret: true` to a declaration is the
+ * only step needed to route a new value through the cipher. A second hand-kept
+ * list is how the next integration's API key ends up in the clear.
+ */
+export const SECRET_SETTING_KEYS = DEFAULT_SETTINGS.filter((d) => d.secret).map((d) => d.key);
+
 @Injectable()
-export class SettingsService {
+export class SettingsService implements OnModuleInit {
+  private readonly logger = new Logger(SettingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly secrets: SecretSettingsService,
   ) {}
+
+  /**
+   * Seal anything still in the clear, then say so if anything is unreadable.
+   *
+   * In that order, and the order matters: the migration is what turns a
+   * plaintext row into an envelope, so running the check first would report a
+   * deployment as healthy and then immediately create the rows it was looking
+   * for. Both are cheap — one indexed read over a handful of keys — and both
+   * happen before the first request, which is the only time a credential is
+   * guaranteed not to be half-written.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.secrets.migrateLegacyPlaintext(SECRET_SETTING_KEYS);
+      await this.secrets.warnIfUnreadable(SECRET_SETTING_KEYS);
+    } catch (err) {
+      // A database that is not up yet must not stop the process: the migration
+      // is idempotent and the next boot does it. Logged so a permanent failure
+      // is not mistaken for a deployment that never had a secret.
+      this.logger.warn(
+        `Verschlüsselung der geheimen Einstellungen übersprungen: ${(err as Error).message}`,
+      );
+    }
+  }
 
   /**
    * All settings, grouped, with the declaration each is rendered from.
    *
-   * Secret values never leave as plaintext — they come back as a fixed mask,
-   * with `hasValue` saying whether one is set. The dashboard shows "gesetzt"
-   * or "nicht gesetzt" and writing an unchanged mask back is a no-op, so
-   * saving the SMTP form without retyping the password does not blank it.
+   * **A secret never leaves as plaintext, for anybody** (P2-4). It used to be
+   * masked only when the caller lacked `settings.secrets`; that permission now
+   * means *manage* rather than *read*, and there is no branch here that
+   * returns the value — because an API that can be asked for a credential is
+   * one screenshot, one proxy log or one over-broad role away from handing it
+   * out. `canManageSecrets` therefore decides whether the field is *editable*,
+   * not whether it is visible, and it travels back so the form can draw the
+   * replace and remove controls rather than offering them and meeting a 403.
+   *
+   * `configured` is what the dashboard renders as "gesetzt" / "nicht gesetzt".
+   * Writing the mask back — or writing nothing at all — is a no-op, so saving
+   * the SMTP form without retyping the password cannot blank it.
    *
    * A row in the database that this code no longer declares is **skipped**
    * rather than shown. The seeder reports orphans instead of deleting them, so
    * a retired key survives a deploy; rendering it would put a control on the
    * page that nothing reads and that `update` would refuse.
    */
-  async list(canSeeSecrets: boolean) {
+  async list(canManageSecrets: boolean) {
     const rows = await this.prisma.setting.findMany({ orderBy: [{ group: "asc" }, { key: "asc" }] });
     const groups = new Map<string, unknown[]>();
 
@@ -343,10 +418,17 @@ export class SettingsService {
       const def = DEFS_BY_KEY.get(row.key);
       if (!def) continue;
 
-      const masked =
-        row.secret && !canSeeSecrets
-          ? { value: row.value ? REDACTED : "", hasValue: Boolean(row.value) }
-          : { value: row.value, hasValue: Boolean(row.value) };
+      /*
+        `configured` is computed from the stored value, never from decrypting
+        it. A row holding an envelope is configured even on a deployment whose
+        key has gone missing — which is true, and is why
+        `SecretSettingsService.warnIfUnreadable` exists to say the other half
+        out loud rather than letting this line imply mail is working.
+      */
+      const configured = typeof row.value === "string" ? row.value !== "" : Boolean(row.value);
+      const masked = def.secret
+        ? { value: configured ? REDACTED : "", hasValue: configured }
+        : { value: row.value, hasValue: Boolean(row.value) };
 
       const list = groups.get(row.group) ?? [];
       list.push({
@@ -356,6 +438,16 @@ export class SettingsService {
         secret: row.secret,
         updatedAt: row.updatedAt,
         ...masked,
+        /**
+         * Whether this caller may replace or remove this credential.
+         *
+         * Only meaningful on a secret, and `false` on everything else so a
+         * screen can read one property rather than two. It is a courtesy —
+         * `removeSecret` and the `settings.secrets` guard are the control.
+         */
+        canManage: def.secret ? canManageSecrets : false,
+        /** `true` once a value is stored, whether or not it can be decrypted. */
+        configured: def.secret ? configured : undefined,
         // Everything below is a property of the *code*, not of the row: whether
         // a setting has a reader, and what shape it may hold, are decided by
         // what imports it. Storing them in columns would go stale the moment a
@@ -375,10 +467,21 @@ export class SettingsService {
     return [...groups.entries()].map(([group, settings]) => ({ group, settings }));
   }
 
-  /** Raw read for internal callers — never routed to a controller. */
+  /**
+   * Raw read for internal callers — never routed to a controller.
+   *
+   * A secret comes back **decrypted**, which is the point of the seam: the one
+   * consumer that genuinely needs the SMTP password asks for it by key and
+   * gets a string, and does not learn that there is a cipher. An unreadable
+   * secret comes back as the fallback rather than throwing — see `reveal`.
+   */
   async value<T = unknown>(key: string, fallback?: T): Promise<T> {
     const row = await this.prisma.setting.findUnique({ where: { key } });
-    return (row?.value as T) ?? (fallback as T);
+    if (!row) return fallback as T;
+    if (DEFS_BY_KEY.get(key)?.secret) {
+      return ((this.secrets.reveal(row.value, key) ?? undefined) as T) ?? (fallback as T);
+    }
+    return (row.value as T) ?? (fallback as T);
   }
 
   /**
@@ -387,10 +490,25 @@ export class SettingsService {
    * A consumer that needs a whole group — mail needs seven — should not make
    * seven round trips for it. Returns a plain lookup so a caller can destructure
    * what it wants and fall back per key.
+   *
+   * Secrets are decrypted here too, and this is the method `MailService` uses.
+   * An unreadable one is **omitted from the result** rather than present as
+   * `null`: the caller's fallback chain already treats a missing key as "not
+   * configured, use the environment", and that is exactly the right behaviour
+   * for a password that cannot be decrypted.
    */
   async values(keys: string[]): Promise<Record<string, unknown>> {
     const rows = await this.prisma.setting.findMany({ where: { key: { in: keys } } });
-    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    const out: Record<string, unknown> = {};
+    for (const row of rows) {
+      if (DEFS_BY_KEY.get(row.key)?.secret) {
+        const plaintext = this.secrets.reveal(row.value, row.key);
+        if (plaintext !== null) out[row.key] = plaintext;
+        continue;
+      }
+      out[row.key] = row.value;
+    }
+    return out;
   }
 
   /**
@@ -465,8 +583,19 @@ export class SettingsService {
       throw new BadRequestException(plan.errors.join(" "));
     }
 
+    /*
+      Secrets are sealed *before* the transaction opens.
+
+      `seal` throws a 503 when no key is configured, and doing that inside the
+      transaction would roll back the ordinary settings beside it — so an
+      operator saving the mail form on a server with no
+      `APP_SECRETS_ENCRYPTION_KEY` would lose the host and the port as well as
+      the password, with one error message mentioning neither.
+    */
+    const sealed = plan.secrets.map((s) => ({ key: s.key, value: this.secrets.seal(s.plaintext) }));
+
     await this.prisma.$transaction(
-      plan.apply.map((u) =>
+      [...plan.apply, ...sealed].map((u) =>
         this.prisma.setting.update({
           where: { key: u.key },
           data: { value: u.value as Prisma.InputJsonValue, updatedById: actor.id },
@@ -478,13 +607,74 @@ export class SettingsService {
       actor,
       action: "settings.updated",
       resource: "setting",
-      // The audit scrubber removes the values of secret keys; listing only the
-      // keys here keeps the log useful without repeating that responsibility.
-      after: { keys: plan.apply.map((a) => a.key) },
-      message: `${plan.apply.length} Einstellung(en)`,
+      /*
+        Keys, never values — and for a secret that is not merely the audit
+        scrubber's job being duplicated, it is the only reason this is safe.
+        `plan.secrets` holds plaintext credentials; naming the keys records
+        that the SMTP password was replaced, which is the auditable fact, while
+        the value itself never enters the log at any level.
+      */
+      after: {
+        keys: plan.apply.map((a) => a.key),
+        secretsReplaced: sealed.map((s) => s.key),
+      },
+      message: `${plan.apply.length + sealed.length} Einstellung(en)`,
       ...ctx,
     });
 
-    return this.list(false);
+    return this.list(canManageSecrets(actor));
   }
+
+  /**
+   * Clears a stored credential, deliberately, on its own.
+   *
+   * **Not reachable through `update`.** The whole argument of
+   * `classifySecretWrite` is that no spelling of a blank field may destroy a
+   * working credential, which leaves removal needing somewhere else to live —
+   * a route of its own, behind `settings.secrets`, behind a confirmation, and
+   * audited as its own action rather than folded into "3 Einstellung(en)".
+   *
+   * Idempotent: removing a secret that is already empty is a success, because
+   * the caller's intent — "there must be no credential stored here" — is
+   * satisfied either way, and a 404 would send somebody looking for a row that
+   * is in exactly the state they asked for.
+   */
+  async removeSecret(key: string, actor: AuthUser, ctx: Ctx) {
+    const def = DEFS_BY_KEY.get(key);
+    if (!def) throw new NotFoundException(`Unbekannte Einstellung „${key}“.`);
+    if (!def.secret) {
+      throw new BadRequestException(
+        `„${def.description || key}“ ist kein geheimer Wert und wird über die normalen Einstellungen geändert.`,
+      );
+    }
+
+    await this.prisma.setting.update({
+      where: { key },
+      data: { value: "", updatedById: actor.id },
+    });
+
+    this.audit.record({
+      actor,
+      action: "settings.secret_removed",
+      resource: "setting",
+      resourceId: key,
+      after: { key },
+      message: `Geheimer Wert „${def.description || key}“ entfernt.`,
+      ...ctx,
+    });
+
+    return this.list(true);
+  }
+}
+
+/**
+ * Whether this caller may manage credentials.
+ *
+ * One spelling of the check, shared by the controller and by the value
+ * `update` hands back — two copies would eventually disagree about Super
+ * Admin, which short-circuits on the role key rather than on holding every
+ * permission.
+ */
+export function canManageSecrets(user: AuthUser): boolean {
+  return user.isSuperAdmin || user.permissions.has("settings.secrets");
 }

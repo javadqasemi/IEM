@@ -132,11 +132,30 @@ export function NotificationBell() {
         </svg>
 
         {badge ? (
+          /*
+            `brand-navy`, not `brand-bronze` — and this was a real contrast
+            failure, not a preference.
+
+            `--c-brand-bronze` is `#75683C` in the light theme and **`#CDB37A`
+            in the dark one**, because in dark mode the gold family is a
+            *foreground* colour meant to sit on a dark surface. White on it
+            measures **2.03:1**, against the 4.5:1 that 10px text needs.
+
+            It survived P2-2 because the badge only renders when the count is
+            non-zero, and no spec had produced an unread notification before
+            P2-4's acceptance test started raising real ones — so axe had never
+            seen this element. `theme.contrast.test.ts` now asserts the pair, so
+            the next person to change it is told by the unit suite rather than
+            by a browser run twenty minutes in.
+
+            `inverse` on `brand-navy` is the pairing the primary button already
+            uses and the one that holds in both themes.
+          */
           <span
             aria-hidden
             className={cn(
               "absolute -right-0.5 -top-0.5 grid min-w-[16px] place-items-center rounded-full",
-              "bg-brand-bronze px-1 text-[10px] font-semibold leading-[16px] text-inverse",
+              "bg-brand-navy px-1 text-[10px] font-semibold leading-[16px] text-inverse",
             )}
           >
             {badge}

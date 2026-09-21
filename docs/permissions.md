@@ -565,6 +565,47 @@ uses for both cells: it holds `system.health` and `audit.read`, so it can see
 how the installation is running, and deciding what the installation *says to
 people* is a different authority from watching it.
 
+## 3.15 E-Mail-Betrieb — the section that adds no key
+
+Built with Email Operations (`docs/ENTERPRISE_ROADMAP.md` → P2-4), and the
+notable thing about it is the **absence** of a `mail` resource. Four keys were
+proposed and all four already existed under a better name:
+
+| Proposed | Used instead | Why |
+| --- | --- | --- |
+| `mail.configure` | `settings.update` (+ `settings.secrets` for the credential) | The SMTP host is a setting. A parallel key would mean two checkboxes to grant for one screen |
+| `mail.test` | `settings.update` | Running a diagnostic against a configuration is the same authority as writing it, and the endpoint cannot send anything but a fixed note |
+| `mail.readDeliveries` | `notification.readDeliveries` | The delivery log *is* `NotificationDelivery`, and it is one table with one disclosure |
+| `mail.retryDelivery` | **`job.retry`** | Re-running a failed e-mail is re-running failed background work, which is what the key declared in F10 was named for |
+
+**`job.retry` is enforced for the first time here**, on
+`POST /notifications/deliveries/:id/retry`, and leaves `KNOWN_UNENFORCED` —
+14 → 13. `job.read` and `job.cancel` stay on the list until the job screen
+exists.
+
+`readDeliveries` is deliberately **not** additionally required on that route.
+`@RequirePermissions` is AND, so demanding both would mean an operator who may
+re-run jobs cannot fix a stuck e-mail without also being granted the disclosure
+of who was told what. Retrying reveals nothing: the route takes an id and
+returns a status.
+
+### `settings.secrets` changed meaning, and kept its name
+
+It used to grant **reading** a secret back in plaintext. It now grants
+**managing** one — replacing it, and removing it through
+`DELETE /settings/secrets/:key`. Nothing returns a credential to any caller at
+any permission level, because an API that can be asked for one is one
+screenshot, one proxy log or one over-broad role away from handing it out.
+
+The key was **not renamed**, and that is deliberate: a permission key is what a
+role is granted and what a seeded role names, so renaming it is a migration and
+a re-grant for a better word. `resources.ts` carries the corrected description;
+this paragraph is the record of why the two do not match a reader's first guess.
+
+It is a `◐` rule in the sense §4 uses: `canManageSecrets` is read inside
+`SettingsController.list` to decide whether the form draws the replace and
+remove controls, and `permissions.agreement.test.ts` counts that as enforcement.
+
 ### The invariant that no permission can override
 
 Four notification types are **mandatory** — the second factor being enabled,

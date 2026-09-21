@@ -120,8 +120,30 @@ export type DomainEvents = {
   OfficeArchived: { name: string };
   OfficeRestored: { name: string };
   OfficeDeleted: { name: string };
-  /** Recorded whether it succeeded, which is the point of testing it. */
-  MailTested: { to: string; ok: boolean; error?: string };
+  /**
+   * Recorded whether it succeeded, which is the point of testing it.
+   *
+   * **`mode` separates the two probes**, which are different operations:
+   * `verify` opens a connection and hangs up, `send` puts the fixed diagnostic
+   * message in somebody's inbox. `MailStatusService` reports them on their own
+   * lines, because a green connection check beside "no message has ever gone
+   * out" is a real and common state that one conflated "last tested" would
+   * hide.
+   *
+   * **`category` is the sanitized classification, never the provider's text.**
+   * `classifyMailError` maps a raw SMTP or nodemailer error onto a closed set
+   * before it reaches here — an audit payload is read by people who are not
+   * operators, and a raw failure routinely names the host, the username and
+   * the AUTH mechanism. `to` is absent on a `verify` because nothing was
+   * addressed.
+   */
+  MailTested: {
+    mode: "verify" | "send";
+    ok: boolean;
+    to?: string;
+    category?: string;
+    durationMs?: number;
+  };
 
   /* ---- Authentication: the second factor --------------------------- */
   /**

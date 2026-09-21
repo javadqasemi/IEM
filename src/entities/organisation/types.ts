@@ -140,14 +140,16 @@ export type Setting = {
 
 export type SettingGroup = { group: string; settings: Setting[] };
 
-export type MailTestResult = {
-  ok: boolean;
-  /** No SMTP server configured, so the message was logged rather than sent. */
-  stub: boolean;
-  host: string;
-  error?: string;
-  to: string;
-};
+/*
+  `MailTestResult` stood here and is **gone** (P2-4).
+
+  It belonged to this entity while the mail probe was a card on the settings
+  form. Email Operations owns the shape now — `features/mail/types.ts` — and it
+  has grown fields that are nothing to do with the organisation: a sanitized
+  failure category, a duration, a provider message id. A type in `entities/`
+  that one feature writes and one feature reads is a feature's type with a
+  longer import path.
+*/
 
 /* ================================================================== */
 /* System                                                              */

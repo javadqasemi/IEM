@@ -131,6 +131,23 @@ export default tseslint.config(
   },
 
   {
+    /*
+      Repository scripts: Node, module scope, run by hand or by an npm script.
+      Never bundled and never shipped — `scripts/fetch-mailpit.mjs` fetches the
+      development SMTP catcher `e2e/mail.spec.ts` asserts against.
+    */
+    files: ["scripts/**/*.mjs", "scripts/**/*.js"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        Buffer: "readonly",
+        fetch: "readonly",
+      },
+    },
+  },
+
+  {
     files: ["**/*.test.ts", "**/*.test.tsx"],
     rules: {
       // Tests reach into shapes on purpose.

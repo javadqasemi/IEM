@@ -147,6 +147,82 @@ verbatim on failure. Audited, and rate-limited.
 **Acceptance.** A wrong host produces a named error in the UI within the request; a
 correct one produces a mail; the attempt appears in the audit log either way.
 
+**Superseded by P2-4**, which kept the route and changed three things about it: the
+error is now a **sanitized classification** rather than the transport's own text, the
+recipient may be named, and a second operation — a connection test that sends nothing —
+sits beside it. The single probe button this entry describes is gone.
+
+### P2-4 ✅ Email Operations — one provider seam, and a credential nobody can read
+
+**Problem.** Four separate ones, and only the first was visible from the settings screen:
+
+1. **The SMTP password was stored in plaintext.** `secret: true` masked it *on read* and
+   nothing encrypted it on write — `EncryptionService` existed and was imported by three
+   files, all MFA. Worse, `settings.secrets` was a permission that **handed the plaintext
+   back**, so a credential travelled the wire and sat in a browser's memory for no
+   operational reason: knowing a password is not needed to replace one.
+2. **`nodemailer` was imported directly into `MailService`**, so its error shapes, option
+   names and `verify()` semantics were the vocabulary the notification platform, the
+   settings screen and the audit log all ended up speaking.
+3. **Raw provider errors went to three places at once** — the browser,
+   `NotificationDelivery.detail` and the `MailTested` audit payload. A failed `AUTH PLAIN`
+   echoes a base64 blob containing the username and the password.
+4. **The last hop had never executed.** `SMTP_HOST` was empty on every machine, so every
+   `EMAIL` delivery resolved to `SKIPPED`. This was the one honest gap P2-3 left open.
+
+**Solution.**
+
+```
+Domain event → Notification → Delivery → MailService → MailProvider → SMTP
+                                             ↑
+                              Settings → Secret Settings Layer → SecretEncryptionService
+```
+
+| | |
+| --- | --- |
+| **One crypto implementation, two keys** | `KeyedCipher` holds the AES-256-GCM; `EncryptionService` reads `MFA_ENCRYPTION_KEY` and `SecretEncryptionService` reads the new `APP_SECRETS_ENCRYPTION_KEY`. Separate because the recovery stories differ: losing one costs a password somebody retypes, losing the other de-enrols every second factor in the firm. Sharing a key would tie those consequences together |
+| **A secret is write-only** | Encrypted at rest, accepted on write, and returned by **no** route. `settings.secrets` now means *manage* — replace and remove — which is what it is named for in `resources.ts`. The permission was not renamed: the key is what roles are granted, and renaming it would be a migration for a better word |
+| **A blank field means keep** | `classifySecretWrite` has no spelling of "delete". A settings form posts every field it rendered and the password field renders empty, so "empty clears it" destroys a working credential on the next save of an unrelated field. Removal is `DELETE /settings/secrets/:key`, behind a confirmation |
+| **A migration that runs at boot** | Idempotent (`isEncrypted` is a prefix test, not a decryption attempt), narrow (declared secrets only), quiet (no value at any log level), and it fails safe — with no key it changes nothing and says so |
+| **Boot safety** | Encrypted secrets with no key to read them is reported loudly rather than treated as empty. Without that the application boots, the panel says "configured" because the row exists, and mail silently stops |
+| **A provider seam** | `MailProvider` is the interface; `SmtpProvider` is the one implementation, and `architecture.test.ts` asserts it is the only file that imports nodemailer. Microsoft 365, SES or Postmark is a second class, not a change to notification logic |
+| **Failures are classified** | Nine categories, each mapping to a *different thing the operator does next*. The raw text goes to the server log, where the reader already has shell access; the classification goes everywhere else. `mail.failure.test.ts` asserts no part of the input reaches the output, including a password embedded in an AUTH blob |
+| **Two diagnostics, not one** | `verify` covers DNS/TCP/TLS/AUTH and sends nothing; the test send additionally covers sender identity, recipient acceptance and the template. One button would either mail somebody every time a password is checked, or never prove a message can leave |
+| **Templates stay in code** | A catalogue with previews, not an editor. A template is where a variable meets a string, and both failure modes — a reference to nothing, and a convincing sentence beside a real link — are worse in a system whose messages include "your second factor was removed". In code the variables *are* the parameter type |
+| **Status has five states** | `unknown` is the one that matters: configured but never tested. A green light meaning "the fields are filled in" teaches an operator that green means nothing |
+
+**Delivered.**
+
+| | |
+| --- | --- |
+| Database | **No migration.** Two new settings rows (`mail.replyTo`, `mail.timeoutSeconds`) arrive through the seed; the encryption is a change to what the existing `Setting.value` holds |
+| API | `GET \|POST /settings/mail/status\|verify\|test`, `GET /settings/mail/templates[/:key/preview]`, `DELETE /settings/secrets/:key`, `POST /notifications/deliveries/:id/retry` |
+| Permissions | **None added.** `settings.update`, `settings.secrets`, `settings.read` and `notification.readDeliveries` already existed; manual retry reuses **`job.retry`**, which leaves `KNOWN_UNENFORCED` at **14 → 13** |
+| Deliveries | Reused, never duplicated. The Zustellprotokoll stays in `features/notifications`; the mail panel shows the summary and links to it — `architecture.test.ts` would have refused the alternative |
+| Frontend | `features/mail/` on the five layers, embedded into the settings workspace through the new `panel: true` source. The old one-button test card is gone |
+| Tests | +41 server unit, +17 client unit, +17 e2e against a real SMTP server |
+
+**Acceptance, met.** A written SMTP password is unreadable through any route and is stored
+as `v1.<iv>.<tag>.<ciphertext>`; a blank write keeps it; a wrong host produces a category
+and no provider text; and a content submission travels event → delivery → job → SMTP →
+**Mailpit confirms the message** → delivery `DELIVERED`. `e2e/mail.spec.ts` is the proof,
+and it asks Mailpit rather than nodemailer — a resolved promise proves a library call
+returned, not that an SMTP transaction happened.
+
+**Not done, deliberately:** a second provider (the interface exists, nothing implements
+it); HTML mail (plain text means the whole HTML-injection question does not arise);
+editable templates; and `security.allowedOrigins`, still inert for the reason P1-5 gives.
+
+**One defect found outside the slice and fixed inside it.** The notification bell's unread
+badge was white on `brand-bronze`, which is a light gold in the dark theme — 2.03:1 against
+the 4.5:1 that 10px text needs. It shipped with P2-2 and no accessibility run had ever seen
+it, because the badge renders only when the count is non-zero and no spec had produced an
+unread notification. This slice's acceptance test raises real ones, so it surfaced — in
+`projects.spec.ts`, two specs away from anything to do with mail. The badge is `brand-navy`
+now and **the pair is asserted in `theme.contrast.test.ts`**, which is the part that
+matters: a colour pair that is only sometimes on screen cannot be left to the browser suite
+to notice.
+
 ### P1-5 ◐ Security configuration is constant
 
 **Problem.** Lockout threshold, lockout duration and password minimum length are constants

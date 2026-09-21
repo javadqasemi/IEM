@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The wire shapes, and nothing else.
  *
  * These names may appear in `repository.ts` and `mapper.ts` and nowhere above
@@ -143,15 +143,6 @@ export type SettingDto = {
 
 export type SettingGroupDto = { group: string; settings: SettingDto[] };
 
-export type MailTestDto = {
-  ok: boolean;
-  /** No SMTP server configured: the message was logged, not sent. */
-  stub: boolean;
-  host: string;
-  error?: string;
-  to: string;
-};
-
 /* ================================================================== */
 /* System                                                              */
 /* ================================================================== */
@@ -184,3 +175,4 @@ export type SystemInfoDto = {
     detail: string | null;
   }[];
 };
+

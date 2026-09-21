@@ -204,12 +204,48 @@ describe("planSettingUpdates", () => {
     // and must not store the mask itself as the password.
     const plan = planSettingUpdates(defs, [{ key: "a.secret", value: REDACTED }]);
     expect(plan.apply).toEqual([]);
+    expect(plan.secrets).toEqual([]);
     expect(plan.errors).toEqual([]);
   });
 
-  it("still writes a secret the caller actually typed", () => {
+  /**
+   * A secret leaves through `secrets`, never through `apply` (P2-4).
+   *
+   * The separation is what lets `SettingsService` encrypt without re-deciding,
+   * per row, whether the value it is about to write is a credential — and the
+   * row it got wrong would be the one that stored an SMTP password in the
+   * clear. A test that only checked "the value survives" would pass against
+   * both designs, so this one checks **which list it is in**.
+   */
+  it("routes a secret the caller actually typed to the secrets list", () => {
     const plan = planSettingUpdates(defs, [{ key: "a.secret", value: "hunter2" }]);
-    expect(plan.apply).toEqual([{ key: "a.secret", value: "hunter2" }]);
+    expect(plan.secrets).toEqual([{ key: "a.secret", plaintext: "hunter2" }]);
+    expect(plan.apply).toEqual([]);
+    expect(plan.errors).toEqual([]);
+  });
+
+  /**
+   * The requirement that a blank field cannot destroy a working credential.
+   *
+   * This is the failure the whole `classifySecretWrite` design is written
+   * against: a settings form posts every field it rendered, the password field
+   * renders empty once it is no longer readable, and the obvious "empty string
+   * clears it" semantics then delete a working SMTP password on the next save
+   * of an unrelated field. The operator's next clue is mail not arriving.
+   */
+  it("treats a blank secret as 'keep', never as 'delete'", () => {
+    for (const blank of ["", "   ", `  ${REDACTED}  `]) {
+      const plan = planSettingUpdates(defs, [{ key: "a.secret", value: blank }]);
+      expect(plan.secrets, `blank=${JSON.stringify(blank)}`).toEqual([]);
+      expect(plan.apply, `blank=${JSON.stringify(blank)}`).toEqual([]);
+      expect(plan.errors, `blank=${JSON.stringify(blank)}`).toEqual([]);
+    }
+  });
+
+  it("refuses a secret that is not text at all", () => {
+    const plan = planSettingUpdates(defs, [{ key: "a.secret", value: 1234 }]);
+    expect(plan.secrets).toEqual([]);
+    expect(plan.errors).toHaveLength(1);
   });
 
   it("reports an unknown key separately from an invalid value", () => {

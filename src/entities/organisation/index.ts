@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The firm, as shared vocabulary.
  *
  * `features/organisation` is the only reader today. It is an entity rather
@@ -11,7 +11,6 @@ export {
   ORGANISATION_STATUSES,
   type IntegrationState,
   type Integration,
-  type MailTestResult,
   type Office,
   type OfficeDraft,
   type Organisation,
@@ -30,3 +29,4 @@ export {
   officeAddressLine,
   organisationStatusLabel,
 } from "./labels";
+

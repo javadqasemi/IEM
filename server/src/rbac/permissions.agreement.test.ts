@@ -106,8 +106,14 @@ const KNOWN_UNENFORCED: Record<string, string> = {
   "system.backup": "no backup endpoint",
   "user.impersonate": "no impersonation flow",
   // Added by F6 for the job runner, ahead of its controller (F10).
+  //
+  // `job.retry` **left this list in P2-4** and is the first of the three to be
+  // enforced: `POST /notifications/deliveries/:id/retry` re-runs a failed
+  // e-mail delivery, which is exactly "re-run failed background work". It was
+  // reused rather than a `notification.retryDelivery` being minted beside it —
+  // a second name for one authority is two checkboxes a person has to hold
+  // together to be useful.
   "job.read": "the job runner ships before its screen",
-  "job.retry": "the job runner ships before its screen",
   "job.cancel": "the job runner ships before its screen",
 };
 

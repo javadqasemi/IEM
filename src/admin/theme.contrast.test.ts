@@ -102,6 +102,23 @@ const PAIRS: { fg: string; bg: string; min: number; where: string }[] = [
   { fg: "inverse", bg: "admin-rail", min: 4.5, where: "the rail's active row" },
   { fg: "brand-sand", bg: "admin-rail", min: 4.5, where: "the rail's accent and badge" },
 
+  /**
+   * The notification bell's unread count — 10px text on a filled dot.
+   *
+   * Added after it failed in a browser run rather than here, which is the gap
+   * this entry closes. The badge was `inverse` on `brand-bronze`, and
+   * `brand-bronze` is `#75683C` in the light theme but **`#CDB37A` in the dark
+   * one** — in dark mode the gold family is a *foreground* colour for dark
+   * surfaces, so white on it measures 2.03:1.
+   *
+   * It hid for a whole release because the badge renders only when the count is
+   * non-zero, and until P2-4's acceptance test began raising real notifications
+   * no spec had ever produced one for axe to look at. A pair that is only
+   * *sometimes* on screen is exactly the pair a palette test should carry,
+   * because the browser suite cannot be relied on to meet it.
+   */
+  { fg: "inverse", bg: "brand-navy", min: 4.5, where: "the bell's unread count" },
+
   // Discipline hues, used as text on a card in badges and charts.
   { fg: "disc-heat", bg: "surface", min: 4.5, where: "Heizung/HLK as text" },
   { fg: "disc-air", bg: "surface", min: 4.5, where: "Lüftung/Klima as text" },

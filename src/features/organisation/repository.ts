@@ -1,7 +1,6 @@
-import { request } from "@/core/api";
+﻿import { request } from "@/core/api";
 import type {
   CreateOfficeBody,
-  MailTestDto,
   OfficeDto,
   OrganisationEnvelopeDto,
   OrganisationSaveDto,
@@ -67,16 +66,10 @@ export const organisationRepository = {
   updateSettings: (updates: { key: string; value: unknown }[]) =>
     request<SettingGroupDto[]>("/settings", { method: "PATCH", body: { updates } }),
 
-  /**
-   * The mail probe. No recipient parameter — the server sends to the caller's
-   * own address, which is what stops this being an open relay behind a
-   * permission check.
-   */
-  testMail: () => request<MailTestDto>("/settings/mail/test", { method: "POST", body: {} }),
-
   /* ---- System ------------------------------------------------------ */
 
   system: () => request<SystemInfoDto>("/dashboard/system"),
 };
 
 export type OrganisationRepository = typeof organisationRepository;
+

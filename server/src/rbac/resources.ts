@@ -164,7 +164,22 @@ export const RESOURCES: ResourceDef[] = [
   resource("settings", "Einstellungen", "Einstellungen", {
     read: "Einstellungen ansehen",
     update: "Einstellungen ändern",
-    secrets: "Geheime Werte wie SMTP-Passwörter sehen und ändern",
+    /**
+     * **Manage, not read** — and the wording changed in P2-4 while the key did
+     * not.
+     *
+     * It used to say "sehen und ändern", and the API honoured the first half:
+     * a holder could read the SMTP password back in plaintext. That is a
+     * credential on the wire and in a browser's memory for no operational
+     * reason — knowing a password is not needed to replace one — so nothing
+     * returns a secret to any caller at any permission level now.
+     *
+     * The **key** is deliberately unchanged. A permission key is what a role
+     * is granted and what a seeded role names, so renaming it is a migration
+     * and a re-grant in exchange for a better word.
+     * `docs/permissions.md` §3.15 is the record.
+     */
+    secrets: "Geheime Werte wie SMTP-Passwörter setzen, ersetzen und entfernen",
   }),
 
   /**

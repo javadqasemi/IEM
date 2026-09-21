@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { SettingsService } from "../core/settings/settings.service";
+import { MailStatusService } from "../mail/mail.status.service";
 import { Public, RequirePermissions } from "../common/decorators";
 import { PERMISSIONS } from "../rbac/permissions.catalog";
 import { CONTENT_TYPES } from "../content/content-types";
@@ -24,6 +25,8 @@ export class DashboardController {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
+    /** One source for the mail verdict — see `health` on the integration row. */
+    private readonly mailStatus: MailStatusService,
   ) {}
 
   @Get("overview")
@@ -219,6 +222,7 @@ export class DashboardController {
     ]);
     const smtpFromSettings = typeof mail["mail.smtpHost"] === "string" && mail["mail.smtpHost"].trim();
     const smtpFromEnv = Boolean(this.config.get("SMTP_HOST"));
+    const mailStatus = await this.mailStatus.status();
 
     const started = Date.now();
     let database: "ok" | "error" = "ok";
@@ -338,6 +342,23 @@ export class DashboardController {
           detail: smtpFromSettings || smtpFromEnv
             ? `Absender ${String(mail["mail.from"] ?? "—")}`
             : "Ohne SMTP-Server werden E-Mails nur ins Protokoll geschrieben.",
+          /**
+           * The operational state beside the configuration state, from the one
+           * service that computes it (P2-4).
+           *
+           * These are two different questions and the panel was only ever
+           * answering the first. "Configured" is a claim about a form;
+           * `health` is `MailStatusService`'s five-valued verdict, which is
+           * `unknown` until somebody has actually tested the connection —
+           * because a green light that means "the fields are filled in"
+           * teaches an operator that green means nothing.
+           *
+           * Read from the same service the settings screen uses rather than
+           * recomputed here: a status derived twice is a status that
+           * eventually disagrees with itself, and the brief's instruction is
+           * not to duplicate system-health endpoints.
+           */
+          health: mailStatus.state,
         },
         {
           key: "storage",

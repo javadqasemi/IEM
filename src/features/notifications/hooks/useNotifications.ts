@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { invalidate, peek, prime, useQuery } from "@/core/api";
 import {
   toDeliveryPage,
@@ -194,4 +194,39 @@ export function useDeliveries(
     () => notificationRepository.deliveries(query).then(toDeliveryPage),
     { staleMs: 10_000 },
   );
+}
+
+/**
+ * Re-queues one finally-failed e-mail (P2-4).
+ *
+ * **Invalidated rather than primed**, which is the opposite of every other
+ * mutation in this file and is right for the one reason that matters: the
+ * row's new state is known (`PENDING`), but the *page* it sits on is filtered
+ * and paginated server-side — a row that no longer matches a `status=FAILED`
+ * filter has to leave the table, and priming it back in would leave a
+ * re-queued delivery sitting in a list of failures.
+ *
+ * The concern the other hooks guard against does not apply: this table is not
+ * the parent of anything holding unrecoverable state, so a refetch that
+ * briefly empties it costs a skeleton rather than ten recovery codes.
+ */
+export function useRetryDelivery() {
+  const [retrying, setRetrying] = useState<string | null>(null);
+
+  const retry = useCallback(async (id: string) => {
+    setRetrying(id);
+    try {
+      const result = await notificationRepository.retryDelivery(id);
+      invalidate([KEY, "deliveries"]);
+      // The mail panel's summary counts this row; it is a different feature's
+      // cache key, and leaving it stale would show a failure count that still
+      // includes a delivery the operator has just re-queued.
+      invalidate(["mail", "status"]);
+      return result;
+    } finally {
+      setRetrying(null);
+    }
+  }, []);
+
+  return { retry, retrying };
 }

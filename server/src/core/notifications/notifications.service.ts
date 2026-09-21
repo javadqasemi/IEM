@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
   NotificationChannel,
@@ -11,6 +11,8 @@ import { EventBus } from "../events/event-bus";
 import { JobService } from "../jobs/job.service";
 import { OrganisationService } from "../organisation/organisation.service";
 import { MailService } from "../../mail/mail.service";
+import { AuditService } from "../audit/audit.service";
+import type { AuthUser } from "../../common/decorators";
 import {
   NOTIFICATION_TYPES,
   notificationDef,
@@ -121,6 +123,18 @@ export class NotificationsService {
     private readonly mail: MailService,
     private readonly organisation: OrganisationService,
     private readonly config: ConfigService,
+    /**
+     * Direct, for `retryDelivery` alone.
+     *
+     * A manual retry is an **operator intervention on a delivery**, not a
+     * business fact somebody else's module should react to — nothing
+     * subscribes to "an e-mail was re-queued" and inventing a domain event so
+     * that `AuditListener` could derive the row would put a name in
+     * `DOMAIN_EVENT_NAMES` that no listener will ever claim. That is the
+     * dead-permission problem in event form, and `audit.record` is what the
+     * rule in CLAUDE.md reserves for exactly this shape.
+     */
+    private readonly audit: AuditService,
     /**
      * For `NotificationSettingsUpdated`, and that is the only direction.
      *
@@ -439,6 +453,89 @@ export class NotificationsService {
         settledAt: new Date(),
       },
     });
+  }
+
+  /**
+   * Puts a finally-failed e-mail back in the queue, by hand.
+   *
+   * The operator's half of `core/jobs`: the runner gives up after three
+   * attempts with a capped backoff, which is right for a transient fault and
+   * useless for the common real one — an SMTP password that was wrong for two
+   * days and has just been corrected. Without this the only way to deliver
+   * those messages is to cause the events again, which for "your second factor
+   * was reset" is not possible.
+   *
+   * ---
+   *
+   * **`FAILED` only, and the guard is the `where` rather than a read.** The
+   * same single-statement argument as `updateIfUnchanged` and the recovery
+   * codes: two operators pressing the button together both read `FAILED`, both
+   * proceed, and the message goes out twice. `updateMany` with the status in
+   * the `where` lets Postgres's row lock decide, and the returned count is the
+   * answer.
+   *
+   * The three statuses it refuses each have their own reason:
+   *
+   * - **`DELIVERED`** — the message arrived. A retry would send a second copy
+   *   of a security alert, which is worse than the silence it was meant to fix.
+   * - **`PROCESSING`** — a worker holds it. Re-queueing would race that worker
+   *   for the same row.
+   * - **`PENDING`** — already queued. The job will run; pressing the button
+   *   again would add a second job for one delivery.
+   *
+   * **`SKIPPED` is refused too**, and that is the least obvious one: a skip is
+   * a deliberate non-send — a preference, a rule, or no SMTP server — so
+   * retrying it would deliver a message the recipient or the firm has switched
+   * off. Configuring mail and wanting the backlog is a different operation
+   * from retrying a failure, and it is not this one.
+   */
+  async retryDelivery(
+    deliveryId: string,
+    actor: AuthUser,
+    ctx: { ip?: string | null; userAgent?: string | null },
+  ): Promise<{ id: string; status: NotificationDeliveryStatus }> {
+    const existing = await this.prisma.notificationDelivery.findUnique({
+      where: { id: deliveryId },
+      select: { id: true, channel: true, status: true },
+    });
+    if (!existing) throw new NotFoundException("Diese Zustellung gibt es nicht.");
+
+    if (existing.channel !== NotificationChannel.EMAIL) {
+      throw new BadRequestException(
+        "Nur E-Mail-Zustellungen können erneut versucht werden — eine In-App-Meldung ist die Zeile selbst.",
+      );
+    }
+
+    const { count } = await this.prisma.notificationDelivery.updateMany({
+      where: { id: deliveryId, status: NotificationDeliveryStatus.FAILED },
+      data: {
+        status: NotificationDeliveryStatus.PENDING,
+        detail: "Manuell erneut in die Warteschlange gestellt.",
+        settledAt: null,
+      },
+    });
+
+    if (count === 0) {
+      throw new BadRequestException(
+        `Diese Zustellung steht auf „${existing.status}“ und kann nicht erneut versucht werden. ` +
+          "Nur endgültig fehlgeschlagene E-Mails (FAILED) lassen sich wiederholen.",
+      );
+    }
+
+    await this.jobs.enqueue("notification.deliver", { deliveryId });
+
+    this.audit.record({
+      actor,
+      action: "notification.delivery_retried",
+      resource: "notification_delivery",
+      resourceId: deliveryId,
+      before: { status: existing.status },
+      after: { status: NotificationDeliveryStatus.PENDING },
+      message: "E-Mail-Zustellung manuell erneut in die Warteschlange gestellt.",
+      ...ctx,
+    });
+
+    return { id: deliveryId, status: NotificationDeliveryStatus.PENDING };
   }
 
   private settle(

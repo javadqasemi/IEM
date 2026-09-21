@@ -1,7 +1,6 @@
-import { useCallback } from "react";
+﻿import { useCallback } from "react";
 import { invalidate, peek, prime, useQuery } from "@/core/api";
 import type {
-  MailTestResult,
   Office,
   OfficeDraft,
   Organisation,
@@ -9,7 +8,6 @@ import type {
   SystemInfo,
 } from "@/entities/organisation";
 import {
-  toMailTestResult,
   toOffice,
   toOfficeCreateBody,
   toOfficeUpdateBody,
@@ -197,22 +195,20 @@ export function useSaveSettings() {
   }, []);
 }
 
-/**
- * The mail probe.
- *
- * **Not a `useQuery`.** It sends a message — running it because a component
- * mounted, or re-running it because a cache entry went stale, would put mail
- * in somebody's inbox for scrolling past a card. It is a command, so it is a
- * callback the button holds.
- */
-export function useTestMail() {
-  return useCallback(async (): Promise<MailTestResult> => {
-    const result = await organisationRepository.testMail();
-    // The attempt is audited server-side either way; refreshing the audit feed
-    // is the shell's business, not this call's.
-    return toMailTestResult(result);
-  }, []);
-}
+/*
+  `useTestMail` stood here and is **gone** (P2-4).
+
+  It was this feature's own path to `POST /settings/mail/test`, from the days
+  when the E-Mail section was a form with one probe button on it. Email
+  Operations owns that now — `features/mail` has the two distinct diagnostics,
+  the sanitized classification and the status they belong beside — and keeping
+  this would have left two client paths to one endpoint, which is the "parallel
+  mail service" the brief names, in miniature.
+
+  The argument it carried is not lost: it is at the head of
+  `features/mail/hooks/useMail.ts`, which records why a probe is a callback and
+  never a `useQuery`.
+*/
 
 /* ================================================================== */
 /* System                                                              */
@@ -232,3 +228,4 @@ export function useSystemInfo(enabled: boolean) {
     organisationRepository.system().then(toSystemInfo),
   );
 }
+
