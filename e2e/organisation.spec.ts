@@ -1,4 +1,4 @@
-﻿import { expect, test } from "./fixtures";
+import { expect, test } from "./fixtures";
 
 /**
  * Company settings, end to end, in the browser.

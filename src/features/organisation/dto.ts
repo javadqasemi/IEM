@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The wire shapes, and nothing else.
  *
  * These names may appear in `repository.ts` and `mapper.ts` and nowhere above

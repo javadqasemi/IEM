@@ -1,5 +1,5 @@
 import type { APIRequestContext, Page } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD, API, apiAs, expect, expectClean, test } from "./fixtures";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, API, apiAs, e2eName, expect, expectClean, test } from "./fixtures";
 
 /**
  * The project edit dialog, all the way through the browser.
@@ -53,7 +53,7 @@ test.beforeAll(async () => {
 
   const created = await api.post(`${API}/projects`, {
     data: {
-      name: `Edit-Dialog Testlauf ${Date.now()}`,
+      name: e2eName(`Edit-Dialog Testlauf ${Date.now()}`),
       customerId: customers.data.items[0].id,
       contractValue: "100000.00",
     },

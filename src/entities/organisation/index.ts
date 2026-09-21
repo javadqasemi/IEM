@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The firm, as shared vocabulary.
  *
  * `features/organisation` is the only reader today. It is an entity rather

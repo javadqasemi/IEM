@@ -14,6 +14,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
+    "e2e:cleanup": "tsx prisma/e2e-cleanup.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.seed.json",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -78,3 +79,4 @@
     "vitest": "^3.2.7"
   }
 }
+

@@ -181,6 +181,19 @@ const RUN_ONCE = [
 export default defineConfig({
   testDir: "./e2e",
   /**
+   * Clears stale test-owned data before anything runs.
+   *
+   * **Before, not after**, and that is the whole point: a cleanup that runs
+   * afterwards is exactly the one a crash skips. See `e2e/global-setup.ts` for
+   * the 782-drawings failure this was written against, and
+   * `server/prisma/e2e-cleanup.ts` for what it will and will not delete.
+   *
+   * It never fails the run — a briefly unreachable database must not read as a
+   * broken suite. `hygiene.spec.ts` is what fails the build if the mechanism
+   * itself goes missing.
+   */
+  globalSetup: "./e2e/global-setup.ts",
+  /**
    * Only `*.spec.ts`, so `fixtures.ts` and `budgets.ts` are libraries.
    *
    * Playwright's default is every `.ts` under `testDir`, which would load both

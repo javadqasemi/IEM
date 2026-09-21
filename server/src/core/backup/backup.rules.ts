@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Every backup decision that is arithmetic rather than I/O.
  *
  * The same split `auth.rules.ts`, `mfa.rules.ts` and `drawings.rules.ts` make,

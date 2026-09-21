@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { BackupTrigger, BackupType } from "@prisma/client";
 import { RedisService } from "../../common/redis";

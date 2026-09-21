@@ -1,4 +1,4 @@
-﻿# Current application audit — 19 September 2026
+# Current application audit — 19 September 2026
 
 What is actually in this repository today, read from the source rather than from the
 documentation. Where the two disagree the source wins and the disagreement is recorded.

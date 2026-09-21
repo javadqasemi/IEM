@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { BackupType } from "@prisma/client";
 import {
   RESTORE_CONFIRMATION,

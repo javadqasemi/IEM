@@ -1,4 +1,4 @@
-﻿import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext } from "@playwright/test";
 import {
   ADMIN_EMAIL,
   ADMIN_PASSWORD,

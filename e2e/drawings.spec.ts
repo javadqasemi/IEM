@@ -1,5 +1,5 @@
 import type { APIRequestContext } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD, API, TEST_PASSWORD, apiAs, expect, test } from "./fixtures";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, API, TEST_PASSWORD, apiAs, e2eNumber, expect, test } from "./fixtures";
 
 /**
  * Pläne und Planversand, **against the live API** — Wave 2, module 3.
@@ -78,12 +78,15 @@ async function employees(): Promise<{ id: string }[]> {
   return ((await response.json()) as { data: { items: { id: string }[] } }).data.items;
 }
 
-let unique = 0;
+/*
+  No local counter any more: `e2eNumber` owns uniqueness, because it has to be
+  unique across *runs* as well as within one — three width projects can create
+  a plan in the same millisecond.
+*/
 async function aDrawing(over: Record<string, unknown> = {}): Promise<Drawing> {
-  unique += 1;
   const response = await admin.post(`${API}/drawings`, {
     data: {
-      number: `E2E-${Date.now()}-${unique}`,
+      number: e2eNumber("PL"),
       title: "E2E Grundriss",
       projectId: await projectId(),
       disciplineId: await disciplineId(),

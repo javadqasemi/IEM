@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Why a backup or a restore did not work, in words this application chose.
  *
  * Pure, and the same shape `mail.failure.ts` established in P2-4 — the pattern

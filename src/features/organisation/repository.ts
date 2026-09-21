@@ -1,4 +1,4 @@
-﻿import { request } from "@/core/api";
+import { request } from "@/core/api";
 import type {
   CreateOfficeBody,
   OfficeDto,

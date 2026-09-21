@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 
 /**
  * The write gate that closes while a restore is replacing the database.

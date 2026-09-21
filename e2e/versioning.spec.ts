@@ -1,5 +1,5 @@
 import type { APIRequestContext } from "@playwright/test";
-import { ADMIN_EMAIL, ADMIN_PASSWORD, API, apiAs, expect, test } from "./fixtures";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, API, apiAs, e2eName, expect, test } from "./fixtures";
 
 /**
  * Fachliche Versionierung and the optimistic lock, against the live API.
@@ -37,7 +37,7 @@ test.beforeAll(async () => {
   };
   const created = await api.post(`${API}/projects`, {
     data: {
-      name: `Versionierung Testlauf ${Date.now()}`,
+      name: e2eName(`Versionierung Testlauf ${Date.now()}`),
       customerId: customers.data.items[0].id,
     },
   });

@@ -1,4 +1,4 @@
-﻿import { useCallback } from "react";
+import { useCallback } from "react";
 import { invalidate, peek, prime, useQuery } from "@/core/api";
 import type {
   Office,

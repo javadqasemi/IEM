@@ -92,6 +92,63 @@ function fromAnyEnvFile(key: string, files: string[]): string {
   return "";
 }
 
+/**
+ * The marker every persistent thing an E2E run creates must carry.
+ *
+ * ---
+ *
+ * ## Why a marker rather than careful cleanup
+ *
+ * `afterAll` is not enough and cannot be made enough. A killed Playwright
+ * process never reaches it, a timed-out test abandons whatever it had made,
+ * and a refusal the domain is *right* to make — `DELETE /drawings/:id` will
+ * not take an issued plan — leaves a row behind by design. Every one of those
+ * happened here: by the time it was noticed, one seeded project carried **782
+ * drawings** where the seed makes six, plus 857 tasks, 852 meetings and 595
+ * decisions.
+ *
+ * That is not merely untidy. It broke a real test: the Planversand dialog asks
+ * for a page of 100 plans, which is a documented design decision, so a plan
+ * created by the test was not in the list and the assertion failed — two full
+ * suite runs were spent diagnosing a defect that did not exist.
+ *
+ * So the rule is inverted. Instead of each spec promising to clean up after
+ * itself, **every spec marks what it makes** and `e2e-cleanup.ts` removes
+ * everything marked, *before* the run. That is crash-safe by construction: the
+ * cleanup does not depend on the previous process having finished, only on it
+ * having labelled its work.
+ *
+ * ## The convention
+ *
+ * The token appears somewhere in a human-readable identifying field — a name,
+ * a title, a number. Most specs already did this informally; what was missing
+ * was that it be **uniform and enforced**. `e2e-hygiene.spec.ts` fails the
+ * build when a spec creates a persistent entity without it.
+ *
+ * `e2eName("Bausitzung")` → `"E2E: Bausitzung"`, and `e2eNumber("PL")` →
+ * `"E2E-PL-1789…-3"` for fields that must be unique and identifier-shaped.
+ */
+export const E2E_MARKER = "E2E";
+
+let sequence = 0;
+
+/** A marked, human-readable name. Use for `name`/`title` fields. */
+export function e2eName(label: string): string {
+  return `${E2E_MARKER}: ${label}`;
+}
+
+/**
+ * A marked, unique, identifier-shaped value. Use for `number`/`key` fields.
+ *
+ * Unique across a run *and* across concurrent runs: the timestamp separates
+ * runs and the counter separates calls inside one, which matters because three
+ * width projects can be creating plans in the same millisecond.
+ */
+export function e2eNumber(prefix: string): string {
+  sequence += 1;
+  return `${E2E_MARKER}-${prefix}-${Date.now()}-${sequence}`;
+}
+
 export const API_ORIGIN =
   process.env.E2E_API_ORIGIN ||
   fromAnyEnvFile("VITE_CMS_API", [".env.local", ".env", ".env.development"]) ||

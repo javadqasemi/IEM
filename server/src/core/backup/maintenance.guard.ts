@@ -1,4 +1,4 @@
-﻿import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
+import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import type { Request } from "express";
 import { MaintenanceService } from "./maintenance.service";
 

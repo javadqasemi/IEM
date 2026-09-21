@@ -1,4 +1,4 @@
-﻿import type { ContentTypeRow } from "./api";
+import type { ContentTypeRow } from "./api";
 
 /**
  * The dashboard's navigation, as data.
