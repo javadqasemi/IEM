@@ -7,6 +7,7 @@
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
 } from "@nestjs/common";
@@ -15,6 +16,7 @@ import {
   Allow,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
   IsOptional,
@@ -94,6 +96,39 @@ export class DecisionDto {
 
 export class PublishDto {
   @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
+/**
+ * When an approved entry should go live.
+ *
+ * `@IsDateString` accepts an ISO-8601 string and nothing else, which is what
+ * the dashboard's `DatePicker` emits. It is **not** `@Type(() => Date)`: a
+ * failed date conversion yields `Invalid Date`, which is an object and passes
+ * every type check there is — so the refusal would land in `refuseSchedule` as
+ * "kein gültiger Zeitpunkt" rather than as a validation error naming the
+ * field. The rule keeps its `Number.isNaN` guard anyway, because it is a pure
+ * function that cannot assume who called it.
+ */
+export class ScheduleDto {
+  @IsDateString() at!: string;
+  @IsInt() @Min(1) expectedVersion!: number;
+}
+
+/**
+ * Takes an entry off the live site.
+ *
+ * `expectedVersion` is **required**, for the reason `UpdateProjectDto` gives:
+ * a lock a caller may omit is one every caller omits exactly once. The client
+ * always has the number — `version` is on every row a list returns — so the
+ * only thing optionality would buy is the bug.
+ *
+ * It is not the same hazard as a lost update, and it is worse in one respect:
+ * withdrawing what somebody else has just re-approved and republished looks,
+ * from the outside, like the site losing a page for no reason.
+ */
+export class UnpublishDto {
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+  @IsInt() @Min(1) expectedVersion!: number;
 }
 
 export class ListQuery {
@@ -324,6 +359,76 @@ export class ContentController {
   @RequirePermissions("content.publish")
   publish(@Body() dto: PublishDto, @CurrentUser() user: AuthUser) {
     return this.content.publish(dto.note, user);
+  }
+
+  /**
+   * Withdraws one entry from the live site (P2-3).
+   *
+   * **`content.unpublish`, not `content.publish`.** The key existed from F6
+   * and guarded nothing; splitting it is not ceremony, because the two are
+   * different authorities in the direction that matters — publishing puts
+   * approved work live, and unpublishing takes live work down, which is the
+   * one an editor can do the most damage with and the one nobody reviews.
+   *
+   * It republishes, because the site serves a snapshot: a status change alone
+   * would leave the entry reading as withdrawn in the dashboard and still
+   * visible to every visitor. See `ContentService.unpublish`.
+   */
+  @Post("entries/:id/unpublish")
+  @RequirePermissions("content.unpublish")
+  unpublish(
+    @Param("id") id: string,
+    @Body() dto: UnpublishDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.content.unpublish(id, dto.note ?? null, dto.expectedVersion, user);
+  }
+
+  /**
+   * Sets when an approved entry goes live.
+   *
+   * `PUT` rather than `POST`: setting a time twice is setting a time, and
+   * re-scheduling has to be one call rather than a cancel and a create — two
+   * audit rows for one decision reads as indecision six months later.
+   *
+   * The cron has read `scheduledAt` since F10 and **nothing ever set it**;
+   * `content.schedule` sat in `KNOWN_UNENFORCED` saying exactly that.
+   */
+  @Put("entries/:id/schedule")
+  @RequirePermissions("content.schedule")
+  schedule(
+    @Param("id") id: string,
+    @Body() dto: ScheduleDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.content.schedule(id, new Date(dto.at), dto.expectedVersion, user);
+  }
+
+  /**
+   * Clears a pending schedule.
+   *
+   * Refuses when there is none rather than succeeding quietly — the two
+   * readings of a silent success are "I stopped it" and "it already fired",
+   * and those are very different things to be wrong about while trying to stop
+   * a publication.
+   */
+  @Delete("entries/:id/schedule")
+  @RequirePermissions("content.schedule")
+  cancelSchedule(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.content.cancelSchedule(id, user);
+  }
+
+  /**
+   * Everything with a publication pending, scheduled, or due to be withdrawn.
+   *
+   * `content.read`, like `pending` above and for the same reason: "what is
+   * waiting to go out" is a question anyone working on the content has cause
+   * to ask, and the screen shows it to people who cannot press the button.
+   */
+  @Get("queue")
+  @RequirePermissions("content.read")
+  queue() {
+    return this.content.publishingQueue();
   }
 
   /**

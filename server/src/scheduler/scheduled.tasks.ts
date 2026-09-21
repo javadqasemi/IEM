@@ -4,6 +4,7 @@ import { WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { RedisService } from "../common/redis";
 import { AuditService } from "../core/audit/audit.service";
+import { EventBus } from "../core/events/event-bus";
 import { JobService } from "../core/jobs/job.service";
 import { ApplicationsService } from "../applications/applications.service";
 import { ContentService } from "../content/content.service";
@@ -43,6 +44,7 @@ export class ScheduledTasks implements OnModuleInit {
     private readonly redis: RedisService,
     private readonly audit: AuditService,
     private readonly jobs: JobService,
+    private readonly events: EventBus,
     private readonly applications: ApplicationsService,
     private readonly content: ContentService,
   ) {}
@@ -99,11 +101,6 @@ export class ScheduledTasks implements OnModuleInit {
     });
     if (!due.length) return { published: 0 };
 
-    await this.prisma.contentEntry.updateMany({
-      where: { id: { in: due.map((d) => d.id) } },
-      data: { scheduledAt: null },
-    });
-
     // A system actor rather than a user: nobody pressed the button, and
     // attributing it to the person who scheduled it would misreport when the
     // decision was taken versus when it took effect.
@@ -121,19 +118,79 @@ export class ScheduledTasks implements OnModuleInit {
         `Zeitgesteuert: ${due.length} Eintrag/Einträge`,
         system,
       );
+
+      /*
+        The schedule is cleared **after** the publish, and that ordering is the
+        whole of a silent failure this used to have (P2-3).
+
+        It used to be cleared first, one statement above the `try`. The
+        reasoning was idempotency — a retry must not publish twice — and it
+        worked, by making the retry find nothing: attempt 1 threw, attempt 2
+        saw an empty due set, returned `{ published: 0 }`, and the runner
+        marked the job **DONE**. So a scheduled publish that failed was
+        recorded as a job that succeeded, `JobFailed` never fired because the
+        job never reached `DEAD`, and the only trace was one audit row nobody
+        was looking at. The entries kept their `APPROVED` status and their
+        publication simply never happened.
+
+        Clearing afterwards inverts that: a failure leaves the rows due, so
+        the retry does the work rather than skipping it, and a genuinely
+        broken publish exhausts its attempts and reaches `DEAD` — which is the
+        state an operator is told about. Publishing twice is not a risk worth
+        trading that for: the publish is a snapshot build, so a second run over
+        the same entries produces the same document.
+      */
+      await this.prisma.contentEntry.updateMany({
+        where: { id: { in: due.map((d) => d.id) } },
+        data: { scheduledAt: null },
+      });
+
       this.logger.log(`Zeitgesteuert veröffentlicht: Snapshot ${result.version}.`);
       return { published: due.length, version: result.version };
     } catch (err) {
       /*
-        Audited, then rethrown.
+        Announced, audited, then rethrown.
 
         The throw is what the job system needs: it records the failure on the
-        row, backs off, and retries twice before giving up — which is strictly
-        better than the old behaviour of swallowing the error and retrying
-        blindly every five minutes forever. The audit row stays because a
-        failed scheduled publish is a fact about the *site*, not only about the
-        job, and the entries remain APPROVED for a person to publish by hand.
+        row, backs off, and retries twice before giving up. The audit row stays
+        because a failed scheduled publish is a fact about the *site*, not only
+        about the job, and the entries remain APPROVED and still due.
+
+        **The event has to be flushed here**, which is the one place in the
+        codebase that does that by hand. `EventBus.publish` queues onto the
+        ambient context, and the job runner calls `discard()` on a failed job —
+        correctly, because an event describing work that did not finish is a
+        lie. This event describes the *failure*, so it is the exception: it is
+        true precisely because the job failed, and leaving it in the queue
+        would throw away the only thing that tells anybody.
+
+        Three attempts raise it three times and that is deliberate rather than
+        tolerated: all three run under the job row's own correlation id, so
+        `Notification`'s `@@unique([eventKey, userId])` collapses them into one
+        row per recipient. The index does the de-duplication that a flag on
+        this class would do worse.
       */
+      this.events.publish("ContentPublishFailed", {
+        entity: "content_snapshot",
+        /*
+          There is no snapshot, which is the point — `ContentPublished` names
+          the version it created and this one has none to name. The literal is
+          what the audit row's resource id reads as, and it is stable across
+          the three attempts so the notification's idempotency key is too.
+        */
+        entityId: "scheduled",
+        payload: {
+          entries: due.length,
+          keys: due.map((d) => d.key).slice(0, 20),
+          error: (err as Error).message.slice(0, 500),
+        },
+        actor: null,
+        message:
+          `Zeitgesteuerte Veröffentlichung von ${due.length} Eintrag/Einträgen fehlgeschlagen. ` +
+          "Die Einträge bleiben freigegeben und terminiert.",
+      });
+      await this.events.flush();
+
       await this.audit.writeSync({
         action: "content.scheduled_publish_failed",
         resource: "content_snapshot",

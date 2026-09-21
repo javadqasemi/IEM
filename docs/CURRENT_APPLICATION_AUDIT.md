@@ -120,7 +120,8 @@ applications (9), auth (8), users (7), rbac (6).
 | SEO / redirects | `Redirect` model + `seo.read/update` permissions, **no module** |
 | Backups | `system.backup` permission, **no endpoint, no backup system** |
 | API keys / integrations | `system.api` permission, **nothing** |
-| Content import/export/unpublish/schedule | 4 permissions, no routes; `ContentEntry.scheduledAt` is read by the cron and set by nothing |
+| ~~Content unpublish/schedule~~ | ~~permissions with no routes; `ContentEntry.scheduledAt` is read by the cron and set by nothing~~ — **built (P2-3).** Three verbs, a pure rules file with the whole transition matrix under test, a required `expectedVersion` on both writes, a publishing queue with a derived effect per row, and an e2e suite that checks the **public site** rather than the dashboard's opinion of it |
+| Content import/export | 2 permissions, no routes. Left out of P2-3 deliberately: they are data portability rather than publishing, and need an interchange format decided |
 | Impersonation | `user.impersonate`, no flow |
 | Test e-mail send | mail is configurable from the dashboard with **no way to prove it works** |
 
@@ -231,13 +232,35 @@ mode is a blocked publish rather than a blank band on a live page.
 | Offices (Standorte) | Editable — but as *website copy*, duplicated against the `Office` table (§5.2) |
 | Departments | **Hardcoded** option list on the team type's `group` field |
 | Legal pages (Impressum / Datenschutz) | Placeholders — `README.md` → Known limitations |
-| Scheduled publishing | Half built: `scheduledAt` read by the cron, set by nothing |
-| Unpublish | Not implemented; rollback is the nearest thing |
+| Scheduled publishing | **Built (P2-3).** `PUT`/`DELETE entries/:id/schedule`, APPROVED only, a five-minute floor matching the cron's own interval |
+| Unpublish | **Built (P2-3).** `POST entries/:id/unpublish` — clears the published copy *and republishes*, because the site serves a snapshot |
+| Content import / export | Not implemented, and deliberately not part of P2-3 — see `docs/ENTERPRISE_ROADMAP.md` → P2-3 |
 
 Publishing itself is sound: editing and publishing are separate acts, the publish screen
 asks *what would the next publish produce* (`rowsForNextPublish` + `diffDocuments`) rather
 than counting `APPROVED` rows, and `jsonb` key order is canonicalised before comparison.
 Snapshots are versioned and restorable.
+
+What P2-3 added on top of that, and the reason it was not simply three routes:
+
+- **The state machine left the service.** `content/content.rules.ts` holds the transition
+  table, and `content.rules.test.ts` asserts all thirty-six pairs against an
+  independently written allow-list. The question an auditor asks — *can an editor move
+  something from IN_REVIEW straight to PUBLISHED?* — is now answered by running a test
+  rather than by reading code.
+- **Both new writes take a required `expectedVersion`**, answering 409 on a stale one.
+  The `UpdateProjectDto` argument: a lock a caller may omit is one every caller omits
+  exactly once.
+- **`GET /content/queue` derives an effect per row.** `PUBLISH` / `REPUBLISH` /
+  `WITHDRAW` / `NONE`, computed from the status and whether a published copy exists —
+  which is how a deleted-but-still-live entry becomes visible at all. It reads `DRAFT` and
+  is about to disappear from the site.
+- **A silent failure in the cron was found and fixed.** `doPublishScheduled` cleared
+  `scheduledAt` before publishing, so a failed publish's retry found nothing due and the
+  job was marked **DONE**. The failure was recorded as a success.
+- **`e2e/publishing.spec.ts` asserts against the public document**, fetched without a
+  token the way a visitor's browser fetches it, plus one browser check that the site
+  renders it. Every other assertion in the area is about an intermediate.
 
 ---
 

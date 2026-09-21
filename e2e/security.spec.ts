@@ -466,6 +466,70 @@ test.describe("the permission matrix, by verb", () => {
         expect: 403,
       },
       { who: "guest", method: "POST", path: "/backups", body: { type: "DATABASE" }, expect: 403 },
+
+      /*
+        The publishing split P2-3 makes real, and the administrator is again
+        the row that carries the argument.
+
+        The role's own description says it "veröffentlicht aber nicht". It
+        holds `content.schedule` — *when* an approved change goes live is
+        scheduling work — and it does **not** hold `content.unpublish`, which
+        takes a live page down. Those two being one key would mean the role
+        that may not publish could unpublish, which is the larger authority of
+        the two: republishing is recoverable by pressing the button again,
+        while a page that disappears is only noticed by whoever it was
+        promised to.
+
+        The ids are fabricated, so the two halves of the proof are 403 at the
+        guard and 404 in the handler — the pattern the sessions rows above
+        describe. The schedule bodies are well-formed for the same reason the
+        restore body is: a cell refused for a missing field would pass whether
+        or not the permission worked.
+      */
+      {
+        who: "administrator",
+        method: "PUT",
+        path: "/content/entries/cmzzzznotarealid0000/schedule",
+        body: { at: "2027-01-01T08:00:00.000Z", expectedVersion: 1 },
+        expect: 404,
+      },
+      {
+        who: "engineer",
+        method: "PUT",
+        path: "/content/entries/cmzzzznotarealid0000/schedule",
+        body: { at: "2027-01-01T08:00:00.000Z", expectedVersion: 1 },
+        expect: 403,
+      },
+      {
+        who: "guest",
+        method: "PUT",
+        path: "/content/entries/cmzzzznotarealid0000/schedule",
+        body: { at: "2027-01-01T08:00:00.000Z", expectedVersion: 1 },
+        expect: 403,
+      },
+      // The cell this block exists for.
+      {
+        who: "administrator",
+        method: "POST",
+        path: "/content/entries/cmzzzznotarealid0000/unpublish",
+        body: { expectedVersion: 1 },
+        expect: 403,
+      },
+      {
+        who: "management",
+        method: "POST",
+        path: "/content/entries/cmzzzznotarealid0000/unpublish",
+        body: { expectedVersion: 1 },
+        expect: 403,
+      },
+      {
+        who: "superAdmin",
+        method: "POST",
+        path: "/content/entries/cmzzzznotarealid0000/unpublish",
+        body: { expectedVersion: 1 },
+        expect: 404,
+      },
+      { who: "guest", method: "DELETE", path: "/content/entries/cmzzzznotarealid0000/schedule", expect: 403 },
     ];
 
     for (const c of cases) {

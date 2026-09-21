@@ -202,6 +202,32 @@ export type PendingChanges = {
   approved: number;
 };
 
+/**
+ * What the next publish would do to one entry, as a word the server derived.
+ *
+ * Mirrors `PublishEffect` in `server/src/content/content.rules.ts`. It is the
+ * server's answer rather than one the screen works out from `status`, because
+ * the interesting rows are exactly the ones a status cannot explain: a deleted
+ * entry that is still live reads `DRAFT` and is about to disappear from the
+ * site.
+ */
+export type PublishEffect = "PUBLISH" | "REPUBLISH" | "WITHDRAW" | "NONE";
+
+export type QueueRow = {
+  id: string;
+  key: string;
+  typeKey: string;
+  status: WorkflowState;
+  hidden: boolean;
+  deleted: boolean;
+  scheduledAt: string | null;
+  publishedAt: string | null;
+  version: number;
+  updatedAt: string;
+  updatedBy: string | null;
+  effect: PublishEffect;
+};
+
 export type Overview = {
   kpis: Record<string, number>;
   content: Record<string, number>;
@@ -287,6 +313,43 @@ export const api = {
       "/content/preview",
     ),
   pendingChanges: () => request<PendingChanges>("/content/pending"),
+
+  /* ---- Publishing: the three verbs added in P2-3 ---- */
+
+  /**
+   * Takes one entry off the live site.
+   *
+   * `expectedVersion` is required by the DTO, not optional-with-a-default. A
+   * withdrawal of what somebody else has just re-approved and republished
+   * reads, from outside, like the site losing a page for no reason — so the
+   * server answers 409 and the screen offers a reload rather than a retry.
+   *
+   * It republishes as a side effect: the public site serves a snapshot, so
+   * clearing the published copy without building a new one would leave the
+   * entry looking withdrawn here and still visible to every visitor.
+   */
+  unpublishEntry: (id: string, expectedVersion: number, note?: string) =>
+    request<{ entry: string; snapshot: number; warnings: string[] }>(
+      `/content/entries/${id}/unpublish`,
+      { method: "POST", body: { expectedVersion, note } },
+    ),
+
+  /** Sets when an approved entry goes live. `PUT`, so re-scheduling is one call. */
+  scheduleEntry: (id: string, at: string, expectedVersion: number) =>
+    request<{ id: string; scheduledAt: string }>(`/content/entries/${id}/schedule`, {
+      method: "PUT",
+      body: { at, expectedVersion },
+    }),
+
+  /** Clears a pending schedule. Refuses when there is none — see the rule. */
+  cancelSchedule: (id: string) =>
+    request<{ id: string; scheduledAt: null }>(`/content/entries/${id}/schedule`, {
+      method: "DELETE",
+    }),
+
+  /** Everything pending, scheduled or about to be withdrawn, with the effect. */
+  publishingQueue: () => request<{ items: QueueRow[] }>("/content/queue"),
+
   snapshots: () => request<SnapshotRow[]>("/content/snapshots"),
   restoreSnapshot: (version: number) =>
     request<{ version: number; restoredFrom: number }>(`/content/snapshots/${version}/restore`, {

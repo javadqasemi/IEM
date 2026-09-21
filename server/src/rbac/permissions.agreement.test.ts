@@ -26,7 +26,13 @@ import { SYSTEM_ROLES } from "./permissions.catalog";
  *    somebody an ability they have not.
  *
  * The second direction is why `KNOWN_UNENFORCED` is a list rather than a
- * comment. It has to shrink; a thirteenth entry fails the build.
+ * comment. It has to shrink: an entry that has started being enforced fails
+ * the build, and so does a key that guards nothing and is not on it.
+ *
+ * **The count deliberately is not written down here.** It used to be — "a
+ * thirteenth entry fails the build" — and it was a line behind the list twice,
+ * for the obvious reason that removing an entry and editing a sentence about
+ * how many entries there are is two edits for one fact. The list is the count.
  */
 
 const SRC = resolve(__dirname, "..");
@@ -96,8 +102,12 @@ for (const file of files) {
 const KNOWN_UNENFORCED: Record<string, string> = {
   "content.export": "no export endpoint yet",
   "content.import": "no import endpoint yet",
-  "content.schedule": "ContentEntry.scheduledAt is read by the cron job and set by nothing",
-  "content.unpublish": "no unpublish endpoint; rollback is the closest thing",
+  // `content.schedule` and `content.unpublish` **left this list in P2-3**.
+  // Both entries described the same half-built feature from opposite ends:
+  // the cron had read `scheduledAt` since F10 with nothing to write it, and
+  // withdrawing an entry had no verb at all. `PUT`/`DELETE
+  // entries/:id/schedule` and `POST entries/:id/unpublish` are the halves
+  // that were missing.
   "contentType.update": "content types are code, not data — may never be enforced",
   "media.download": "the media library links originals directly; no guarded route",
   "seo.read": "no SEO module",

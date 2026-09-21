@@ -252,6 +252,36 @@ const MAP: Partial<Record<DomainEventName, Builder>> = {
     };
   },
 
+  /**
+   * The one publishing event nobody is in the room for.
+   *
+   * A publish somebody pressed fails in front of them, with a red dialog. A
+   * *scheduled* one fails at 02:00 into a log file, and the first sign is a
+   * page that is not live when it was supposed to be — days later, found by
+   * whoever it was promised to. That asymmetry is the whole reason this entry
+   * exists rather than leaving it to `system.job_failed`.
+   *
+   * The body says the entries are still due, because the fix is usually
+   * nothing: the retry publishes them. What the reader has to know is whether
+   * to go and do it by hand.
+   */
+  ContentPublishFailed: (event) => {
+    const payload = payloadOf<{ entries: number; keys: string[]; error: string }>(event);
+    return {
+      type: "content.publish_failed" satisfies NotificationType,
+      title: "Zeitgesteuerte Veröffentlichung fehlgeschlagen",
+      body:
+        `${payload.entries} Eintrag/Einträge sollten veröffentlicht werden und wurden es nicht.` +
+        (payload.keys.length ? `\n\nBetroffen: ${payload.keys.join(", ")}` : "") +
+        `\n\nFehler: ${payload.error}` +
+        "\n\nDie Einträge bleiben freigegeben und terminiert; der nächste Versuch läuft " +
+        "automatisch. Bleibt es dabei, veröffentlichen Sie von Hand.",
+      entityType: "content_snapshot",
+      entityId: event.entityId,
+      link: "#/veroeffentlichen",
+    };
+  },
+
   /* ---- Bewerbungen --------------------------------------------------- */
   ApplicationReceived: (event) => {
     const payload = payloadOf<{ position: string; files: number }>(event);
@@ -303,6 +333,7 @@ export const PRODUCED_TYPES: NotificationType[] = [
   "content.approved",
   "content.rejected",
   "content.published",
+  "content.publish_failed",
   "application.received",
   "system.job_failed",
 ];

@@ -1,7 +1,13 @@
 import "reflect-metadata";
 import { ValidationPipe } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
-import { CreateEntryDto, UpdateEntryDto, VisibilityDto } from "./content.controller";
+import {
+  CreateEntryDto,
+  ScheduleDto,
+  UnpublishDto,
+  UpdateEntryDto,
+  VisibilityDto,
+} from "./content.controller";
 
 /**
  * The content DTOs, through the real pipe with the real options.
@@ -80,5 +86,67 @@ describe("VisibilityDto", () => {
 
   it("rejects a non-boolean", async () => {
     await expect(through({ hidden: "yes" }, VisibilityDto)).rejects.toThrow();
+  });
+});
+
+/* ================================================================== */
+/* The two publishing DTOs added in P2-3                               */
+/* ================================================================== */
+
+describe("ScheduleDto", () => {
+  it("keeps an ISO timestamp as a string", async () => {
+    const out = await through<ScheduleDto>(
+      { at: "2026-12-24T08:00:00.000Z", expectedVersion: 3 },
+      ScheduleDto,
+    );
+    expect(out.at).toBe("2026-12-24T08:00:00.000Z");
+    expect(out.expectedVersion).toBe(3);
+  });
+
+  /**
+   * The reason this is `@IsDateString` and not `@Type(() => Date)`.
+   *
+   * A failed `Date` conversion produces `Invalid Date`, which **is** a `Date`
+   * and passes every type check there is — so the refusal would surface deep
+   * in `refuseSchedule` as "kein gültiger Zeitpunkt" instead of here, naming
+   * the field.
+   */
+  it("rejects something that is not a date at all", async () => {
+    await expect(through({ at: "irgendwann", expectedVersion: 1 }, ScheduleDto)).rejects.toThrow();
+  });
+
+  /**
+   * The whole point of the lock. A stripped or defaulted version would make
+   * every schedule unconditional, which is the failure `UpdateProjectDto`
+   * describes: a lock a caller may omit is one every caller omits once.
+   */
+  it("rejects a missing expectedVersion rather than scheduling unconditionally", async () => {
+    await expect(through({ at: "2026-12-24T08:00:00.000Z" }, ScheduleDto)).rejects.toThrow();
+  });
+
+  it("rejects a non-numeric version", async () => {
+    await expect(
+      through({ at: "2026-12-24T08:00:00.000Z", expectedVersion: "3" }, ScheduleDto),
+    ).rejects.toThrow();
+  });
+});
+
+describe("UnpublishDto", () => {
+  it("keeps the note and the version", async () => {
+    const out = await through<UnpublishDto>(
+      { note: "Stelle besetzt", expectedVersion: 7 },
+      UnpublishDto,
+    );
+    expect(out.note).toBe("Stelle besetzt");
+    expect(out.expectedVersion).toBe(7);
+  });
+
+  it("allows an absent note — a withdrawal needs no explanation to be valid", async () => {
+    const out = await through<UnpublishDto>({ expectedVersion: 7 }, UnpublishDto);
+    expect(out.note).toBeUndefined();
+  });
+
+  it("rejects a missing expectedVersion", async () => {
+    await expect(through({ note: "x" }, UnpublishDto)).rejects.toThrow();
   });
 });

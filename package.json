@@ -28,6 +28,7 @@
     "e2e:budgets": "playwright test e2e/budgets.spec.ts --project=desktop",
     "e2e:security": "playwright test e2e/security.spec.ts --project=desktop",
     "e2e:versioning": "playwright test e2e/versioning.spec.ts --project=desktop",
+    "e2e:publishing": "playwright test e2e/publishing.spec.ts --project=desktop",
     "e2e:mail": "playwright test e2e/mail.spec.ts --project=desktop",
     "// e2e:backup": "Backup and recovery, including the RECOVERY DRILL — a real pg_dump, a real pg_restore into an isolated database, and the validation that proves the artifact becomes a database an application can read. Needs pg_dump/pg_restore on PATH or PG_BIN_PATH set; skips with a message otherwise. Run it on its own: it writes hundreds of megabytes and creates and drops a database, which distorts anything measured beside it.",
     "e2e:backup": "node -e \"process.env.E2E_BACKUP='1';require('child_process').execSync('npx playwright test e2e/backup.spec.ts --project=desktop',{stdio:'inherit',env:{...process.env,E2E_BACKUP:'1'}})\"",

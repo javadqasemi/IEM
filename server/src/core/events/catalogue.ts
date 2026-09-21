@@ -145,6 +145,30 @@ export type DomainEvents = {
     durationMs?: number;
   };
 
+  /* ---- Publishing, the three verbs that were missing (P2-3) -------- */
+  /**
+   * Withdrawing one entry from the live site.
+   *
+   * A *different fact* from `ContentEntryDeleted` and from hiding, which is
+   * why it is its own name: deleting removes the record, hiding is an
+   * editorial choice that survives a republish, and unpublishing clears the
+   * published copy while keeping the draft. A log that spelled all three the
+   * same way could not answer "who took this off the site".
+   */
+  ContentUnpublished: { typeKey: string; key: string };
+  ContentScheduled: { typeKey: string; key: string; at: string };
+  ContentScheduleCancelled: { typeKey: string; key: string };
+  /**
+   * A scheduled publication that did not happen.
+   *
+   * The one publishing event that **nobody is watching for** when it matters:
+   * a manual publish fails in front of the person who pressed the button, and
+   * a scheduled one fails at 02:00 into a log. It is the event the
+   * notification platform consumes, and the reason this is not merely an audit
+   * row.
+   */
+  ContentPublishFailed: { entries: number; keys: string[]; error: string };
+
   /* ---- Backup and recovery (P2-5) ---------------------------------- */
   /**
    * Five events, and the **absence of a sixth** is the design.
@@ -454,6 +478,10 @@ export const DOMAIN_EVENT_NAMES = [
   "ContentRejected",
   "ContentPublished",
   "ContentRolledBack",
+  "ContentUnpublished",
+  "ContentScheduled",
+  "ContentScheduleCancelled",
+  "ContentPublishFailed",
   "OrganisationUpdated",
   "OfficeCreated",
   "OfficeUpdated",

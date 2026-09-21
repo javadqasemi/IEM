@@ -100,3 +100,108 @@ export function DatePicker({
     </Field>
   );
 }
+
+/* ================================================================== */
+/* Date *and* time                                                     */
+/* ================================================================== */
+
+/**
+ * `<input type="datetime-local">`, on the same argument as `DateInput`.
+ *
+ * Added for scheduled publishing (P2-3), which is the first thing in the system
+ * where the hour is part of the decision — every date before it was a due date
+ * or a retention date, where midnight is as good an answer as any. "Live at
+ * 06:00 on Monday" is not the same instruction as "live on Monday".
+ *
+ * **The value is local wall-clock time, not an instant**, and that is the one
+ * trap here: `2026-12-24T08:00` carries no zone, so the caller converts. Doing
+ * it in the control would be wrong in the other direction — the string a
+ * `datetime-local` shows is by definition the one on the operator's own clock,
+ * and an editor who types 08:00 means eight o'clock where they are.
+ * `toLocalInput`/`fromLocalInput` below are that conversion, in one place
+ * rather than at each call site.
+ */
+export const DateTimeInput = forwardRef<HTMLInputElement, DateInputProps>(
+  function DateTimeInput({ value, onChange, invalid, className, ...rest }, ref) {
+    return (
+      <input
+        ref={ref}
+        type="datetime-local"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={invalid || undefined}
+        className={cn(
+          "field-input",
+          "[&::-webkit-calendar-picker-indicator]:cursor-pointer",
+          "dark:[&::-webkit-calendar-picker-indicator]:invert",
+          invalid && "field-input-error",
+          className,
+        )}
+        {...rest}
+      />
+    );
+  },
+);
+
+/** The labelled form, matching `DatePicker`. */
+export function DateTimePicker({
+  label,
+  value,
+  onChange,
+  hint,
+  error,
+  optional,
+  min,
+  max,
+  disabled,
+  id,
+}: {
+  label: string;
+  /** `yyyy-mm-ddThh:mm`, local wall-clock. Use `toLocalInput` to produce one. */
+  value: string;
+  onChange: (next: string) => void;
+  hint?: string;
+  error?: string;
+  optional?: boolean;
+  min?: string;
+  max?: string;
+  disabled?: boolean;
+  id?: string;
+}) {
+  const generated = useId();
+  const inputId = id ?? generated;
+  return (
+    <Field label={label} htmlFor={inputId} hint={hint} error={error} optional={optional}>
+      <DateTimeInput
+        id={inputId}
+        value={value}
+        onChange={onChange}
+        min={min}
+        max={max}
+        disabled={disabled}
+        invalid={Boolean(error)}
+      />
+    </Field>
+  );
+}
+
+/**
+ * An instant → the `datetime-local` string for the viewer's own clock.
+ *
+ * `toISOString().slice(0, 16)` is the obvious version and is wrong by the UTC
+ * offset — in Switzerland that is an hour in winter and two in summer, so a
+ * publication typed for 08:00 is offered back as 06:00 and somebody "corrects"
+ * it. Subtracting the offset before formatting is what makes the round trip
+ * identity.
+ */
+export function toLocalInput(date: Date): string {
+  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return shifted.toISOString().slice(0, 16);
+}
+
+/** The inverse: a `datetime-local` string → the instant it names locally. */
+export function fromLocalInput(value: string): Date {
+  // `new Date("2026-12-24T08:00")` is already parsed as local time by every
+  // engine that follows the spec — the absence of a `Z` is what decides it.
+  return new Date(value);
+}

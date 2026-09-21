@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -20,27 +21,29 @@ import {
   diffDocuments,
   rowsForNextPublish,
 } from "./snapshot.builder";
+import {
+  publishEffect,
+  refuseCancelSchedule,
+  refuseSchedule,
+  refuseStalePublish,
+  refuseTransition,
+  refuseUnpublish,
+} from "./content.rules";
 import type { AuthUser } from "../common/decorators";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
 
-/**
- * The transitions the workflow allows.
- *
- * Written as a table rather than as `if` chains in each method, because the
- * question an auditor asks is "can an editor move something from IN_REVIEW
- * straight to PUBLISHED?" and a table answers it by being read. The answer is
- * no: publishing is only reachable from APPROVED, and only by someone holding
- * `content.publish`, which in the seeded roles is Super Admin alone.
- */
-const TRANSITIONS: Record<WorkflowState, WorkflowState[]> = {
-  DRAFT: ["IN_REVIEW", "ARCHIVED"],
-  IN_REVIEW: ["APPROVED", "REJECTED", "DRAFT"],
-  APPROVED: ["PUBLISHED", "DRAFT", "REJECTED"],
-  PUBLISHED: ["DRAFT", "ARCHIVED"],
-  REJECTED: ["DRAFT", "ARCHIVED"],
-  ARCHIVED: ["DRAFT"],
-};
+/*
+  The transition table **moved to `content.rules.ts`** (P2-3).
+
+  It was already a table rather than a chain of `if`s, which was most of the
+  battle — what it was not was reachable without a database, so the one
+  question an auditor actually asks ("can an editor move something from
+  IN_REVIEW straight to PUBLISHED?") could only be answered by reading code.
+  `content.rules.test.ts` now asserts all thirty-six pairs in milliseconds,
+  against a table written out a second time so the check cannot pass by
+  comparing the source with itself.
+*/
 
 @Injectable()
 export class ContentService {
@@ -523,11 +526,255 @@ export class ContentService {
   /* ================================================================ */
 
   private assertTransition(from: WorkflowState, to: WorkflowState) {
-    if (!TRANSITIONS[from].includes(to)) {
-      throw new BadRequestException(
-        `Ein Eintrag im Status „${from}“ kann nicht direkt nach „${to}“ wechseln.`,
-      );
-    }
+    const refusal = refuseTransition(from, to);
+    if (refusal) throw new BadRequestException(refusal);
+  }
+
+  /* ================================================================ */
+  /* Publishing — the three verbs that were missing                    */
+  /* ================================================================ */
+
+  /**
+   * Withdraws one entry from the live site.
+   *
+   * ---
+   *
+   * ## Why this is two writes and a snapshot rather than a status change
+   *
+   * The public site serves a **snapshot**, not the entry table. An entry is
+   * live if it carries `publishedData` and is neither hidden nor deleted — so
+   * a status change alone would leave it reading as withdrawn in the dashboard
+   * and still visible to every visitor. That is the worst possible version of
+   * this feature, and it is the obvious implementation.
+   *
+   * So: clear the published copy, return the entry to `DRAFT`, and **build a
+   * new snapshot in the same transaction**. The draft survives, which is the
+   * point — withdrawing is not deleting — and the entry has to go through
+   * review again before it can be live, because `DRAFT → PUBLISHED` is not a
+   * transition the machine has.
+   *
+   * ## Why it is not `hidden`
+   *
+   * `hidden` is an editorial choice that survives a republish and is meant to
+   * be toggled back; the entry stays published and simply is not rendered.
+   * Unpublishing clears the published copy. "Not showing this at the moment"
+   * and "this should not be on the site" are different decisions and the log
+   * should be able to tell them apart.
+   */
+  async unpublish(
+    id: string,
+    note: string | null,
+    expectedVersion: number,
+    actor: AuthUser,
+  ) {
+    const entry = await this.prisma.contentEntry.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        key: true,
+        typeKey: true,
+        status: true,
+        version: true,
+        deletedAt: true,
+        publishedData: true,
+      },
+    });
+    if (!entry) throw new NotFoundException("Diesen Eintrag gibt es nicht.");
+
+    const stale = refuseStalePublish(entry.version, expectedVersion);
+    if (stale) throw new ConflictException(stale);
+
+    const refusal = refuseUnpublish({
+      status: entry.status,
+      hasPublishedData: entry.publishedData !== null,
+      deletedAt: entry.deletedAt,
+    });
+    if (refusal) throw new BadRequestException(refusal);
+
+    await this.prisma.contentEntry.update({
+      where: { id },
+      data: {
+        publishedData: Prisma.DbNull,
+        publishedAt: null,
+        status: WorkflowState.DRAFT,
+        // A withdrawn entry cannot still be waiting to publish itself.
+        scheduledAt: null,
+        updatedById: actor.id,
+      },
+    });
+
+    /*
+      Republished immediately, and outside the update rather than inside a
+      transaction with it.
+
+      `publish()` opens the one transaction in the system that locks the whole
+      content table, and nesting this write inside it would hold that lock
+      across a snapshot build. The window between the two is a few
+      milliseconds during which the entry is withdrawn in the table and still
+      in the last snapshot — which is the same window every publish has, and
+      the same answer: the next document is the one that counts.
+    */
+    const result = await this.publish(
+      note ?? `„${entry.key}“ zurückgezogen`,
+      actor,
+    );
+
+    this.events.publish("ContentUnpublished", {
+      entity: "content_entry",
+      entityId: entry.id,
+      payload: { typeKey: entry.typeKey, key: entry.key },
+      after: { typeKey: entry.typeKey, key: entry.key, snapshot: result.version },
+      message: `„${entry.key}“ von der Website zurückgezogen (Snapshot ${result.version}).`,
+    });
+
+    return { entry: entry.id, snapshot: result.version, warnings: result.warnings };
+  }
+
+  /**
+   * Sets when an approved entry should go live.
+   *
+   * The column and the cron have existed since F10 and **nothing ever set the
+   * column** — `content.schedule` sat in `KNOWN_UNENFORCED` saying so in as
+   * many words. This is the half that was missing.
+   *
+   * The cron (`scheduled.tasks.ts`) publishes the whole site when anything is
+   * due, which is right given the snapshot model: there is no such thing as
+   * publishing one entry in isolation. It already refuses anything that is not
+   * `APPROVED`, and `refuseSchedule` refuses to *set* a time on anything else —
+   * so a schedule that could never fire cannot be created in the first place.
+   */
+  async schedule(id: string, at: Date, expectedVersion: number, actor: AuthUser) {
+    const entry = await this.prisma.contentEntry.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        key: true,
+        typeKey: true,
+        status: true,
+        version: true,
+        deletedAt: true,
+        scheduledAt: true,
+      },
+    });
+    if (!entry) throw new NotFoundException("Diesen Eintrag gibt es nicht.");
+
+    /*
+      Checked before the status, and the order is the message.
+
+      An edit knocks an entry back to `DRAFT` (see `updateEntry`), so a
+      concurrent save turns a scheduled publish into a refusal either way —
+      but "nur freigegebene Einträge lassen sich terminieren" sends the reader
+      looking for a missing approval, while the conflict says what actually
+      happened: somebody changed it under you, go and look.
+    */
+    const stale = refuseStalePublish(entry.version, expectedVersion);
+    if (stale) throw new ConflictException(stale);
+
+    const refusal = refuseSchedule(entry, at, new Date());
+    if (refusal) throw new BadRequestException(refusal);
+
+    await this.prisma.contentEntry.update({
+      where: { id },
+      data: { scheduledAt: at, updatedById: actor.id },
+    });
+
+    this.events.publish("ContentScheduled", {
+      entity: "content_entry",
+      entityId: entry.id,
+      payload: { typeKey: entry.typeKey, key: entry.key, at: at.toISOString() },
+      after: { typeKey: entry.typeKey, key: entry.key, scheduledAt: at.toISOString() },
+      message: `„${entry.key}“ für ${at.toISOString()} terminiert.`,
+    });
+
+    return { id: entry.id, scheduledAt: at.toISOString() };
+  }
+
+  /** Clears a pending schedule. Refuses when there is none — see the rule. */
+  async cancelSchedule(id: string, actor: AuthUser) {
+    const entry = await this.prisma.contentEntry.findUnique({
+      where: { id },
+      select: { id: true, key: true, typeKey: true, scheduledAt: true },
+    });
+    if (!entry) throw new NotFoundException("Diesen Eintrag gibt es nicht.");
+
+    const refusal = refuseCancelSchedule(entry);
+    if (refusal) throw new BadRequestException(refusal);
+
+    await this.prisma.contentEntry.update({
+      where: { id },
+      data: { scheduledAt: null, updatedById: actor.id },
+    });
+
+    this.events.publish("ContentScheduleCancelled", {
+      entity: "content_entry",
+      entityId: entry.id,
+      payload: { typeKey: entry.typeKey, key: entry.key },
+      after: { typeKey: entry.typeKey, key: entry.key, was: entry.scheduledAt?.toISOString() },
+      message: `Terminierung für „${entry.key}“ aufgehoben.`,
+    });
+
+    return { id: entry.id, scheduledAt: null };
+  }
+
+  /**
+   * Everything with a publication pending or scheduled, for the publishing
+   * centre.
+   *
+   * `effect` is **derived** by `publishEffect` rather than stored, because a
+   * stored answer would be a third fact free to disagree with the two that
+   * decide it. It is what lets a row say *why* it is listed — and in
+   * particular it is what makes a deleted-but-still-live entry visible, which
+   * is the case a screen counting `APPROVED` rows is blind to.
+   */
+  async publishingQueue() {
+    const rows = await this.prisma.contentEntry.findMany({
+      where: {
+        OR: [
+          { status: { in: [WorkflowState.APPROVED, WorkflowState.IN_REVIEW] } },
+          { scheduledAt: { not: null } },
+          { deletedAt: { not: null }, publishedData: { not: Prisma.DbNull } },
+          { hidden: true, publishedData: { not: Prisma.DbNull } },
+        ],
+      },
+      orderBy: [{ scheduledAt: "asc" }, { updatedAt: "desc" }],
+      take: 200,
+      select: {
+        id: true,
+        key: true,
+        typeKey: true,
+        status: true,
+        hidden: true,
+        deletedAt: true,
+        scheduledAt: true,
+        publishedAt: true,
+        publishedData: true,
+        version: true,
+        updatedAt: true,
+        updatedBy: { select: { name: true } },
+      },
+    });
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        key: row.key,
+        typeKey: row.typeKey,
+        status: row.status,
+        hidden: row.hidden,
+        deleted: row.deletedAt !== null,
+        scheduledAt: row.scheduledAt?.toISOString() ?? null,
+        publishedAt: row.publishedAt?.toISOString() ?? null,
+        version: row.version,
+        updatedAt: row.updatedAt.toISOString(),
+        updatedBy: row.updatedBy?.name ?? null,
+        effect: publishEffect({
+          status: row.status,
+          hasPublishedData: row.publishedData !== null,
+          hidden: row.hidden,
+          deletedAt: row.deletedAt,
+        }),
+      })),
+    };
   }
 
   /*

@@ -209,16 +209,19 @@ it for website copy, where it is the right design.
 
 **Status.** Complete and correct.
 
-**Working correctly.** The transition table (`content.service.ts:33-40`) is written as data, so the
-question "can an editor go from IN_REVIEW straight to PUBLISHED?" is answered by reading it. Review
+**Working correctly.** The transition table is written as data, so the
+question "can an editor go from IN_REVIEW straight to PUBLISHED?" is answered by reading it. *(It
+has since moved out of the service into `content/content.rules.ts`, where the same question is
+answered by **running** a test over all thirty-six pairs — P2-3.)* Review
 requests point at a **version**, not an entry, so approving cannot approve whatever the entry happens
 to say later. Self-approval is refused (`content.service.ts:553`), with Super Admin explicitly exempt
 and the exemption recorded in the audit log. `pendingChanges` asks what the next publish would
 *produce* rather than counting APPROVED rows — which is the only way a deletion or a reordering shows
 up, because neither ever becomes APPROVED.
 
-**Missing.** `content.unpublish` is a permission with no endpoint. No bulk approve. No delegation or
-out-of-office reassignment.
+**Missing.** ~~`content.unpublish` is a permission with no endpoint.~~ **Built in P2-3**, together
+with scheduling — `POST entries/:id/unpublish` and `PUT`/`DELETE entries/:id/schedule`. Still
+missing: no bulk approve, and no delegation or out-of-office reassignment.
 
 **Improvements.** `rowsForNextPublish` is a pure model of what `publish()` does in its transaction,
 and `publish()` deliberately does not call it. That is a documented duplication with a stated reason;

@@ -127,6 +127,7 @@ export type NotificationType =
   | "content.approved"
   | "content.rejected"
   | "content.published"
+  | "content.publish_failed"
   | "application.received"
   | "system.job_failed";
 
@@ -219,6 +220,32 @@ export const NOTIFICATION_TYPES: NotificationDef[] = [
     severity: "SUCCESS",
     recipients: { kind: "permission", permission: "content.approve" },
     defaults: { inApp: true, email: false },
+    mandatory: false,
+  },
+
+  {
+    key: "content.publish_failed",
+    category: "Inhalte",
+    label: "Zeitgesteuerte Veröffentlichung fehlgeschlagen",
+    description:
+      "Wenn eine für einen Zeitpunkt vorgemerkte Veröffentlichung nicht durchgelaufen ist. Die Einträge bleiben freigegeben und terminiert — es ist niemand da, der es sonst merken würde.",
+    severity: "CRITICAL",
+    /*
+      `content.approve` rather than `system.health`, and the difference is who
+      is waiting.
+
+      `system.job_failed` already tells the operators that a background task
+      died; this one exists because the people who care are the **editors** —
+      somebody set a time for a page to go live, and it did not. Sending it to
+      the operators alone would tell the group that can fix the server and not
+      the group that is expecting the change.
+
+      E-mail on by default, which almost nothing else in `Inhalte` has: a
+      scheduled publish fires at an hour nobody is at a desk, so a dashboard
+      badge is read the following morning at the earliest.
+    */
+    recipients: { kind: "permission", permission: "content.approve" },
+    defaults: { inApp: true, email: true },
     mandatory: false,
   },
 

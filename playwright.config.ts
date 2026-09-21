@@ -157,6 +157,25 @@ const BACKUP = [/backup\.spec\.ts/];
 const MUTATES = [/organisation\.spec\.ts/, /sessions\.spec\.ts/];
 
 /**
+ * Publishing, once, and it is the strongest "writes" case on this list short of
+ * the backup: it **changes what the public website shows**.
+ *
+ * `publishing.spec.ts` publishes real snapshots, withdraws entries from the
+ * live document and restores an earlier one. At three widths that is three
+ * processes publishing and rolling back one document through one database —
+ * and the assertions are against the *published* state, so each project would
+ * be measuring what the other two had just done. The failures would read as a
+ * broken workflow.
+ *
+ * Nothing is lost by running it once. Every assertion is about an API
+ * response, a status or the content of the public document, except one browser
+ * check that the site renders what was published — and that check is about
+ * whether the fetch-and-swap happens at all, which does not vary with the
+ * viewport.
+ */
+const PUBLISHING = [/publishing\.spec\.ts/];
+
+/**
  * Suites that assert about the *repository* rather than about the running
  * application, and are therefore width-independent by construction.
  *
@@ -176,6 +195,7 @@ const RUN_ONCE = [
   ...NOTIFICATIONS,
   ...MAIL,
   ...BACKUP,
+  ...PUBLISHING,
 ];
 
 export default defineConfig({

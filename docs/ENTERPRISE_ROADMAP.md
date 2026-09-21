@@ -270,14 +270,21 @@ without a restart; no policy value can weaken an invariant however it reaches th
 
 ### P1-6 ○ Fourteen permissions guard nothing
 
-**Problem.** `KNOWN_UNENFORCED` lists 14 keys selectable in the role editor that no route
+**Problem.** `KNOWN_UNENFORCED` lists keys selectable in the role editor that no route
 checks. Harmless while the routes do not exist; misleading the moment one does.
+
+**The count is deliberately not written here.** It was — "lists 14 keys" — and it was a
+line behind the list twice, because removing an entry and editing a sentence about how many
+entries there are is two edits for one fact. `permissions.agreement.test.ts` is the count,
+and it now carries the same note in place of its own stale "a thirteenth entry fails the
+build".
 
 **Solution.** Not a single change — each entry retires with the module that earns it
 (jobs, SEO, backup, import/export, impersonation). The list is already the tracking
 mechanism and the test already fails on a stale entry. What this roadmap adds is the
-*order*: `job.*` with P2-1, `seo.*` with P2-4, `content.export/import/unpublish/schedule`
-with P2-3, `system.backup` with P2-5, `user.impersonate` deliberately last or never.
+*order*: `job.*` with P2-1, `seo.*` with P2-4, `content.unpublish/schedule` with P2-3
+(**done** — `content.export`/`import` stay, see there), `system.backup` with P2-5,
+`user.impersonate` deliberately last or never.
 
 **Acceptance.** The list only shrinks, and each removal lands in the commit that adds the
 route.
@@ -359,11 +366,40 @@ strategy for an event whose module ships its own board was more speculation than
 needed. It is one entry in `catalogue.ts` and one line in the listener when Aufgaben asks
 for it.
 
-### P2-3 ○ Publishing is missing four verbs
-No unpublish, no import, no export, and scheduling is half built — `scheduledAt` is read
-by the 5-minute cron and set by nothing. **Acceptance:** an editor can schedule a publish
-and see it pending; an entry can be withdrawn from the live site without a rollback; four
-permissions leave `KNOWN_UNENFORCED`.
+### P2-3 ✅ Publishing — the three verbs the workflow was missing
+
+**Problem.** The workflow read as complete and was short three verbs. `scheduledAt` had
+been read by the 5-minute cron since F10 and **set by nothing** — half a feature, with the
+half that existed being the half nobody could see. There was no way to take a page off the
+live site short of a rollback, which reverts *everything*. And `content.unpublish` and
+`content.schedule` had sat in `KNOWN_UNENFORCED` since F6 describing exactly this.
+
+**What was built.**
+
+| | |
+| --- | --- |
+| Rules | `content/content.rules.ts` — the transition table **moved out of the service**, plus `refuseUnpublish`, `refuseSchedule`, `refuseCancelSchedule`, `refuseStalePublish` and `publishEffect`. 63 tests, including the whole 6×6 matrix against an independently written allow-list |
+| API | `POST entries/:id/unpublish`, `PUT`/`DELETE entries/:id/schedule`, `GET content/queue` |
+| Locking | `expectedVersion` **required** on both writes, 409 on a stale one — the `UpdateProjectDto` argument, applied to the two operations that can make a live page disappear |
+| Events | `ContentUnpublished`, `ContentScheduled`, `ContentScheduleCancelled`, `ContentPublishFailed` |
+| Notifications | `content.publish_failed`, to `content.approve` holders with e-mail on — a scheduled publish fires at an hour nobody is at a desk |
+| Frontend | The publish screen became a publishing centre: the queue with a derived `effect` per row, a schedule dialog, and confirmations for cancelling and withdrawing |
+| Tests | +63 server unit, +7 DTO, +11 e2e (including the public site), +7 security-matrix cells |
+
+**The bug found on the way, and it was the expensive kind.** `doPublishScheduled` cleared
+`scheduledAt` *before* publishing, for idempotency. It worked by making the retry find
+nothing: attempt 1 threw, attempt 2 saw an empty due set and returned `{ published: 0 }`,
+and the runner marked the job **DONE**. A scheduled publish that failed was recorded as a
+job that succeeded, `JobFailed` never fired because the job never reached `DEAD`, and the
+entries stayed `APPROVED` with their publication simply never having happened. The clear
+now happens after the publish.
+
+**Not done, deliberately:** import and export. Both are in the same paragraph of the
+original item and neither is a *publishing* verb — they are data portability, they need a
+file format decided and a merge rule for an entry that already exists, and folding them
+into this slice would have meant designing an interchange format in a module about when
+things go live. `content.export` and `content.import` stay on `KNOWN_UNENFORCED` with that
+reason.
 
 ### P2-4 ○ SEO and redirects
 `Redirect` has a table, hits counter and enable flag; `seo.read`/`seo.update` guard

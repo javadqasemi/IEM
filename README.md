@@ -375,8 +375,12 @@ Path alias `@/*` → `src/*`, configured in both `tsconfig.json` and `vite.confi
   `REDIS_URL` is set and *not* when it is absent — a second instance would then run them too and
   could produce duplicate snapshots. The bootstrap log says which of the two is in force, and the
   System panel under Einstellungen reports Redis as configured or not.
-- **Scheduled publishing is also only half built in the other direction**: `ContentEntry.scheduledAt`
-  is read and cleared by the cron and set by nothing — no endpoint, no UI.
+- ~~**Scheduled publishing is also only half built in the other direction**: `ContentEntry.scheduledAt`
+  is read and cleared by the cron and set by nothing — no endpoint, no UI.~~
+  **Built** (`docs/ENTERPRISE_ROADMAP.md` → P2-3): an approved entry can be scheduled from the
+  publishing centre, the schedule can be moved or cancelled, and a live entry can be withdrawn
+  from the site without a rollback. The Redis caveat above still applies — it is about the *timer*,
+  not about the missing half.
 - **Notifications reach the dashboard reliably and e-mail only where SMTP is configured.**
   The platform is built (`docs/ENTERPRISE_ROADMAP.md` → P2-2) and the in-app half needs no
   configuration at all. The e-mail half goes through the same `SMTP_*`/Einstellungen

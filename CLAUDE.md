@@ -84,6 +84,7 @@ permissions and the tests, not a folder with the same names in it.
 | P2·9 | **Aktive Sitzungen** — no migration; a live session is one unrevoked `RefreshToken` row. Own sessions under `/auth/sessions` with no permission at all, somebody else's under `/users/:id/sessions` behind two new keys |
 | P3·2 | **Zwei-Faktor-Authentisierung** — four tables, AES-256-GCM at rest, a challenge that issues nothing, ten single-use recovery codes, and a re-authentication window that is not MFA-specific. The brief that commissioned it calls it *P2.2*; the roadmap has always called it P3-2 |
 | P2·2 | **Benachrichtigungen** — one platform, four tables, ten typed notifications, two channels, a bell, a centre, and the rule that **no business module sends an e-mail**. Nine domain events feed it and eight of them existed only on paper before it |
+| P2·3 | **Publishing** — the three verbs the workflow was short. The transition table moved out of the service into `content.rules.ts` and is now asserted over all thirty-six pairs; `unpublish`, `schedule` and `cancelSchedule` take a **required** `expectedVersion`; `GET /content/queue` derives an effect per row; and a cron that recorded a failed publish as a successful job was fixed |
 | P2·4 | **E-Mail-Betrieb** — a `MailProvider` seam with SMTP as its one implementation, nine sanitized failure categories, a connection test beside the test send, a template catalogue with previews, and secrets encrypted at rest under a key of their own. No migration, no new permission, and the first route to enforce `job.retry` |
 | P2·5 | **Sicherung und Wiederherstellung** — three tables, `pg_dump`/`tar`/manifest with SHA-256, verification that parses the artifacts, retention that can never leave zero recovery points, and a **recovery drill** that restores into an isolated database and reads the records back. One new permission; `system.backup` finally enforced |
 
@@ -210,6 +211,7 @@ npm run verify:all   # verify + e2e, for a release
 npm run e2e:security   # the role x verb x resource matrix, against the live API
 npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
+npm run e2e:publishing # the workflow end to end, asserted against the public document
 npm run e2e:install    # once per machine: downloads the browser
 npm run e2e:mail       # Email Operations, incl. a real SMTP transaction
 npm run e2e:backup     # Backup and recovery, incl. the RECOVERY DRILL
@@ -542,6 +544,40 @@ are approved.
 `rowsForNextPublish` is a pure model of the first two steps `publish()` performs in its
 transaction. `publish()` deliberately does not call it — it writes the rows and re-reads them. If
 the promotion rule changes, change it in both.
+
+`publishEffect` in `content.rules.ts` is the per-entry form of the same question, and it is what
+makes the invisible row visible: `PUBLISH` / `REPUBLISH` / `WITHDRAW` / `NONE`, derived from the
+status and whether a published copy exists. A deleted entry that is still live reads `DRAFT` in
+the status column and `WITHDRAW` here, which is the one an operator about to publish needs.
+
+**Unpublishing is not a status change, and the obvious implementation is the worst one.** The
+public site serves a **snapshot**, so an entry is live if it carries `publishedData`. Setting the
+status to `DRAFT` without rebuilding the document leaves the entry reading as withdrawn in the
+dashboard and **still visible to every visitor** — the exact failure this feature is bought to
+prevent, arriving silently. `ContentService.unpublish` therefore clears the published copy and then
+calls `publish()`, and `e2e/publishing.spec.ts` asserts against `GET /content/published` rather
+than against the row.
+
+It is also not `hidden`. Hiding is an editorial choice that survives a republish and toggles back;
+unpublishing clears the published copy, so the entry returns to `DRAFT` and has to go through
+review again. "Not showing this at the moment" and "this should not be on the site" are different
+decisions, and the log has to be able to tell them apart.
+
+**A schedule must be cleared *after* the publish, not before.** `doPublishScheduled` used to clear
+`scheduledAt` first, for idempotency — and it achieved it by making the retry find nothing:
+attempt 1 threw, attempt 2 saw an empty due set, returned `{ published: 0 }`, and the runner marked
+the job **DONE**. A scheduled publish that failed was recorded as a job that succeeded, `JobFailed`
+never fired because the job never reached `DEAD`, and the entries kept their approval with their
+publication simply never having happened. Publishing twice is not the risk it looks like: the
+publish is a snapshot build, so a second run over the same entries produces the same document.
+
+**`ContentPublishFailed` is the one event in the codebase flushed by hand.** `EventBus.publish`
+queues onto the ambient context and `JobRunner` calls `discard()` on a failed job — correctly,
+because an event describing work that did not finish is a lie. This event describes the *failure*,
+so it is true precisely because the job failed, and leaving it in the queue would throw away the
+only thing that tells anybody. All three attempts raise it under the job row's own correlation id,
+so `Notification`'s `@@unique([eventKey, userId])` collapses them into one row per recipient — the
+index doing the de-duplication a flag on the class would do worse.
 
 **Comparing anything read back from Postgres `jsonb` needs canonicalisation.** `jsonb` does not
 preserve key order, so a plain `JSON.stringify` comparison against a freshly built object reports
@@ -1290,7 +1326,8 @@ string, and adding a module would mean editing the table as well as `screens/tab
 
 Documented in the audit performed on this repo, still open:
 
-- **12 permissions in the catalogue are enforced on no route**, and they are a list rather than a
+- **A handful of permissions in the catalogue are enforced on no route**, and they are a list
+  rather than a
   paragraph: `KNOWN_UNENFORCED` in `server/src/rbac/permissions.agreement.test.ts`, one line each
   with what it is waiting for. A new one fails the build, and so does an entry that has started
   being enforced and was left on the list. (The audit said twelve; the test found a thirteenth on
@@ -1302,14 +1339,21 @@ Documented in the audit performed on this repo, still open:
   being minted beside it. **`system.backup` left it in P2-5**, where it was finally enforced by
   the backup module — and P2-5 minted `system.restore` beside it rather than reusing it,
   because taking a backup and replacing the production database with one are not the same
-  authority. **The prose in that file still says "a thirteenth entry fails the build" and is
-  two behind** — the list is what counts.
-- `ContentEntry.scheduledAt` is read and cleared by the publish job but set by nothing — no
-  endpoint, no UI. Scheduled publishing is half built.
+  authority. **`content.schedule` and `content.unpublish` left it in P2-3**, both describing the
+  same half-built feature from opposite ends. **Neither that file nor this line states a count any
+  more**, and that is the fix rather than an omission: the test's prose said "a thirteenth entry
+  fails the build" and was one behind, then two, because removing an entry and editing a sentence
+  about how many entries there are is two edits for one fact. Read the list.
+- ~~`ContentEntry.scheduledAt` is read and cleared by the publish job but set by nothing — no
+  endpoint, no UI.~~ **Built (P2-3)** — `PUT`/`DELETE /content/entries/:id/schedule`, `APPROVED`
+  only, with a five-minute floor matching the cron's own interval so a schedule cannot be set
+  inside the window that would make it look like it fired late. `content.export` and
+  `content.import` are the two content keys still on the unenforced list, deliberately: they are
+  data portability rather than publishing, and need an interchange format decided first.
 - ~~The `Notification` and `Redirect` Prisma models have tables and no implementation at all.~~
   **Notification is built (P2-2)** — one platform, four tables, ten types, two channels.
   `Redirect` still has a table, a hits counter, an enable flag and no implementation of any
-  kind; `seo.read` and `seo.update` are two of the fourteen unenforced keys (P2-4).
+  kind; `seo.read` and `seo.update` are two of the unenforced keys (P2-4).
 - `Department` has a table, a tree and a head, and **no API and no screen**; the team content
   type's `group` is still a hardcoded option list. Standorte got their module first because the
   website reads them; Abteilungen are `docs/ENTERPRISE_ROADMAP.md` → P2-6.

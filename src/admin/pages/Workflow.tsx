@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { Field, Textarea } from "@/shared/ui/forms";
+import { DateTimePicker, Field, Textarea, toLocalInput } from "@/shared/ui/forms";
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { type Column, DataTable } from "@/shared/ui/data";
+import { Badge } from "@/shared/ui/primitives";
 import { useToast } from "@/shared/ui/feedback";
 import { WorkflowBadge } from "@/entities/content";
-import { api, type ReviewRow } from "../lib/api";
+import { api, type PublishEffect, type QueueRow, type ReviewRow } from "../lib/api";
 import { useAuth } from "@/core/auth";
 import { Link } from "@/core/router";
 import { useMutation } from "@/shared/hooks";
@@ -278,14 +279,43 @@ export function PublishPage() {
   const [note, setNote] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [restore, setRestore] = useState<number | null>(null);
+  const [scheduling, setScheduling] = useState<QueueRow | null>(null);
+  const [cancelling, setCancelling] = useState<QueueRow | null>(null);
+  const [withdrawing, setWithdrawing] = useState<QueueRow | null>(null);
 
-  const pending = useAsync(() => api.entries({ status: "APPROVED", perPage: 200 }), []);
   const diff = useAsync(() => api.pendingChanges(), []);
+  const queue = useAsync(() => api.publishingQueue(), []);
   const snapshots = useAsync(() => api.snapshots(), []);
+  /*
+    Gated on the permission, not merely hidden.
+
+    A query the caller cannot make answers 403, and a failed query used to
+    retry itself for ever — the thousand-request bug `core/api/query.ts`
+    records. `useAsync` is the older hook and does not loop, but the rule the
+    shell learned still holds: a request nobody may make should not be sent.
+  */
+  const failures = useAsync(
+    () =>
+      can("audit.read")
+        ? api.audit({ resource: "content_snapshot", outcome: "FAILURE", perPage: 5 })
+        : Promise.resolve({ items: [], total: 0, page: 1, perPage: 5, pages: 0 }),
+    [],
+  );
   const publish = useMutation(api.publish);
   const restoreSnapshot = useMutation(api.restoreSnapshot);
+  const schedule = useMutation(api.scheduleEntry);
+  const cancelSchedule = useMutation(api.cancelSchedule);
+  const unpublish = useMutation(api.unpublishEntry);
 
-  const ready = pending.data?.items ?? [];
+  /** Everything the screen changed, in the order a reader would check it. */
+  const reloadAll = () => {
+    diff.reload();
+    queue.reload();
+    snapshots.reload();
+  };
+
+  const queued = queue.data?.items ?? [];
+  const scheduled = queued.filter((row) => row.scheduledAt !== null);
   // What publishing would actually change — not the same as how many entries
   // are approved. See `PendingChanges` in `lib/api.ts`.
   const changes = diff.data?.changes ?? [];
@@ -352,33 +382,123 @@ export function PublishPage() {
         )}
       </Card>
 
+      {/*
+        The publishing queue, which replaced a card that listed `status:
+        APPROVED` and said so in its own description: "Löschungen und
+        Umsortierungen erscheinen hier nicht". That was the honest version of
+        the same blindness the card above this one was built to fix — a
+        deletion never reaches `APPROVED`, so the one row somebody most needs
+        to see before publishing was the one a status filter could not show.
+
+        `effect` comes from the server (`publishEffect`), so the screen renders
+        an answer rather than deriving a second one that can disagree.
+      */}
       <Card
-        title={`${ready.length} freigegebene ${ready.length === 1 ? "Änderung" : "Änderungen"}`}
-        description="Bearbeitete Einträge, die den Freigabeschritt durchlaufen haben. Löschungen und Umsortierungen erscheinen hier nicht — sie stehen oben."
+        title={
+          scheduled.length
+            ? `Warteschlange — ${scheduled.length} terminiert`
+            : "Warteschlange"
+        }
+        description="Alles, was beim nächsten Veröffentlichen live geht, verschwindet oder auf einen Zeitpunkt wartet."
       >
-        {pending.loading ? (
+        {queue.loading ? (
           <Skeleton className="h-24" />
-        ) : ready.length ? (
+        ) : queued.length ? (
           <ul className="flex flex-col divide-y divide-line">
-            {ready.map((entry) => (
-              <li key={entry.id} className="flex items-center gap-3 py-2.5">
+            {queued.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
                 <Link
-                  to={`/inhalte/${entry.typeKey}/${entry.id}`}
+                  to={`/inhalte/${row.typeKey}/${row.id}`}
                   className="min-w-0 flex-1 truncate text-[14px] text-ink hover:text-brand-blue"
                 >
-                  {entry.key}
+                  {row.key}
                 </Link>
-                <span className="shrink-0 text-[12px] text-muted">{entry.typeKey}</span>
-                <WorkflowBadge state={entry.status} />
+                <span className="shrink-0 text-[12px] text-muted">{row.typeKey}</span>
+                <EffectBadge effect={row.effect} />
+                <WorkflowBadge state={row.status} />
+                {row.scheduledAt ? (
+                  <span
+                    className="shrink-0 text-[12px] tnum text-disc-water"
+                    title={formatDateTime(row.scheduledAt)}
+                  >
+                    ⏱ {formatDateTime(row.scheduledAt)}
+                  </span>
+                ) : null}
+
+                <span className="flex shrink-0 items-center gap-1">
+                  {can("content.schedule") && row.scheduledAt ? (
+                    <Button size="sm" variant="ghost" onClick={() => setCancelling(row)}>
+                      Terminierung aufheben
+                    </Button>
+                  ) : null}
+                  {can("content.schedule") && !row.scheduledAt && row.status === "APPROVED" ? (
+                    <Button size="sm" variant="ghost" onClick={() => setScheduling(row)}>
+                      Terminieren
+                    </Button>
+                  ) : null}
+                  {can("content.unpublish") && row.publishedAt && !row.deleted ? (
+                    <Button size="sm" variant="ghost" onClick={() => setWithdrawing(row)}>
+                      Zurückziehen
+                    </Button>
+                  ) : null}
+                </span>
               </li>
             ))}
           </ul>
         ) : (
           <p className="text-[14px] leading-relaxed text-muted">
-            Sobald eine Änderung freigegeben ist, erscheint sie hier.
+            Nichts in der Warteschlange. Sobald eine Änderung eingereicht oder freigegeben ist,
+            erscheint sie hier.
           </p>
         )}
       </Card>
+
+      {/*
+        Fehlgeschlagene Veröffentlichungen, and the card exists because of
+        *when* they happen rather than how often.
+
+        A publish somebody pressed fails in front of them, in a dialog. A
+        scheduled one fails at 02:00 into a log, and the first sign is a page
+        that is not live when it was promised. The notification
+        (`content.publish_failed`) is the primary channel; this is where
+        somebody looks afterwards to see whether it has happened before.
+
+        Read out of the audit log rather than out of a `Job` row, because the
+        job runner has no operator surface yet (`docs/ENTERPRISE_ROADMAP.md` →
+        P2-1) — so the card is gated on `audit.read` and simply absent for
+        somebody who cannot read the log. An empty card promising a list they
+        will never be shown would be worse than no card.
+      */}
+      {can("audit.read") ? (
+        <Card
+          title="Fehlgeschlagene Veröffentlichungen"
+          description="Zeitgesteuerte Läufe, die nicht durchgelaufen sind. Die Einträge bleiben dabei freigegeben und terminiert."
+        >
+          {failures.loading ? (
+            <Skeleton className="h-16" />
+          ) : failures.data?.items.length ? (
+            <ul className="flex flex-col divide-y divide-line">
+              {failures.data.items.map((row) => (
+                <li key={row.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2.5">
+                  <span
+                    className="w-36 shrink-0 text-[13px] text-muted"
+                    title={formatDateTime(row.createdAt)}
+                  >
+                    {relativeTime(row.createdAt)}
+                  </span>
+                  <span className="min-w-0 flex-1 text-[13px] text-ink">
+                    {row.message ?? "Ohne Meldung"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[14px] leading-relaxed text-muted">
+              Keine fehlgeschlagene Veröffentlichung aufgezeichnet.
+            </p>
+          )}
+        </Card>
+      ) : null}
 
       <Card
         title="Veröffentlichungen"
@@ -452,9 +572,7 @@ export function PublishPage() {
                 });
                 setNote("");
                 setConfirm(false);
-                pending.reload();
-                diff.reload();
-                snapshots.reload();
+                reloadAll();
               }}
             >
               Veröffentlichen
@@ -510,9 +628,204 @@ export function PublishPage() {
             );
           }
           setRestore(null);
-          snapshots.reload();
+          reloadAll();
+        }}
+      />
+
+      {/* ---- Schedule ---- */}
+      <ScheduleDialog
+        entry={scheduling}
+        onClose={() => setScheduling(null)}
+        busy={schedule.busy}
+        error={schedule.error}
+        onSchedule={async (at) => {
+          if (!scheduling) return;
+          const result = await schedule.run(scheduling.id, at, scheduling.version);
+          if (!result) return;
+          toast.success(
+            "Terminiert",
+            `„${scheduling.key}“ geht am ${formatDateTime(result.scheduledAt)} live.`,
+          );
+          setScheduling(null);
+          reloadAll();
+        }}
+      />
+
+      {/* ---- Cancel a schedule ---- */}
+      <ConfirmDialog
+        open={cancelling !== null}
+        onClose={() => setCancelling(null)}
+        busy={cancelSchedule.busy}
+        title="Terminierung aufheben?"
+        confirmLabel="Aufheben"
+        message={
+          <>
+            <p>
+              „{cancelling?.key}“ wird zum vorgemerkten Zeitpunkt nicht mehr automatisch
+              veröffentlicht.
+            </p>
+            <p className="mt-2">
+              Die Freigabe bleibt bestehen — der Eintrag geht mit der nächsten Veröffentlichung
+              von Hand live.
+            </p>
+          </>
+        }
+        onConfirm={async () => {
+          if (!cancelling) return;
+          const result = await cancelSchedule.run(cancelling.id);
+          if (result) toast.success("Aufgehoben", `„${cancelling.key}“ wartet nicht mehr.`);
+          setCancelling(null);
+          reloadAll();
+        }}
+      />
+
+      {/* ---- Unpublish ---- */}
+      <ConfirmDialog
+        open={withdrawing !== null}
+        onClose={() => setWithdrawing(null)}
+        busy={unpublish.busy}
+        destructive
+        title={`„${withdrawing?.key}“ von der Website zurückziehen?`}
+        confirmLabel="Zurückziehen"
+        message={
+          <>
+            <p>
+              Der Eintrag verschwindet <em>sofort</em> von der Website: es wird dabei ein neuer
+              Stand veröffentlicht.
+            </p>
+            <p className="mt-2">
+              Der Entwurf bleibt erhalten. Um ihn wieder live zu bringen, muss er erneut durch die
+              Freigabe — das ist der Unterschied zum Ausblenden, das sich einfach zurücknehmen
+              lässt.
+            </p>
+          </>
+        }
+        onConfirm={async () => {
+          if (!withdrawing) return;
+          const result = await unpublish.run(withdrawing.id, withdrawing.version);
+          if (result) {
+            toast.push({
+              kind: result.warnings.length ? "info" : "success",
+              title: `Zurückgezogen — Stand ${result.snapshot}`,
+              description: `„${withdrawing.key}“ ist nicht mehr auf der Website.`,
+              details: result.warnings,
+            });
+          }
+          setWithdrawing(null);
+          reloadAll();
         }}
       />
     </>
+  );
+}
+
+/* ================================================================== */
+/* Pieces                                                              */
+/* ================================================================== */
+
+/**
+ * What the next publish does to this row, as a word.
+ *
+ * `WITHDRAW` is the one that earns the component. A deleted or hidden entry
+ * that is still live reads `DRAFT` in the status badge beside it — accurate,
+ * and the opposite of what somebody about to press "Veröffentlichen" needs to
+ * know, which is that a page is about to disappear.
+ */
+const EFFECT_LABEL: Record<PublishEffect, { label: string; tone: "energy" | "water" | "bronze" | "neutral" }> = {
+  PUBLISH: { label: "geht live", tone: "energy" },
+  REPUBLISH: { label: "wird aktualisiert", tone: "water" },
+  WITHDRAW: { label: "verschwindet", tone: "bronze" },
+  NONE: { label: "keine Änderung", tone: "neutral" },
+};
+
+function EffectBadge({ effect }: { effect: PublishEffect }) {
+  const { label, tone } = EFFECT_LABEL[effect];
+  return <Badge tone={tone}>{label}</Badge>;
+}
+
+/**
+ * Picks a moment for an approved entry to go live.
+ *
+ * The `min` is five minutes out and not "now", matching `MIN_SCHEDULE_LEAD_MS`
+ * on the server: the cron ticks every five minutes, so anything nearer is
+ * "publish now" wearing a timestamp and would look, to whoever set it, like a
+ * schedule that fired late. Constraining the picker is better than explaining
+ * the refusal — the same argument `DatePicker` makes about `min`/`max`.
+ */
+function ScheduleDialog({
+  entry,
+  onClose,
+  onSchedule,
+  busy,
+  error,
+}: {
+  entry: QueueRow | null;
+  onClose: () => void;
+  onSchedule: (at: string) => void;
+  busy: boolean;
+  error: string | null;
+}) {
+  const [at, setAt] = useState("");
+  const [floor, setFloor] = useState("");
+
+  /*
+    Reset on open, and read the clock here rather than in the render body.
+
+    Two things at once, and neither is optional. The component stays mounted
+    while `entry` is null, so without this a time typed for one entry would be
+    offered back for the next one — and `Date.now()` during render is an
+    impure call the React Compiler rules refuse outright, because a re-render
+    would silently move the floor under a value the operator had already
+    chosen.
+
+    The same reset-on-open shape `ConfirmDialog` in `shared/ui/overlays` uses,
+    and it carries the same `set-state-in-effect` warning for the same reason.
+  */
+  useEffect(() => {
+    if (!entry) return;
+    setAt("");
+    setFloor(toLocalInput(new Date(Date.now() + 6 * 60_000)));
+  }, [entry?.id]);
+
+  if (!entry) return null;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Veröffentlichung terminieren"
+      description={`„${entry.key}“ (${entry.typeKey}) · Version ${entry.version}`}
+      size="sm"
+      busy={busy}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Abbrechen
+          </Button>
+          <Button variant="primary" busy={busy} disabled={!at} onClick={() => onSchedule(at)}>
+            Terminieren
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <DateTimePicker
+          label="Zeitpunkt"
+          value={at}
+          onChange={setAt}
+          min={floor}
+          hint="Ihre Ortszeit. Die Zeitsteuerung prüft alle fünf Minuten — die Veröffentlichung läuft also frühestens dann."
+        />
+        <p className="rounded-md bg-surface-2 px-4 py-3 text-[13px] leading-relaxed text-muted">
+          Zum gewählten Zeitpunkt wird die ganze Website neu veröffentlicht — alles, was bis dahin
+          freigegeben ist, geht mit. Eine Terminierung ersetzt die Freigabe nicht.
+        </p>
+        {error ? (
+          <p role="alert" className="text-[13px] font-medium text-brand-bronze">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Modal>
   );
 }
