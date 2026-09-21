@@ -131,26 +131,24 @@ export class MfaController {
    * body: the re-authentication proof travels in it, and a `DELETE` with a
    * body is a shape several proxies and one fetch polyfill quietly drop.
    */
+  /*
+    Neither of these passes a `ctx` any more.
+
+    They publish domain events rather than writing audit rows by hand, and
+    `AuditListener` takes the IP and the user agent from the request context
+    — so threading them down was carrying a value nothing read. See the note
+    on `MfaService.disable`.
+  */
   @Post("disable")
   @HttpCode(204)
-  async disable(
-    @Body() dto: ReauthenticatedDto,
-    @CurrentUser() user: AuthUser,
-    @Req() req: AuthedRequest,
-    @ClientIp() ip: string | null,
-  ) {
-    await this.mfa.disable(user, dto.reauthToken, this.ctx(req, ip));
+  async disable(@Body() dto: ReauthenticatedDto, @CurrentUser() user: AuthUser) {
+    await this.mfa.disable(user, dto.reauthToken);
   }
 
   /** A new set; the old ones stop working. Behind recent authentication. */
   @Post("recovery-codes")
   @HttpCode(200)
-  regenerate(
-    @Body() dto: ReauthenticatedDto,
-    @CurrentUser() user: AuthUser,
-    @Req() req: AuthedRequest,
-    @ClientIp() ip: string | null,
-  ) {
-    return this.mfa.regenerateRecoveryCodes(user, dto.reauthToken, this.ctx(req, ip));
+  regenerate(@Body() dto: ReauthenticatedDto, @CurrentUser() user: AuthUser) {
+    return this.mfa.regenerateRecoveryCodes(user, dto.reauthToken);
   }
 }

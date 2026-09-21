@@ -217,12 +217,71 @@ and `job.read`/`retry`/`cancel` guard nothing. **Fix:** a jobs list with state f
 payload, attempts, last error, and retry/cancel actions. **Acceptance:** a failed job can
 be diagnosed and retried from the dashboard; three permissions leave `KNOWN_UNENFORCED`.
 
-### P2-2 ○ Notifications are a table and nothing else
-`Notification` exists; `TaskOverdue` is raised and consumed by nobody; the notification
-settings group in the settings workspace is rendered as explicitly not-yet-connected.
-This is Wave 2 module 9 in `docs/roadmap.md` and the dependency is the event bus, which is
-done. **Acceptance:** at least one real consumer (overdue tasks), a bell with unread
-counts, and the settings group stops being inert.
+### P2-2 ✅ Notifications are a table and nothing else
+
+**Problem.** `Notification` existed as a Prisma model with no implementation at all, the
+settings group rendered as explicitly not-yet-connected, and two business services sent
+e-mail directly — `ApplicationsService` to a configured address, and a `sendReviewRequest`
+that was written and **called by nobody**, so the review mail simply never existed.
+
+**Solution: one platform, and no module sends an e-mail.**
+
+```
+domain event → listener → draft → dispatch()
+                                    ├─ recipients   (strategy → users → dedupe → actor rule)
+                                    ├─ channels     (invariant → organisation → person)
+                                    ├─ Notification (one row per recipient, unique per event)
+                                    ├─ Delivery     (one row per channel)
+                                    └─ job          (e-mail only, durable, retried)
+```
+
+#### The decisions worth reading
+
+| | |
+| --- | --- |
+| **Four tables, four owners** | A notification is what the *recipient* is owed; a delivery is what the *channel* did; a preference is what the *person* chose; a rule is what the *firm* chose. Folding any pair loses a question somebody asks — "has she read it" and "did the e-mail go" have different answers |
+| **`SKIPPED` is not `FAILED`** | A deliberate non-send with a reason. "We chose not to" and "we tried and could not" look identical in a log that has only one of them, and only the second is a fault |
+| **The invariant chain** | `security invariant → organisation policy → user preference`, the shape `security.policy.ts` already uses, applied on **read**. Four security notifications cannot have their in-app copy switched off by anyone; their *e-mail* copy still can, which is what keeps people from filtering the sender |
+| **The actor rule, and its exception** | Telling somebody what they just did is noise — except for the four `subject` notifications, where the actor being the account holder is precisely the case the message exists for. Somebody with your session disabling your second factor *is* you as far as the server can tell |
+| **Idempotency is an index, not a check** | `@@unique([eventKey, userId])` and a caught `P2002`. A read-then-write is the race the index settles |
+| **The loop that had to be cut** | `JobFailed` → notification → e-mail job → fails → `JobFailed`. A dying `notification.deliver` job raises nothing; the failure is still a `DEAD` row, an audit entry and a log line |
+| **No realtime stack** | There is no WebSocket or SSE infrastructure here, and adding one for a bell would be a connection per tab, a reconnection strategy and a second authentication path. A 60-second poll that pauses on a hidden tab, with `pollMs` on `useQuery` as the seam a transport later replaces |
+
+#### What became a domain event
+
+Nine events feed it, and **eight of them existed only on paper**. Four `Content*` events
+were declared in the F7 catalogue and raised by nobody; the module wrote its audit rows by
+hand. Four MFA facts were direct `audit.record` calls — against this repository's own rule,
+restated by `AuditListener`: *events describe things that happened to records; direct audit
+calls describe things that happened to nobody.* A second factor being switched off happens
+to a record.
+
+**The audit log is byte-identical either way**, which is what made the migration safe to do
+four call sites at a time: `auditActionFor` derives `content.submitted` from
+`ContentSubmitted` — the same string the hand-written call used — and
+`notifications.agreement.test.ts` pins all ten derivations to literals.
+
+`JobFailed` is new, raised once when a job goes `DEAD` rather than on every attempt.
+
+#### Delivered
+
+| | |
+| --- | --- |
+| Database | Four tables, three enums, `Notification.kind` replaced by `type` + `severity`. Migration `20260921090000_notifications`, **reviewed by hand** — the diff contained one `DROP COLUMN` and the table was verified empty first |
+| Catalogue | Ten notification types across four categories, each with a severity, a recipient strategy, defaults and a `mandatory` flag. Every one has a real producer; the agreement test checks both directions |
+| API | `GET /notifications`, `…/unread-count`, `POST …/:id/read`, `…/read-all`, `GET|PUT …/preferences`, `GET|PUT …/rules`, `GET …/deliveries` |
+| Permissions | `notification.configure`, `notification.readDeliveries` — 117 → **119**, both enforced. `KNOWN_UNENFORCED` unchanged at 14 |
+| Jobs | `mail.send` **renamed** to `notification.deliver` and given a real producer and handler. The payload is a delivery id, so no address is ever written into the queue table |
+| Mail | One shared abstraction, `MailService.sendNotification`, which reports its outcome instead of swallowing it. `sendApplicationNotice` and `sendReviewRequest` **deleted** |
+| Frontend | `features/notifications/` on the five layers; the bell in the shell's header; a centre at `/benachrichtigungen` with an inbox and a preferences tab; the firm's rules and the delivery log embedded in Einstellungen through `admin/pages/SettingsPage.tsx` |
+| Tests | +75 server unit, +40 client unit, +24 e2e, +12 security-matrix cells |
+
+**Not done, deliberately:** `TaskOverdue` is still consumed by nobody. It is the one event
+this module could plausibly have wired and did not, because a task notification needs a
+recipient strategy the catalogue does not have — *the assignee* — and inventing a fifth
+strategy for an event whose module ships its own board was more speculation than the slice
+needed. It is one entry in `catalogue.ts` and one line in the listener when Aufgaben asks
+for it.
 
 ### P2-3 ○ Publishing is missing four verbs
 No unpublish, no import, no export, and scheduling is half built — `scheduledAt` is read
@@ -406,9 +465,17 @@ P0-1  settings validation            ← blocks everything
        └─ P1-4  mail test send
   └─ P1-5  security configuration
        └─ P2-9  active sessions        ← the screen half of P1-5, done
-P2-1 jobs → P2-2 notifications → P2-3 publishing verbs → P2-4 SEO → P2-5 backup
+P2-2 notifications ✅ → P2-1 jobs → P2-3 publishing verbs → P2-4 SEO → P2-5 backup
 P2-6 departments · P2-7 screen migration · P2-8 media
 ```
+
+**Notifications went before jobs**, which is the reverse of the order above as it was
+written, and the swap is worth recording because the dependency pointed the other way
+from how it read. A jobs *screen* is an operator surface for a queue that already works;
+notifications need the queue itself, which existed, and in return they gave the jobs
+screen the one thing it was missing — `system.job_failed` now tells an operator that a
+job died, so the screen they will build is somewhere to go rather than somewhere to
+remember to look.
 
 P2-9 is drawn under P1-5 rather than in the P2 chain because it is the same piece of work
 seen from the other side: P1-5 made the security *numbers* answerable without a deploy,

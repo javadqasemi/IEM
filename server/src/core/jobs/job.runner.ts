@@ -149,6 +149,42 @@ export class JobRunner {
             status === JobStatus.DEAD ? " — endgültig" : `, Versuch ${job.attempts}`
           }: ${(err as Error).message}${dropped ? ` (${dropped} Ereignis(se) verworfen)` : ""}`,
         );
+
+        /*
+          Announced only when it has **given up**, not on every attempt.
+
+          A retry that is going to happen is not news: three messages saying
+          "something might be wrong" followed by one saying "it is" trains an
+          operator to ignore the first three, and the log already has all
+          four. `DEAD` is the state a human has to act on, so it is the state
+          that leaves the queue.
+
+          Published *after* `fail()` has written the row, and dispatched
+          immediately rather than queued — `discard()` above has just emptied
+          this context, and there is no request left to flush it. `EventBus`
+          handles that case by construction.
+        */
+        if (status === JobStatus.DEAD) {
+          this.bus.publish("JobFailed", {
+            entity: "job",
+            entityId: job.id,
+            payload: {
+              job: job.name,
+              jobId: job.id,
+              attempts: job.attempts,
+              error: (err as Error).message.slice(0, 500),
+            },
+            /*
+              The actor is the person who enqueued it, where there was one —
+              `runWithContext` above put them in scope — and `null` for a
+              scheduled tick. Left to the bus rather than passed, so a job
+              started by a cron is attributed to nobody rather than to
+              whoever happened to be last.
+            */
+            message: `Nach ${job.attempts} Versuch(en) aufgegeben.`,
+          });
+          await this.bus.flush();
+        }
       }
     });
   }

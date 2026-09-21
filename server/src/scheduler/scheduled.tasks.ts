@@ -120,7 +120,6 @@ export class ScheduledTasks implements OnModuleInit {
       const result = await this.content.publish(
         `Zeitgesteuert: ${due.length} Eintrag/Einträge`,
         system,
-        {},
       );
       this.logger.log(`Zeitgesteuert veröffentlicht: Snapshot ${result.version}.`);
       return { published: due.length, version: result.version };

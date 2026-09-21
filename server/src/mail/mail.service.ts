@@ -242,6 +242,59 @@ export class MailService {
     }
   }
 
+  /**
+   * The one send whose outcome the caller is told, and the channel every
+   * notification e-mail goes through.
+   *
+   * ---
+   *
+   * **Why it cannot use `send` above.** That one swallows a transport error on
+   * purpose, and the purpose is sound: a stored job application must not be
+   * lost because a relay refused. But a `NotificationDelivery` row exists
+   * precisely to record whether the message arrived, and a channel that always
+   * reports success would make the whole table a row of `DELIVERED` that means
+   * nothing. So this returns the outcome instead of logging it — the same
+   * reasoning `sendTest` is written with, for the same reason.
+   *
+   * **Three outcomes, not two.** `stub` is a distinct answer from `ok: false`:
+   * with no SMTP server configured the message was *written to the log*, which
+   * is neither a delivery nor a failure, and the delivery row records it as
+   * `SKIPPED` with a reason rather than as a fault somebody should investigate.
+   * Calling a stubbed send "failed" would put every developer machine's
+   * notification queue into a retry loop.
+   *
+   * It takes a subject and a body and nothing else. Rendering is
+   * `core/notifications/templates.ts`'s job — a mail service that knew what a
+   * notification was would be the second place the wording lives.
+   */
+  async sendNotification(
+    to: string,
+    subject: string,
+    text: string,
+  ): Promise<{ ok: boolean; stub: boolean; error?: string }> {
+    const mail = await this.resolve();
+    const transport = this.transportFor(mail);
+
+    if (!transport) {
+      this.logger.log(`[mail:stub] an ${to} — ${subject}\n${text}`);
+      return { ok: false, stub: true };
+    }
+
+    try {
+      await transport.sendMail({
+        from: `"${mail.fromName}" <${mail.from}>`,
+        to,
+        subject,
+        text,
+      });
+      return { ok: true, stub: false };
+    } catch (err) {
+      const error = (err as Error).message;
+      this.logger.warn(`Benachrichtigung an ${to} fehlgeschlagen: ${error}`);
+      return { ok: false, stub: false, error };
+    }
+  }
+
   sendPasswordReset(to: string, token: string): Promise<void> {
     const link = `${this.adminUrl}#/passwort-zuruecksetzen?token=${token}`;
     return this.send(
@@ -284,29 +337,28 @@ export class MailService {
     );
   }
 
-  /** To IEM: a new application has arrived. */
-  sendApplicationNotice(to: string, application: JobApplication): Promise<void> {
-    const files = (application.files as unknown as { originalName: string }[]) ?? [];
-    return this.send(
-      to,
-      `Neue Bewerbung: ${application.position}`,
-      [
-        `Position:      ${application.position}`,
-        `Name:          ${application.firstName} ${application.lastName}`,
-        `E-Mail:        ${application.email}`,
-        `Telefon:       ${application.phone ?? "—"}`,
-        `Verfügbar ab:  ${application.availableFrom ?? "—"}`,
-        "",
-        "Nachricht:",
-        application.message || "(keine)",
-        "",
-        `Anhänge (${files.length}):`,
-        ...(files.length ? files.map((f) => `  · ${f.originalName}`) : ["  (keine)"]),
-        "",
-        `Im Dashboard öffnen: ${this.adminUrl}#/bewerbungen/${application.id}`,
-      ].join("\n"),
-    );
-  }
+  /*
+    `sendApplicationNotice` and `sendReviewRequest` stood here and are **gone**
+    (P2-3).
+
+    Both were the shape the notification platform replaces: a business fact
+    turned into an e-mail, addressed from inside the service that caused it.
+    The first went to a configured shared mailbox and the second to nobody at
+    all — it was declared, written, and **called by no caller in the
+    repository**, which is the clearest possible demonstration of why a
+    per-feature mail method is the wrong seam. Nothing failed; the mail simply
+    never existed.
+
+    What replaced them is one event each — `ApplicationReceived` and
+    `ContentSubmitted` — and `core/notifications`, which resolves recipients
+    from a permission, applies the firm's rules and the person's preferences,
+    and records what each channel did.
+
+    What is left in this class is the correct residue: messages to people who
+    are **not users of the dashboard** (an applicant, somebody being invited,
+    somebody resetting a password they cannot yet sign in with) and the two
+    probes. None of them has a recipient the platform could govern.
+  */
 
   /**
    * To the applicant: confirmation of receipt.
@@ -336,17 +388,4 @@ export class MailService {
     );
   }
 
-  sendReviewRequest(to: string, entryLabel: string, requestedBy: string): Promise<void> {
-    return this.send(
-      to,
-      `Freigabe angefragt: ${entryLabel}`,
-      [
-        `${requestedBy} hat „${entryLabel}“ zur Freigabe eingereicht.`,
-        "",
-        `Zur Prüfung: ${this.adminUrl}#/freigaben`,
-        "",
-        "IEM AG",
-      ].join("\n"),
-    );
-  }
 }

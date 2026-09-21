@@ -1,4 +1,4 @@
-import {
+﻿import {
   Body,
   Controller,
   Delete,
@@ -282,6 +282,14 @@ export class ContentController {
 
   /* ---- Workflow ------------------------------------------------ */
 
+  /*
+    These three take no `@Req` and no `@ClientIp` any more.
+
+    They publish domain events rather than writing audit rows by hand, and
+    `AuditListener` reads the IP and the user agent from the request context
+    — so the two parameters were being collected, passed down two layers and
+    read by nobody. See the note on `ContentService.submitForReview`.
+  */
   @Post("entries/:id/submit")
   @HttpCode(204)
   @RequirePermissions("content.submit")
@@ -289,10 +297,8 @@ export class ContentController {
     @Param("id") id: string,
     @Body() dto: SubmitDto,
     @CurrentUser() user: AuthUser,
-    @Req() req: AuthedRequest,
-    @ClientIp() ip: string | null,
   ) {
-    return this.content.submitForReview(id, dto.message, user, this.ctx(req, ip));
+    return this.content.submitForReview(id, dto.message, user);
   }
 
   @Get("reviews")
@@ -308,23 +314,16 @@ export class ContentController {
     @Param("id") id: string,
     @Body() dto: DecisionDto,
     @CurrentUser() user: AuthUser,
-    @Req() req: AuthedRequest,
-    @ClientIp() ip: string | null,
   ) {
-    return this.content.decideReview(id, dto.decision, dto.note, user, this.ctx(req, ip));
+    return this.content.decideReview(id, dto.decision, dto.note, user);
   }
 
   /* ---- Publishing ---------------------------------------------- */
 
   @Post("publish")
   @RequirePermissions("content.publish")
-  publish(
-    @Body() dto: PublishDto,
-    @CurrentUser() user: AuthUser,
-    @Req() req: AuthedRequest,
-    @ClientIp() ip: string | null,
-  ) {
-    return this.content.publish(dto.note, user, this.ctx(req, ip));
+  publish(@Body() dto: PublishDto, @CurrentUser() user: AuthUser) {
+    return this.content.publish(dto.note, user);
   }
 
   /**

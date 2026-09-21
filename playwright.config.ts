@@ -92,6 +92,23 @@ const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/, /drawings-ui\.spec\.ts/, /auth\
 const SECOND_FACTOR = [/mfa\.spec\.ts/];
 
 /**
+ * Notifications, once, for the same three reasons together.
+ *
+ * It signs two accounts in, opens a browser context of its own, and changes
+ * a real second factor to produce the events it asserts on — which is the
+ * only fully reversible trigger in the catalogue. Running it at three widths
+ * would have three projects enrolling and resetting the same credential
+ * through one database, and the failures would surface as wrong TOTP codes
+ * two specs away.
+ *
+ * Nothing is lost by running it once: every assertion in it is about an API
+ * response, a count, a permission or the presence of a control, and
+ * `screens.spec.ts` already photographs the shell — bell included, since it
+ * is in the header of every screen — at all three widths in both themes.
+ */
+const NOTIFICATIONS = [/notifications\.spec\.ts/];
+
+/**
  * Browser suites that run once for a **third** reason: they write.
  *
  * `organisation.spec.ts` edits the company record and tries to archive the
@@ -121,6 +138,7 @@ const RUN_ONCE = [
   ...MUTATES,
   ...SOURCE_ASSERTIONS,
   ...SECOND_FACTOR,
+  ...NOTIFICATIONS,
 ];
 
 export default defineConfig({

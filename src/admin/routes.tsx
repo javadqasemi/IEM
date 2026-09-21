@@ -14,7 +14,7 @@ import {
   TransmittalDetailRoute,
   TransmittalsRoute,
 } from "@/features/drawings";
-import { SettingsRoute } from "@/features/organisation";
+import { NotificationCenterRoute } from "@/features/notifications";
 import { match } from "@/core/router";
 
 /**
@@ -402,15 +402,45 @@ export const ROUTES: Route[] = [
    */
   {
     pattern: "/einstellungen/:section",
-    permissions: ["settings.read", "organisation.read", "office.read", "system.health"],
-    component: SettingsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    /*
+      `notification.configure` and `notification.readDeliveries` joined the
+      list when Benachrichtigungen got its section (P2-3), for the reason the
+      note above gives: the eleven sections do not share a permission, and a
+      role holding only one of these two would otherwise be shut out of the
+      page its own rail row points at. `routes.test.ts` compares the menu's
+      keys against this table in both directions and is what caught it the
+      first time.
+    */
+    permissions: [
+      "settings.read",
+      "organisation.read",
+      "office.read",
+      "system.health",
+      "notification.configure",
+      "notification.readDeliveries",
+    ],
+    /**
+     * `SettingsPage`, not `SettingsRoute` directly — the wrapper is where
+     * the notification section is composed in, because
+     * `features/organisation` may not import `features/notifications`. Same
+     * arrangement as `/projekte/:id`. See `pages/SettingsPage.tsx`.
+     */
+    component: page(() => import("./pages/SettingsPage"), "SettingsPage"),
+    props: ({ section }) => ({ section }),
     label: "Einstellungen",
     parent: "/einstellungen",
   },
   {
     pattern: "/einstellungen",
-    permissions: ["settings.read", "organisation.read", "office.read", "system.health"],
-    component: SettingsRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    permissions: [
+      "settings.read",
+      "organisation.read",
+      "office.read",
+      "system.health",
+      "notification.configure",
+      "notification.readDeliveries",
+    ],
+    component: page(() => import("./pages/SettingsPage"), "SettingsPage"),
     label: "Einstellungen",
   },
   {
@@ -418,6 +448,43 @@ export const ROUTES: Route[] = [
     permissions: ["audit.read"],
     component: page(() => import("./pages/Operations"), "AuditPage"),
     label: "Audit-Log",
+  },
+  /**
+   * Benachrichtigungen — two patterns, and **no permission on either**.
+   *
+   * These are the reader's own messages and their own preferences, like
+   * `/profil`: a key every role had to hold for the bell to work is a key
+   * that means nothing, and the server takes the account from the verified
+   * token rather than from the URL. The *firm's* configuration is a
+   * different screen behind `notification.configure`, reached through
+   * `/einstellungen/benachrichtigungen`.
+   *
+   * The second pattern is read first, the same ordering `/projekte/:id/:tab`
+   * needs — `match()` is exact-length, so this is reading order rather than
+   * correctness. The settings tab has a URL of its own because the
+   * notification e-mails link straight to it: "how do I stop receiving
+   * this" has to be one click from the message, not a hunt through a
+   * workspace.
+   */
+  {
+    pattern: "/benachrichtigungen/einstellungen",
+    permissions: [],
+    component: NotificationCenterRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    /*
+      "Einstellungen", not "Benachrichtigungen". The screen publishes no
+      `usePageTitle` — it is the same component as its parent with a
+      different tab — so this label *is* the last crumb, and repeating the
+      parent's word would render the trail as
+      "Benachrichtigungen / Benachrichtigungen", which says nothing twice.
+    */
+    label: "Einstellungen",
+    parent: "/benachrichtigungen",
+  },
+  {
+    pattern: "/benachrichtigungen",
+    permissions: [],
+    component: NotificationCenterRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "Benachrichtigungen",
   },
   {
     // No permission: everyone reaches their own profile. It is also where the

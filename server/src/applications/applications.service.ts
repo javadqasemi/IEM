@@ -208,9 +208,26 @@ export class ApplicationsService {
       payload: { position: application.position, files: stored.length },
     });
 
-    // Notification and confirmation are sent after the record is committed, so
-    // a mail outage cannot lose an application that was successfully stored.
-    void this.notify(application.id);
+    /*
+      The **applicant's** confirmation, and only that one.
+
+      The internal notice used to be sent from here too, to an address in
+      `applications.notifyEmail`. It is gone: who at the firm hears about a
+      new application is a notification (`application.received`), resolved
+      from the `application.read` permission by `core/notifications`, which
+      is what the platform exists for.
+
+      This one stays a direct mail, and the boundary is worth stating because
+      it is where "everything is a notification" stops being true: **an
+      applicant is not a user.** They have no account, no inbox, no
+      preferences and nothing to mark read, and the confirmation is a
+      transactional reply to a form submission rather than a message about
+      something that happened elsewhere. Routing it through the platform
+      would mean inventing a recipient with no way to govern it.
+
+      Still after the commit, so a mail outage cannot lose a stored dossier.
+    */
+    void this.confirmToApplicant(application.id);
 
     return {
       id: application.id,
@@ -219,15 +236,13 @@ export class ApplicationsService {
     };
   }
 
-  private async notify(id: string) {
+  private async confirmToApplicant(id: string) {
     try {
       const application = await this.prisma.jobApplication.findUniqueOrThrow({ where: { id } });
-      const to = await this.settings.value<string>("applications.notifyEmail", "info@iem.ch");
-      await this.mail.sendApplicationNotice(to, application);
       await this.mail.sendApplicationConfirmation(application.email, application);
     } catch (err) {
       this.logger.error(
-        `Benachrichtigung für Bewerbung ${id} fehlgeschlagen: ${(err as Error).message}`,
+        `Bestätigung für Bewerbung ${id} fehlgeschlagen: ${(err as Error).message}`,
       );
     }
   }

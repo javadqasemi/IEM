@@ -377,6 +377,15 @@ Path alias `@/*` → `src/*`, configured in both `tsconfig.json` and `vite.confi
   System panel under Einstellungen reports Redis as configured or not.
 - **Scheduled publishing is also only half built in the other direction**: `ContentEntry.scheduledAt`
   is read and cleared by the cron and set by nothing — no endpoint, no UI.
+- **Notifications reach the dashboard reliably and e-mail only where SMTP is configured.**
+  The platform is built (`docs/ENTERPRISE_ROADMAP.md` → P2-2) and the in-app half needs no
+  configuration at all. The e-mail half goes through the same `SMTP_*`/Einstellungen
+  configuration as every other message, so on an install with no mail server every
+  e-mail delivery is recorded as **`SKIPPED` with a reason** rather than as a failure —
+  which is correct, and does mean that "why did nobody get an e-mail" is answered in
+  *Einstellungen → Benachrichtigungen → Zustellprotokoll* rather than by guessing. Only
+  two channels exist; SMS, push and webhooks are shapes the model allows and nothing
+  implements.
 - **MFA is built, and is not yet enforceable as a policy.** Enrolment, TOTP sign-in,
   recovery codes, self-service disable and an administrative reset all work
   (`docs/ENTERPRISE_ROADMAP.md` → P3-2). What is deliberately missing is the

@@ -55,7 +55,29 @@ export type JobPayloads = {
   "sync.run": { integration: string };
 
   /* ---- Housekeeping ------------------------------------------------- */
-  "mail.send": { to: string; subject: string; template: string; data: Record<string, unknown> };
+  /**
+   * One notification's e-mail, and the reason the payload is an **id** rather
+   * than a message.
+   *
+   * This slot was declared as `mail.send`, taking `{ to, subject, template,
+   * data }`, and nothing ever enqueued it. Renaming rather than adding beside
+   * it was the point: two housekeeping jobs for getting a message out, one of
+   * them live and one of them a shape somebody would eventually copy, is the
+   * declared-but-dead problem this repository keeps closing elsewhere.
+   *
+   * The payload names a `NotificationDelivery` row and nothing else, which is
+   * what makes the job **idempotent and safe to retry**: the row carries the
+   * status, the attempt count and the recipient, so a job that runs twice
+   * finds the second attempt already claimed. A payload carrying the message
+   * itself would be a second copy of it — free to drift from the notification
+   * it belongs to, and a subject line in a queue table that nobody can
+   * correct.
+   *
+   * It also means **no address is ever written into the queue**: a `Job` row
+   * is readable by anybody with database access, and the recipient is looked
+   * up at send time from the row that owns it.
+   */
+  "notification.deliver": { deliveryId: string };
 };
 
 export type JobName = keyof JobPayloads;
@@ -81,7 +103,7 @@ export const JOB_NAMES = [
   "report.run",
   "notification.digest",
   "sync.run",
-  "mail.send",
+  "notification.deliver",
 ] as const satisfies readonly JobName[];
 
 /**

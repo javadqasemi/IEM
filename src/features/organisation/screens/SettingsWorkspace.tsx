@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { Suspense, useMemo, type ReactNode } from "react";
 import { EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
 import { SideNav, type SideNavGroup } from "@/shared/ui/navigation";
 import { ModulePlaceholder } from "@/shared/ui/feedback";
@@ -41,7 +41,25 @@ import { SystemSection } from "./SystemSection";
  * the database, and a latency measurement taken on every page load measures
  * the page load.
  */
-export function SettingsWorkspace({ section: slug }: { section?: string }) {
+export function SettingsWorkspace({
+  section: slug,
+  embedded,
+}: {
+  section?: string;
+  /**
+   * Sections another feature owns, keyed by slug.
+   *
+   * Supplied by `admin/pages/SettingsPage.tsx`, which is the only layer
+   * allowed to put two features together — this one may not import
+   * `features/notifications`, and `src/architecture.test.ts` enforces it.
+   * The same shape `ProjectDetail` takes for its embedded module tabs.
+   *
+   * A declared `embedded` section with nothing supplied renders the
+   * not-built placeholder, so the map is the roadmap: the next module to
+   * claim a settings section is one line in that file.
+   */
+  embedded?: Record<string, ReactNode>;
+}) {
   const { can } = useAuth();
   const section = sectionFor(slug);
 
@@ -142,6 +160,35 @@ export function SettingsWorkspace({ section: slug }: { section?: string }) {
 
       case "system":
         return <SystemSection section={section} />;
+
+      case "embedded": {
+        const supplied = embedded?.[section.slug];
+        if (supplied) {
+          /*
+            `Suspense` because the supplier hands over a `lazy()` boundary:
+            the section belongs to a module almost nobody with these
+            permissions opens, and pulling it into the settings chunk would
+            make everybody pay for it.
+          */
+          return <Suspense fallback={<SectionSkeleton />}>{supplied}</Suspense>;
+        }
+        /*
+          Nothing supplied for a slot that declares one.
+
+          Not a "not yet built" message — the section exists and is
+          declared, so this is a wiring fault rather than a roadmap entry,
+          and saying so is what stops somebody spending an afternoon looking
+          for the feature in the backend.
+        */
+        return (
+          <ModulePlaceholder
+            title={section.title}
+            description={section.source.reason}
+            status="planned"
+            rows={3}
+          />
+        );
+      }
 
       case "placeholder":
         /*

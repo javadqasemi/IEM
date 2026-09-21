@@ -88,7 +88,8 @@ model User {
   snapshots         ContentSnapshot[]
   uploads           MediaAsset[]
   settingsChanged   Setting[]
-  notifications     Notification[]
+  notifications     Notification[]         @relation("NotificationRecipient")
+  notificationPrefs NotificationPreference[]
   listPreferences   ListPreference[]
   organisationEdits Organisation[]
   officeEdits       Office[]          @relation("OfficeUpdatedBy")
@@ -686,20 +687,174 @@ model AuditLog {
   @@index([correlationId])
 }
 
+// ---------------------------------------------------------------------
+// Notifications
+//
+// **Four tables, and the split is between four different owners.** A
+// notification is what the *recipient* is owed; a delivery is what the
+// *channel* did about it; a preference is what the *person* chose; a rule is
+// what the *firm* chose. Folding any pair together loses a question somebody
+// asks: "has she read it" and "did the e-mail go" have different answers, and
+// "I turned this off" and "we do not send this" are different sentences.
+//
+// The one concept deliberately **not** here is a template table. Templates are
+// code (`core/notifications/templates.ts`), versioned with the release that
+// changed them. A database-backed HTML template editor is an injection surface
+// and a support burden, and nothing yet needs an editor.
+//
+// `docs/data-model.md` §3.23 sketched two further columns — `groupKey` for
+// collapsing and `expiresAt` — and neither is here. `groupKey` earns its place
+// when a bulk operation can produce forty notifications at once and nothing
+// can today; `expiresAt` would be a column nothing sets, which is the
+// `Task.spentHours` mistake with a date on it.
+// ---------------------------------------------------------------------
+
+enum NotificationSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  CRITICAL
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  FAILED
+  /// A deliberate non-send: the rule or the preference said no.
+  ///
+  /// Distinct from `FAILED`, and the distinction is the whole reason the
+  /// status exists — "we chose not to" and "we tried and could not" look
+  /// identical in a log that has only one of them, and only the second is a
+  /// fault. A silence with a reason is the difference between working and
+  /// broken.
+  SKIPPED
+}
+
+/// One message owed to one person.
+///
+/// **Per recipient, not per event.** Three people being told about the same
+/// approval are three rows, because read state, the preference that produced
+/// it and the delivery outcome are all per person — a shared row would need a
+/// join table to carry any of them, which is the same four tables with an
+/// extra hop. The cost is the title and body repeated a handful of times.
+///
+/// Immutable after creation apart from `readAt`. Editing what somebody was
+/// told after telling them is the one thing an operational feed must not do.
 model Notification {
-  id        String    @id @default(cuid())
+  id         String               @id @default(cuid())
+  /// Who is owed it.
+  userId     String
+  /// The catalogue key — `security.mfa_disabled`. See `core/notifications`.
+  type       String
+  severity   NotificationSeverity
+  title      String
+  body       String?
+  /// What it is about, for a future "everything about this project" view.
+  entityType String?
+  entityId   String?
+  /// Where clicking it goes in the dashboard, as a hash route.
+  link       String?
+  /// Who caused it. Denormalised because an actor may later be deleted, and a
+  /// notification that loses the name of the person who triggered it is a
+  /// sentence with a hole in it.
+  actorId    String?
+  actorName  String?
+  /**
+   * The idempotency key: one notification per business event per recipient.
+   *
+   * Built from the event's name, entity and correlation id — see
+   * `notificationEventKey`. It is what makes a listener that runs twice, or a
+   * request that publishes the same fact twice, produce one row rather than
+   * two. The unique index is the enforcement; nothing checks first and writes
+   * after, because that is a race.
+   */
+  eventKey   String
+  readAt     DateTime?
+  createdAt  DateTime             @default(now())
+
+  user       User                   @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@unique([eventKey, userId])
+  /// The inbox query: unread first, newest first, one person.
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@index([type])
+}
+
+/// What one channel did about one notification.
+///
+/// `IN_APP` is created `DELIVERED` — the row *is* the delivery, there is
+/// nothing to wait for. `EMAIL` is created `PENDING` and a durable job moves
+/// it, which is why a failing mail server cannot slow down the click that
+/// caused the notification, and why **a failed e-mail never removes the
+/// in-app message**: they are different rows with different outcomes.
+model NotificationDelivery {
+  id             String                     @id @default(cuid())
+  notificationId String
+  channel        NotificationChannel
+  status         NotificationDeliveryStatus @default(PENDING)
+  attempts       Int                        @default(0)
+  /// Why it was skipped, or how it failed. Truncated, and never a stack trace
+  /// or an address the recipient did not give us.
+  detail         String?
+  queuedAt       DateTime                   @default(now())
+  settledAt      DateTime?
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  /// One attempt-chain per channel. A second `EMAIL` row for one notification
+  /// would be a second e-mail, which is the duplicate this whole design is
+  /// arranged to prevent.
+  @@unique([notificationId, channel])
+  @@index([status])
+}
+
+/// What one person chose, for one kind of notification.
+///
+/// **Only deviations are stored.** A user with no row gets the catalogue's
+/// default, so adding a notification type needs no backfill and the table
+/// stays the size of the opinions people have actually expressed rather than
+/// the size of the catalogue times the staff list.
+///
+/// A preference cannot switch off a mandatory security notification's in-app
+/// copy — that rule lives in `notifications.rules.ts`, applied on *read*, for
+/// the reason `security.policy.ts` clamps on read: it then covers a row that
+/// arrived by migration or by hand as well as one that came through the API.
+model NotificationPreference {
   userId    String
-  kind      String
-  title     String
-  body      String?
-  /// Where clicking it goes in the dashboard.
-  link      String?
-  readAt    DateTime?
-  createdAt DateTime  @default(now())
+  type      String
+  inApp     Boolean
+  email     Boolean
+  updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, readAt])
+  @@id([userId, type])
+}
+
+/// What the firm chose, for one kind of notification.
+///
+/// The organisation half of the same pair, and deliberately a table rather
+/// than rows in `Setting`: this is four structured fields per type, and
+/// expressing it as key/value would be forty-odd declarations in the settings
+/// catalogue for one screen.
+///
+/// Only deviations again — an absent row means the catalogue's default.
+model NotificationRule {
+  /// The catalogue key. The primary key, because there is exactly one rule per
+  /// type and a surrogate id would only make the upsert need a lookup first.
+  type      String   @id
+  enabled   Boolean  @default(true)
+  inApp     Boolean  @default(true)
+  email     Boolean  @default(false)
+  updatedAt DateTime @updatedAt
 }
 
 // =====================================================================

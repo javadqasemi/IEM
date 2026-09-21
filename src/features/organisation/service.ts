@@ -28,6 +28,22 @@ export type SectionSource =
   | { kind: "offices" }
   | { kind: "settings"; groups: readonly string[] }
   | { kind: "system" }
+  /**
+   * A section another feature owns, composed in from above.
+   *
+   * The fifth kind, added for Benachrichtigungen (P2-3), and it exists
+   * because of an arrow this workspace may not draw: `features/organisation`
+   * must not import `features/notifications`, and
+   * `src/architecture.test.ts` enforces it. So the workspace declares that a
+   * slot exists and `admin/pages/SettingsPage.tsx` — the only layer above
+   * both — supplies what goes in it. The same arrangement `ProjectDetail`
+   * uses for its embedded module tabs, and the same reason.
+   *
+   * A slug nothing supplies falls back to the not-built placeholder, so the
+   * next module to claim a section is one import and one line in that file,
+   * with nothing here changing.
+   */
+  | { kind: "embedded"; reason: string }
   | { kind: "placeholder"; reason: string };
 
 export type SettingsSection = {
@@ -197,23 +213,23 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "Benachrichtigungen",
     zone: "Betrieb",
     title: "Benachrichtigungen",
-    description: "Wer worüber informiert wird.",
-    permissions: ["settings.read"],
+    description:
+      "Welche Ereignisse eine Meldung auslösen und wer sie erhält. Persönliche Einstellungen — ob Sie selbst eine E-Mail möchten — stehen unter „Benachrichtigungen“ im Hauptmenü.",
     /**
-     * Drawn as explicitly not built, rather than omitted.
+     * `notification.configure`, not `settings.read`.
      *
-     * The `Notification` table exists and `TaskOverdue` is raised with nobody
-     * listening; the module is Wave 2 №9. An absent section would make an
-     * administrator look for the switch and conclude the system has none,
-     * which is the same failure the `pending` badge on a setting exists to
-     * prevent one level down.
+     * Deciding which events reach whom is governance, and somebody who may
+     * read the SMTP host is not thereby somebody who may switch a
+     * notification off. `notification.readDeliveries` opens it too, because
+     * the delivery log lives in the same section and is a separate
+     * authority — a role holding one of the two sees one half.
      */
+    permissions: ["notification.configure", "notification.readDeliveries"],
     source: {
-      kind: "placeholder",
+      kind: "embedded",
       reason:
-        "Das Benachrichtigungsmodul ist noch nicht gebaut. Die Tabelle und die Ereignisse " +
-        "bestehen bereits — es fehlt der Empfänger. Bis dahin gehen Hinweise zu neuen " +
-        "Bewerbungen an die Adresse unter „Bewerbungen“.",
+        "Der Abschnitt „Benachrichtigungen“ konnte nicht geladen werden. " +
+        "Das ist ein Fehler in der Zusammensetzung der Einstellungen, nicht in Ihren Rechten.",
     },
   },
   {

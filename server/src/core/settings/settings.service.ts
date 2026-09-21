@@ -111,13 +111,26 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     description: "TLS ab Verbindungsaufbau",
   },
 
-  {
-    key: "applications.notifyEmail",
-    group: "Bewerbungen",
-    type: "email",
-    value: "info@iem.ch",
-    description: "Wohin eine Benachrichtigung über neue Bewerbungen geht",
-  },
+  /*
+    `applications.notifyEmail` stood here and is **retired** (P2-3).
+
+    It was a single address — `info@iem.ch` by default — that
+    `ApplicationsService` mailed directly when a dossier arrived. Two things
+    were wrong with it and both are the reason the notification platform
+    exists: it was a hardcoded recipient in a business service, and it was a
+    shared mailbox rather than a person, so nobody's preference applied to it
+    and nothing recorded whether it arrived.
+
+    Who hears about a new application is now a **permission** —
+    `application.read` — resolved centrally, so the recipients follow the role
+    editor instead of a text field somebody has to remember to update when
+    HR changes. The e-mail still goes out by default, which is the part that
+    had to stay true on the day this shipped.
+
+    The row is not deleted by a migration: the seeder reports an orphaned
+    setting rather than dropping it, which is the documented behaviour and
+    leaves the old value visible to anybody wondering where it went.
+  */
   {
     /**
      * The P0.

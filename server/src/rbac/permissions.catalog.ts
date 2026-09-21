@@ -127,6 +127,15 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "organisation.read", "organisation.update",
       "office.read", "office.create", "office.update", "office.archive",
       "seo.read", "seo.update",
+      /*
+        Both notification keys. Deciding which events notify whom is system
+        maintenance — the same category as the SMTP host and the retention
+        period — and diagnosing a message that did not arrive is support
+        work, which is what the delivery log is for. Neither discloses the
+        firm's business the way `project.readAll` would; a delivery row
+        carries a type, a recipient and a status, and no message body.
+      */
+      "notification.configure", "notification.readDeliveries",
       "audit.read",
       "system.health",
       /*

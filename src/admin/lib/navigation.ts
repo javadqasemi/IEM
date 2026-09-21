@@ -115,6 +115,20 @@ export const ICONS = {
    * built.
    */
   transmittals: "M3.2 5.4h6.4v7.2H3.2zM11 9h4.2M13.4 7l2 2-2 2",
+  /**
+   * Benachrichtigungen: a bell — a dome on a rim with a clapper under it.
+   *
+   * The one icon in this set that is **not** in the rail: the header's bell
+   * is the way in, and this entry is `hidden`. It is declared anyway so the
+   * palette and the favourites draw the row with a mark rather than a gap,
+   * and so the shape is defined once — the header draws the same path.
+   *
+   * Same 18×18 grid and 1.4 stroke as the rest. Deliberately not an envelope:
+   * `transmittals` already rejected one on the grounds that this system sends
+   * no mail for it, and a second mail-shaped glyph would be the mismatch
+   * nobody can unsee.
+   */
+  bell: "M4.5 12.5V8a4.5 4.5 0 0 1 9 0v4.5M3.2 12.5h11.6M7.4 14.5a1.7 1.7 0 0 0 3.2 0",
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -566,7 +580,13 @@ function operationalSections(badges: {
       label: "System",
       icon: "settings",
       zone: "admin",
-      permissions: ["settings.read", "audit.read", "system.health"],
+      permissions: [
+        "settings.read",
+        "audit.read",
+        "system.health",
+        "notification.configure",
+        "notification.readDeliveries",
+      ],
       items: [
         {
           id: "settings",
@@ -593,6 +613,20 @@ function operationalSections(badges: {
           permissions: ["settings.read"],
         },
         {
+          /*
+            Stands on its own two keys rather than on `settings.read`, the
+            same way every other row in this group stands on the permission
+            the *server* checks for its section. Somebody who may read the
+            settings store and not configure notifications sees the four
+            rows above and not this one, which is the correct menu for them
+            rather than a shorter version of somebody else's.
+          */
+          id: "settings-notifications",
+          to: "/einstellungen/benachrichtigungen",
+          label: "Benachrichtigungen",
+          permissions: ["notification.configure", "notification.readDeliveries"],
+        },
+        {
           id: "settings-system",
           to: "/einstellungen/system",
           label: "System",
@@ -600,6 +634,29 @@ function operationalSections(badges: {
         },
         { id: "audit", to: "/audit", label: "Audit-Log", permissions: ["audit.read"] },
       ],
+    },
+    {
+      /**
+       * Benachrichtigungen — searchable, and **not drawn in the rail**.
+       *
+       * The bell in the header is the way in, and it is on every screen; a
+       * rail row beside it would be a second door to the same room, which is
+       * the argument that put "Mein Konto" in this zone as well. What
+       * `hidden` buys is that the palette and the favourites still find it,
+       * so somebody who types "Benachricht…" reaches the page.
+       *
+       * It is also why the brief's warning — *do not overload the SideNav
+       * with a large notification submenu* — needed no resisting: there is
+       * no submenu, because the page carries its own two tabs.
+       */
+      id: "notifications",
+      label: "Benachrichtigungen",
+      icon: "bell",
+      zone: "hidden",
+      to: "/benachrichtigungen",
+      // No key: everyone has an inbox of their own.
+      permissions: [],
+      items: [],
     },
     {
       id: "account",

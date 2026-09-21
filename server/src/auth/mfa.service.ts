@@ -7,6 +7,7 @@ import { AuditOutcome } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
+import { EventBus } from "../core/events/event-bus";
 import { EncryptionService, sha256 } from "../core/crypto/encryption.service";
 import { OrganisationService } from "../core/organisation/organisation.service";
 import { qrMatrix, type QrMatrix } from "./mfa.qr";
@@ -130,6 +131,19 @@ export class MfaService {
     private readonly audit: AuditService,
     private readonly organisation: OrganisationService,
     private readonly reauth: ReauthService,
+    /**
+     * The four state changes are **announced**, not logged (P2-3).
+     *
+     * `AuditListener` writes the row from the event, so the log is unchanged
+     * — `auditActionFor` derives `mfa.enabled` from `MfaEnabled`, which is
+     * exactly what the direct call used to write — and Notifications hears
+     * the same fact without this service knowing it exists.
+     *
+     * The **failures** still call `AuditService` directly, and correctly:
+     * `auth.mfa_failed` is an attempt, not a change, and has no record it is
+     * about. That is the rule `AuditListener` states.
+     */
+    private readonly events: EventBus,
   ) {}
 
   /* ---------------------------------------------------------------- */
@@ -338,13 +352,11 @@ export class MfaService {
       }),
     ]);
 
-    this.audit.record({
-      actor: user,
-      action: "auth.mfa_enabled",
-      resource: "user",
-      resourceId: user.id,
+    this.events.publish("MfaEnabled", {
+      entity: "user",
+      entityId: user.id,
+      payload: { email: user.email },
       message: `TOTP aktiviert, ${codes.length} Wiederherstellungscodes erzeugt.`,
-      ...ctx,
     });
 
     return { codes: codes.map(formatRecoveryCode), generatedAt: now.toISOString() };
@@ -375,7 +387,18 @@ export class MfaService {
    * live single-use passwords for an account that no longer has a second
    * factor to recover.
    */
-  async disable(user: AuthUser, reauthToken: string | undefined, ctx: Ctx): Promise<void> {
+  /*
+    No `ctx` any more, and its absence is the refactor showing.
+
+    Every method that writes its own audit row needs the request's IP and
+    user agent threaded down to it. One that publishes an event does not:
+    `AuditListener` reads them from `AsyncLocalStorage`, so the parameter
+    became dead the moment the `audit.record` call became a `publish`. The
+    same is true of `regenerateRecoveryCodes` below and of three methods in
+    `content.service.ts`. `resetFor` keeps its `ctx`, because it still has
+    one direct audit call for the case where there was nothing to reset.
+  */
+  async disable(user: AuthUser, reauthToken: string | undefined): Promise<void> {
     await this.reauth.require(user.id, reauthToken);
 
     const credential = await this.prisma.mfaCredential.findUnique({
@@ -388,13 +411,11 @@ export class MfaService {
 
     await this.clear(user.id);
 
-    this.audit.record({
-      actor: user,
-      action: "auth.mfa_disabled",
-      resource: "user",
-      resourceId: user.id,
+    this.events.publish("MfaDisabled", {
+      entity: "user",
+      entityId: user.id,
+      payload: { email: user.email },
       message: "Selbst deaktiviert. Offene Sitzungen bleiben bestehen.",
-      ...ctx,
     });
   }
 
@@ -412,7 +433,6 @@ export class MfaService {
   async regenerateRecoveryCodes(
     user: AuthUser,
     reauthToken: string | undefined,
-    ctx: Ctx,
   ): Promise<RecoveryCodeSet> {
     await this.reauth.require(user.id, reauthToken);
 
@@ -430,13 +450,11 @@ export class MfaService {
       }),
     ]);
 
-    this.audit.record({
-      actor: user,
-      action: "auth.mfa_recovery_regenerated",
-      resource: "user",
-      resourceId: user.id,
+    this.events.publish("MfaRecoveryRegenerated", {
+      entity: "user",
+      entityId: user.id,
+      payload: { email: user.email, codes: codes.length },
       message: `${codes.length} neue Wiederherstellungscodes; die bisherigen sind ungültig.`,
-      ...ctx,
     });
 
     return { codes: codes.map(formatRecoveryCode), generatedAt: new Date().toISOString() };
@@ -488,17 +506,38 @@ export class MfaService {
     });
     await this.reauth.closeAll(targetId);
 
-    this.audit.record({
-      actor,
-      action: "auth.mfa_reset_by_admin",
-      resource: "user",
-      resourceId: targetId,
-      outcome: hadFactor ? AuditOutcome.SUCCESS : AuditOutcome.FAILURE,
-      message: hadFactor
-        ? `Zweiter Faktor von ${target.email} zurückgesetzt; ${count} Sitzung(en) beendet.`
-        : `${target.email} hatte keinen zweiten Faktor; nichts zurückzusetzen.`,
-      ...ctx,
-    });
+    if (hadFactor) {
+      /*
+        An event only when there was something to reset.
+
+        A reset of an account with no second factor changed nothing, so there
+        is no fact to announce and nobody to notify — telling somebody
+        "your second factor was reset" when they never had one is a security
+        message that is not true. It is still worth a row in the log, because
+        an administrator *attempted* it, so that case keeps the direct audit
+        call below.
+
+        `entityId` is the **target**, not the actor: that is what lets the
+        notification reach the person whose account changed rather than the
+        administrator who changed it.
+      */
+      this.events.publish("MfaReset", {
+        entity: "user",
+        entityId: targetId,
+        payload: { email: target.email, byEmail: actor.email, sessionsRevoked: count },
+        message: `Zweiter Faktor von ${target.email} zurückgesetzt; ${count} Sitzung(en) beendet.`,
+      });
+    } else {
+      this.audit.record({
+        actor,
+        action: "mfa.reset",
+        resource: "user",
+        resourceId: targetId,
+        outcome: AuditOutcome.FAILURE,
+        message: `${target.email} hatte keinen zweiten Faktor; nichts zurückzusetzen.`,
+        ...ctx,
+      });
+    }
 
     return { hadFactor, sessionsRevoked: count };
   }

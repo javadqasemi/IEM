@@ -83,6 +83,7 @@ permissions and the tests, not a folder with the same names in it.
 | P1·5 | **Security policy** — four kinds of security number, and only one of them is a setting. Clamped on read, so a policy can tighten an invariant and never loosen it |
 | P2·9 | **Aktive Sitzungen** — no migration; a live session is one unrevoked `RefreshToken` row. Own sessions under `/auth/sessions` with no permission at all, somebody else's under `/users/:id/sessions` behind two new keys |
 | P3·2 | **Zwei-Faktor-Authentisierung** — four tables, AES-256-GCM at rest, a challenge that issues nothing, ten single-use recovery codes, and a re-authentication window that is not MFA-specific. The brief that commissioned it calls it *P2.2*; the roadmap has always called it P3-2 |
+| P2·2 | **Benachrichtigungen** — one platform, four tables, ten typed notifications, two channels, a bell, a centre, and the rule that **no business module sends an e-mail**. Nine domain events feed it and eight of them existed only on paper before it |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -247,7 +248,15 @@ the sign-in total against its limit. The second is only meaningful with rows —
 message** rather than failing when its data is absent, because a red suite on a
 machine that has not opted in is one people learn to ignore.
 
-**The eighth account, `mfa@iem.test`, exists for one spec and must stay that
+**The eighth account, `mfa@iem.test`, is used by two specs and is still not for
+anybody else.** `notifications.spec.ts` shares it with `mfa.spec.ts`, and the sharing is
+deliberate rather than convenient: the four security notifications are the only triggers in
+the catalogue that are **fully reversible**, so producing one means changing a second
+factor, and the account that exists for exactly that is the one to do it on. They run in
+file order — `mfa` before `notifications` — and both clean up after themselves. Everything
+in the paragraph below applies twice over.
+
+**The eighth account, `mfa@iem.test`, exists for those two specs and must stay that
 way.** `mfa.spec.ts` enables and disables a real second factor on a live
 account, and MFA state is persistent and cross-cutting: doing that to
 `gast@iem.test` breaks `sessions.spec.ts`, and doing it to the administrator
@@ -448,6 +457,28 @@ Call `AuditService.record` directly only for things that happened to *nobody* �
 denial — or for an **access** rather than a change: opening a dossier has no before and no after,
 and it is in the log because personal data was looked at.
 
+**That rule has teeth now, and applying it moved eight call sites.** Notifications (P2-2) needed
+domain signals for MFA and for the content workflow, and both were writing audit rows by hand — MFA
+out of consistency with the rest of `auth/` (which predates F8), content because the whole module
+does. Eight `audit.record` calls became `events.publish`, and **the log is byte-identical**:
+`auditActionFor` derives `content.submitted` from `ContentSubmitted` and `mfa.enabled` from
+`MfaEnabled`, which are the strings the hand-written calls used.
+`notifications.agreement.test.ts` pins all ten derivations to literals, because the day one of them
+drifts is the day three months of log splits across two spellings of one fact.
+
+Two consequences worth knowing before touching those services. **The failures stayed direct** —
+`auth.mfa_failed` is an attempt, not a change. And **a method that publishes needs no `ctx`**:
+`AuditListener` reads the IP and the user agent from `AsyncLocalStorage`, so five methods and three
+controller handlers lost parameters that nothing read. A `ctx` on a method that only publishes is a
+sign the migration was done halfway.
+
+**No business module sends an e-mail.** A module announces a fact; `core/notifications` decides who
+cares and how they are told. `MailService` keeps only the messages whose recipient is **not a user
+of the dashboard** — an applicant's confirmation, an invitation, a password reset — because those
+have no inbox, no preferences and nothing to mark read, so there is nothing for the platform to
+govern. `sendApplicationNotice` and `sendReviewRequest` are gone; the second had been written and
+called by nobody, which is what a per-feature mail method looks like once nobody is watching.
+
 Anything slow goes through `JobService.enqueue` (`core/jobs`). A job is durable, retried with a
 capped backoff, attributable — it inherits the correlation id and actor of the request that queued
 it — and visible as a row, which is the property an operator needs when an export never arrives.
@@ -602,6 +633,50 @@ workspace was a dialog that closes on save, so all three were invisible:
   Enter working, since a form with no submit button does not submit implicitly once it has
   more than one field.
 
+**A notification's channels are resolved in one order and clamped on read.**
+`security invariant → organisation policy → user preference`, the shape
+`security.policy.ts` gives its numbers. Four types are `mandatory` and their **in-app copy
+cannot be switched off by the firm or by the person** — a notification you can be talked
+out of receiving is not a security control, it is a courtesy an attacker turns off first.
+The API refuses such a write *and* `resolveChannels` re-applies the rule on read, which is
+what covers a row that arrived from a migration or a hand-edit. Their **e-mail** copy stays
+configurable, deliberately: refusing that is how somebody filters the sender, which would
+take the security messages with it.
+
+**The actor is removed from the recipients — except where the notification is about their
+own account.** `suppressesActor` is false only for the `subject` strategy, and the
+exception is the whole security argument: if somebody with your session disables your
+second factor, they *are* you as far as the server can tell, so suppressing the message
+because "the actor already knows" would suppress precisely the case it exists for.
+
+**A skipped delivery is not a failed one.** `SKIPPED` records a deliberate non-send with a
+reason — a preference, a rule, or no SMTP server configured. Collapsing it into `FAILED`
+would put a wall of amber in front of an operator on every development machine, which is
+how somebody learns to ignore the colour that matters. It is also why the stub case does
+**not** throw: a retried send that cannot succeed fills the queue.
+
+**`JobFailed` must never be able to notify about the notification channel.**
+`SELF_INFLICTED` in `notifications.listener.ts` is one `Set` with one entry, and it is what
+stops a mail outage becoming an unbounded queue of mail about mail: a dying
+`notification.deliver` job raises no notification. The failure is still a `DEAD` row, an
+audit entry and a log line — the three places an operator looks — and the one channel that
+cannot report its own failure is the channel that is broken.
+
+**`Notification` is per recipient, and idempotency is an index rather than a check.**
+`@@unique([eventKey, userId])`, with the key built from the event's name, entity and
+**correlation id** — so one fact reaching three people is three rows, the same fact
+reaching one person twice is one row, and two *genuine* occurrences in two requests are two
+rows. That last part is why the correlation id is in the key: without it, submitting the
+same entry twice would be swallowed for ever, which is a worse failure than a duplicate
+because it is silent and permanent. Nothing reads the key to decide whether to write; the
+insert is attempted and `P2002` is the answer.
+
+**The notification centre must never take its own data off screen** — the same `invalidate`
+trap as `MfaCard`, and worth repeating because the shape recurs: every mutation in
+`useNotifications.ts` primes the known outcome, and the unread count in particular is
+primed rather than invalidated so the badge does not vanish and come back under the cursor
+that just clicked it.
+
 **A second factor issues nothing until it has been shown, and the type is what
 enforces that.** `AuthService.login` returns a discriminated union —
 `{ kind: "session", … }` or `{ kind: "mfa", challenge }` — rather than a
@@ -751,6 +826,37 @@ wins, and a child that is not a single element is rendered untouched.
 **`useId` contains colons, so `#id` is not a selector.** React produces `:r1:`, a colon is a
 pseudo-class, and `#:r1:-error` matches nothing — Playwright reports it as an element that is not
 visible, which reads as a missing error message. Use `[id="…"]`.
+
+**A scrollable region needs keyboard access, and axe only says so when the region has nothing
+focusable in it.** `DataTable`'s pane is `overflow-x-auto`, which for a table wider than the
+viewport is a region a mouse can scroll and a keyboard cannot reach — WCAG 2.1.1, and axe's
+`scrollable-region-focusable` at *serious*. It sat there for the whole dashboard's life because
+the rule fires only when the region **both** overflows **and** contains no focusable element, and
+nearly every list here has a link or a button in its rows, which lets the keyboard in by accident.
+The Zustellprotokoll is six columns of plain text with no control in any row, so it was the first
+table to meet both conditions — at tablet and phone widths only, which is why three widths is not
+three times the same run. The fix is in the shared component and is **measured**: a `ResizeObserver`
+watches the pane and the table inside it, and `tabIndex`/`role="region"`/`aria-label` appear only
+while `scrollWidth > clientWidth`. Unconditional `tabIndex={0}` would have been one line and would
+have put a tab stop in front of every list in the dashboard, most of which have nothing to scroll to.
+
+**A breadcrumb trail may repeat a word, so `key={item.label}` is a bug waiting for the second
+two-segment route.** The last crumb's label comes from the screen through `usePageTitle` and the
+middle one from the route's `parent`, so until the screen has mounted the two are the *same
+string* — a transient duplicate on every `/x/y` route, made permanent on one where the child
+publishes no title of its own. React answers with *"Encountered two children with the same key"*,
+which is a console **error**, which `screens.spec.ts` fails the run over — so the symptom is six
+red screen tests naming no screen. `Breadcrumb` keys by index now, which is right because the
+list is positional and rebuilt from the route on every navigation. The other half was real too:
+`/benachrichtigungen/einstellungen` was labelled "Benachrichtigungen" under a parent of the same
+name, and a trail that says one word twice is worth fixing whatever React thinks of it.
+
+**A duplicate `name` in `SCREENS` is not a harmless copy-paste.** Screenshots are filed by name, so
+the second entry overwrites the first one's image; `a11y.spec.ts` keys its report by name, so one
+screen's violations come back **twice under one id** and read as two separate faults. P2-3 added a
+rebuilt section beside the stale entry it was meant to replace rather than over it, and the doubled
+axe report is what sent the first hour looking for a second scroll container that did not exist.
+`screens.spec.ts` now asserts the list has no duplicate name before it navigates anywhere.
 
 **A failed query used to retry itself forever.** `load` settles → `notify` → every subscriber's
 `sync` → `load` again, and a failed entry was never *fresh*. One rail badge that answered 403 made
@@ -1006,6 +1112,16 @@ Writes are guarded by `project.update` and friends, which are firm-wide — some
 directions, and counts a `permissions.has(...)` check inside a handler as enforcement — those are
 the row- and field-level `◐` rules in `docs/permissions.md` §4, and `settings.secrets` is one.
 
+**`notification.configure` and `notification.readDeliveries` are two keys, and reading one's
+own inbox is neither.** Configuring which events notify whom is governance and is not folded
+into `settings.update`; reading the delivery log is a disclosure about *people* rather than
+about policy — who was told what and when — so it is separate again, the way `readSessions`
+is separate from `revokeSessions`. A person's own notifications and preferences carry **no
+key at all**, like `/auth/me`, `/auth/sessions` and `/auth/mfa`: the routes take the account
+from the verified token, and a key every role had to hold for the bell to work would mean
+nothing. `routes.test.ts` names the three open routes explicitly rather than allowing any,
+because the next one added without thinking is the one that should have had a permission.
+
 **`user.resetMfa` exists and `user.readMfa` deliberately does not.** Clearing somebody
 else's second factor is an intervention — it removes a control from an account that is not
 the caller's and ends every session it holds — so it gets a key, the same argument that
@@ -1059,8 +1175,10 @@ Documented in the audit performed on this repo, still open:
   says "a thirteenth entry fails the build" and is one behind** — the list is what counts.
 - `ContentEntry.scheduledAt` is read and cleared by the publish job but set by nothing — no
   endpoint, no UI. Scheduled publishing is half built.
-- The `Notification` and `Redirect` Prisma models have tables and no implementation at all.
-  `docs/data-model.md` §3.23 makes Notification a real domain; nothing reads it yet.
+- ~~The `Notification` and `Redirect` Prisma models have tables and no implementation at all.~~
+  **Notification is built (P2-2)** — one platform, four tables, ten types, two channels.
+  `Redirect` still has a table, a hits counter, an enable flag and no implementation of any
+  kind; `seo.read` and `seo.update` are two of the fourteen unenforced keys (P2-4).
 - `Department` has a table, a tree and a head, and **no API and no screen**; the team content
   type's `group` is still a hardcoded option list. Standorte got their module first because the
   website reads them; Abteilungen are `docs/ENTERPRISE_ROADMAP.md` → P2-6.
@@ -1074,9 +1192,12 @@ Opened by Wave 2 module 1, and each is a deliberate stop rather than an oversigh
   `docs/data-model.md` §3.9 lists it and Wave 2 module 14 (Time Tracking) fills it; nothing seeds
   it and no rule reads it, so a reconciler that stopped working cannot hide behind a plausible
   number.
-- **`TaskOverdue` is raised and nothing consumes it.** `tasks.flagOverdue` runs at 06:00 and
-  announces once per due date; Notifications is Wave 2 module 9. The event exists now so that
-  module is a consumer rather than a reason to revisit this one.
+- **`TaskOverdue` is raised and nothing consumes it — still**, and P2-2 is where that stopped
+  being about the platform and started being about the catalogue. Notifications exists and
+  consumes nine events; this is not one of them, because a task notification needs a
+  recipient strategy the catalogue does not have — **the assignee** — and inventing a fifth
+  strategy for one event was more speculation than the slice needed. It is one entry in
+  `core/notifications/catalogue.ts` and one line in the listener the day Aufgaben asks.
 - **`Comment` is polymorphic and only Tasks writes it.** The table takes `entity`/`entityId`, so
   Meetings and Drawings call it through their own repositories when they arrive. Editing a comment
   is not implemented — `editedAt` is a column nothing sets.

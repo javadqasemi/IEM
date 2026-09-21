@@ -517,6 +517,68 @@ disruptive act.
 uses: it holds `user.read`, so the cell separates *"may look at the user
 list"* from *"may strip somebody's second factor"*.
 
+## 3.14 Benachrichtigungen — two keys, and the third that is not there
+
+Built with the notification platform (`docs/ENTERPRISE_ROADMAP.md` → P2-2).
+
+| Resource | Actions | Notes |
+| --- | --- | --- |
+| `notification` | `configure`, `readDeliveries` | No `read`, no `update`, no `delete` — see below |
+
+**`configure` is not `settings.update`.** Which events notify whom is a
+governance decision about the firm, and somebody who may set the SMTP host is
+not thereby somebody who may decide that a security notification stops being
+sent. The same argument that split `organisation.updateLegal` from
+`organisation.update`: one screen, two authorities.
+
+**`readDeliveries` is not `configure`.** The pair splits the way
+`user.readSessions` and `user.revokeSessions` do, with the halves the other
+way round: configuring says what *would* happen, and the delivery log says
+who was told, when, and whether it arrived. The second is a disclosure about
+people rather than about policy. The log carries a type, a recipient, a
+status and a reason and **no titles and no bodies** — an operator diagnosing
+SMTP does not need to read everybody's messages, and a delivery log that
+doubled as a way to do so would be a different feature with a different key.
+
+**There is deliberately no key for one's own notifications.** Reading them,
+marking them read and setting personal preferences are operations on the
+caller's own account, like `/auth/me`, `/auth/sessions` and `/auth/mfa`. A key
+every role had to be granted for the bell to work is a key that means nothing.
+The scope is the control: every one of those routes takes the account from the
+verified token and names no user, so there is no parameter through which one
+person could reach another's inbox.
+
+### By role
+
+| Key | Super Admin | Mgmt | Admin | PM | Engineer | HR | Finance | Guest |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| `notification.configure` | ● | ○ | **●** | ○ | ○ | ○ | ○ | ○ |
+| `notification.readDeliveries` | ● | ○ | **●** | ○ | ○ | ○ | ○ | ○ |
+
+`administrator` holds both: deciding which events notify whom is system
+maintenance — the same category as the SMTP host and the retention period —
+and diagnosing a message that did not arrive is support work. Neither
+discloses the firm's business the way `project.readAll` would.
+
+`management` is the interesting refusal and the one `e2e/security.spec.ts`
+uses for both cells: it holds `system.health` and `audit.read`, so it can see
+how the installation is running, and deciding what the installation *says to
+people* is a different authority from watching it.
+
+### The invariant that no permission can override
+
+Four notification types are **mandatory** — the second factor being enabled,
+disabled, reset, or its recovery codes regenerated. Their in-app copy cannot
+be switched off by the firm holding `notification.configure`, nor by the
+recipient, nor by a row edited directly in the database: `resolveChannels`
+re-applies the rule on **read**, which is the same arrangement
+`security.policy.ts` uses to stop a policy weakening an invariant.
+
+That is not an RBAC rule and it is deliberately not expressed as one. A
+permission answers *who may*; this answers *what may not be done at all*, and
+a control an administrator can switch off is a control an attacker who
+reaches an administrator session switches off first.
+
 ## 4. Row-level rules (`◐`)
 
 The guard is coarse and the service is fine-grained. The `◐` cells resolve to

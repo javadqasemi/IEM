@@ -29,6 +29,29 @@ test.describe("screens", () => {
     await signIn();
   });
 
+  /**
+   * The list itself, before anything is rendered from it.
+   *
+   * A duplicate `name` is not the harmless thing it looks like. Screenshots
+   * are filed by name, so the second entry silently overwrites the first
+   * one's image; `a11y.spec.ts` keys its report by name, so one screen's
+   * violations are reported twice under a single id and read as two separate
+   * faults. Both happened in one run of P2-3, where a rebuilt section was
+   * added beside the stale entry it was meant to replace rather than over it.
+   * It navigates to nothing and asserts against the list in memory, so it
+   * costs a millisecond and catches a copy-paste.
+   */
+  test("the screen list has no duplicate name", async () => {
+    const seen = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const screen of SCREENS) {
+      const first = seen.get(screen.name);
+      if (first) clashes.push(`${screen.name}: ${first} and ${screen.path}`);
+      else seen.set(screen.name, screen.path);
+    }
+    expect(clashes.join("\n"), "duplicate SCREENS names").toBe("");
+  });
+
   for (const theme of ["light", "dark"] as const) {
     test(`render in the ${theme} theme`, async ({ page, collected }, testInfo) => {
       const width = testInfo.project.name;

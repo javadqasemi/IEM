@@ -323,6 +323,39 @@ test.describe("the permission matrix, by verb", () => {
     */
     { who: "guest", method: "GET", path: "/auth/mfa", expect: 200 },
     { who: "engineer", method: "GET", path: "/auth/mfa", expect: 200 },
+
+    /*
+      Benachrichtigungen, and the three levels in one block.
+
+      **The firm's rules** are `notification.configure`. `management` is the
+      interesting refusal again: it holds `system.health` and `audit.read`,
+      so it can see how the installation is running — and deciding which
+      events notify whom is a different authority from watching them.
+
+      **The delivery log** is a second key, and the pair is what stops them
+      being conflated by a later edit: `administrator` holds both, so the
+      cells alone would not distinguish them, which is why the guest and the
+      engineer rows are here for each.
+
+      **One's own inbox carries no permission at all.** The guest is the
+      floor of the matrix — two content keys and nothing else — so a 200
+      there means a 200 for everybody. These two cells are what a future
+      "tidying up" of the route table would break.
+    */
+    { who: "superAdmin", method: "GET", path: "/notifications/rules", expect: 200 },
+    { who: "administrator", method: "GET", path: "/notifications/rules", expect: 200 },
+    { who: "management", method: "GET", path: "/notifications/rules", expect: 403 },
+    { who: "hr", method: "GET", path: "/notifications/rules", expect: 403 },
+    { who: "engineer", method: "GET", path: "/notifications/rules", expect: 403 },
+    { who: "guest", method: "GET", path: "/notifications/rules", expect: 403 },
+
+    { who: "administrator", method: "GET", path: "/notifications/deliveries", expect: 200 },
+    { who: "management", method: "GET", path: "/notifications/deliveries", expect: 403 },
+    { who: "engineer", method: "GET", path: "/notifications/deliveries", expect: 403 },
+    { who: "guest", method: "GET", path: "/notifications/deliveries", expect: 403 },
+
+    { who: "guest", method: "GET", path: "/notifications", expect: 200 },
+    { who: "guest", method: "GET", path: "/notifications/preferences", expect: 200 },
   ];
 
   for (const cell of READS) {

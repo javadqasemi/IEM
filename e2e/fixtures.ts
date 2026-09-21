@@ -776,10 +776,18 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
     heading: /im Kopf, im Kontaktfeld/i,
   },
   { path: "/einstellungen/email", name: "settings-mail", heading: /Versand prüfen/i },
+  /*
+    Was the `unbuilt` placeholder until P2-3; it is now the organisation's
+    rules plus the delivery log. The entry was *replaced* rather than added
+    beside the old one — for one run it was both, and a duplicate `name` is
+    not the harmless thing it looks like: `a11y.spec.ts` keys its report by
+    the name, so the same screen was scanned twice and every violation on it
+    was reported twice under one id, which reads as two separate faults.
+  */
   {
     path: "/einstellungen/benachrichtigungen",
     name: "settings-notifications",
-    heading: /Benachrichtigungsmodul ist noch nicht gebaut/i,
+    heading: /Welche Ereignisse benachrichtigen/i,
   },
   {
     path: "/einstellungen/system",
@@ -788,4 +796,27 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
   },
   { path: "/audit", name: "audit", heading: /Audit/i },
   { path: "/profil", name: "profile", heading: /Profil|Konto/i },
+  /**
+   * The notification centre, at all three widths and in both themes.
+   *
+   * The heading is the page's **description**, not its title: "Benachrichtigungen"
+   * is a heading, a tab label and — now — the accessible name of a button in
+   * the header of every screen, so `getByText(...).first()` on it would match
+   * the bell and pass whatever the page rendered. The same trap the six
+   * entries above document.
+   *
+   * Two entries rather than one, because the settings tab is a different
+   * layout: a grid of grouped switches is the one thing in this module with
+   * nowhere to go at 390px, which is exactly what this sweep is for.
+   */
+  {
+    path: "/benachrichtigungen",
+    name: "notifications",
+    heading: /Was Ihr Konto und Ihre Arbeit betrifft/i,
+  },
+  {
+    path: "/benachrichtigungen/einstellungen",
+    name: "notifications-settings",
+    heading: /Welche Ereignisse überhaupt benachrichtigen/i,
+  },
 ];

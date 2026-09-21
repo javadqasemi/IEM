@@ -1134,10 +1134,37 @@ would mean three screens, three permission sets and three notions of "open". An
 
 ### 3.23 Notification
 
-Exists as a Prisma model today **with no implementation at all** — the audit
-lists it as a table with nothing behind it. The review is right that it is a
-domain and not a toast: a toast is what you show the person who just clicked;
-a notification is what you owe the person who is not looking.
+> **Built, September 2026 (`docs/ENTERPRISE_ROADMAP.md` → P2-2).** The design
+> below is what was specified; what shipped follows it closely and differs in
+> four places, each noted inline. The sentence that mattered most survived
+> intact and is the reason the module looks the way it does: *a toast is what
+> you show the person who just clicked; a notification is what you owe the
+> person who is not looking.*
+>
+> **What shipped differently:**
+>
+> - **`priority` became `severity`** with four values — `INFO` `SUCCESS`
+>   `WARNING` `CRITICAL` — and it is drawn as a **word** beside a tone
+>   everywhere, never as a colour alone.
+> - **`groupKey` is not built.** It earns its place when one operation can
+>   produce forty notifications at once, and nothing in the system can today.
+>   Recipient *deduplication* — the other half of the same worry — is built
+>   and tested.
+> - **`expiresAt`, `dismissedAt` and `workflowRunId` are not built**, for the
+>   `Task.spentHours` reason: a column nothing writes cannot hide behind a
+>   plausible value.
+> - **`DIGEST` is not a channel** and `NotificationPreference` has no
+>   `digest` or quiet hours. Two channels, `IN_APP` and `EMAIL`; the job name
+>   `notification.digest` stays declared and unimplemented like the rest of
+>   its block.
+> - **`SUPPRESSED` is spelled `SKIPPED`**, and the idea is exactly the one
+>   below — a silence with a reason, which is the difference between working
+>   and broken.
+> - **One table was added that this section did not anticipate**:
+>   `NotificationRule`, the *firm's* configuration. The section had
+>   preferences (the person's) and nothing for the organisation, and the two
+>   are different questions — "I do not want this" and "we do not send this"
+>   are not the same sentence.
 
 #### Notification
 

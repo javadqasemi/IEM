@@ -1,4 +1,4 @@
-# Current application audit — 19 September 2026
+﻿# Current application audit — 19 September 2026
 
 What is actually in this repository today, read from the source rather than from the
 documentation. Where the two disagree the source wins and the disagreement is recorded.
@@ -40,7 +40,7 @@ and one of them is a deletion deadline for personal data.**
 | Verify gate | ✅ green — typecheck, lint (0 errors), 1'024 server tests, site tests |
 | Server modules | 19 controllers, ~173 route handlers |
 | Prisma models | 49 models, 38 enums, 12 migrations |
-| Permissions | 106 keys from 21 resources at the time of the audit; **117 today** (+8 for Unternehmen/Standorte in P1-1, +2 for sessions in P2-9, +1 for `user.resetMfa` in P3-2). **14 enforced on no route**, unchanged — every key added since was enforced on the route that came with it |
+| Permissions | 106 keys from 21 resources at the time of the audit; **119 today** (+8 for Unternehmen/Standorte in P1-1, +2 for sessions in P2-9, +1 for `user.resetMfa` in P3-2, +2 for notifications in P2-2). **14 enforced on no route**, unchanged — every key added since was enforced on the route that came with it |
 | Domain events | 75 names; audit derived from them |
 | Content types | 24 editable types covering all 38 keys of `SiteContent` |
 | Public site CMS coverage | effectively complete — see §4 |
@@ -116,7 +116,7 @@ applications (9), auth (8), users (7), rbac (6).
 | Offices / locations | `Office` model exists, is seeded, and has **no API and no screen** |
 | Departments | `Department` model exists, is seeded, **no API, no screen**; the site still uses a hardcoded option list |
 | Background jobs | `Job` table + runner + `job.read/retry/cancel` permissions, **no controller** |
-| Notifications | `Notification` model, **no implementation at all** |
+| ~~Notifications~~ | ~~`Notification` model, **no implementation at all**~~ — **built (P2-2).** Four tables, ten typed notifications, two channels, a bell and a centre, nine domain events feeding it, and two new permissions. The row that stood here was right about more than the audit knew: the model had a `kind` column and a plaintext-shaped design, and replacing it was the first change |
 | SEO / redirects | `Redirect` model + `seo.read/update` permissions, **no module** |
 | Backups | `system.backup` permission, **no endpoint, no backup system** |
 | API keys / integrations | `system.api` permission, **nothing** |
@@ -210,7 +210,7 @@ Observations:
   visibility, no ordering, no archive. It is referenced by `Employee`, `Project` and
   `Building`, so it is real master data — it simply has no owner.
 - **There is no `Organisation` model at all.** The firm itself is not an entity.
-- `Notification` and `Redirect` have tables and no code.
+- ~~`Notification` and `Redirect` have tables and no code.~~ `Notification` is built (P2-2) and now has three siblings; `Redirect` still has a table and no code.
 - `Department` has a table, a tree and a head, and no API.
 - Media: checksum, alt text with an explicit `altDecorative`, variants and versions —
   a good model. No duplicate-detection *surface* despite the checksum index.
@@ -327,9 +327,9 @@ SMTP password.
 | 4 Contact & communication | Scattered — `contactEmail` (CMS), `applications.notifyEmail` (setting), office phones (CMS), socials (CMS). No single source |
 | 5 Website defaults | Partial — the `seo` content type covers title/description/OG/robots well; no fallback pattern, no favicon wiring |
 | 6 E-mail | **Good** — configurable, environment fallback, secrets redacted, read per send. Missing: test send, templates, delivery status |
-| 7 Notifications | Missing — table exists, nothing reads it |
+| 7 Notifications | **Built (P2-2)** — organisation rules under Einstellungen, personal preferences in the notification centre, and the two kept deliberately apart: one is governance, the other is a personal choice |
 | 8 Recruitment | Partial — notify address, retention, file size (see §5.1); no allowed-types or candidate-status configuration |
-| 9 Security | Partial — session timeout, lockout threshold, lockout duration and password length are all configurable and clamped (P1-5); active sessions are visible and revocable for oneself and, behind `user.readSessions`/`user.revokeSessions`, for another account (P2-9); **MFA is built and self-service** (P3-2), with an administrative reset behind `user.resetMfa`. Origins stay inert; the MFA *policy* switch stays `pending` until there is a forced-enrolment flow to make it true (P3-2b) |
+| 9 Security | Partial — session timeout, lockout threshold, lockout duration and password length are all configurable and clamped (P1-5); active sessions are visible and revocable for oneself and, behind `user.readSessions`/`user.revokeSessions`, for another account (P2-9); **MFA is built and self-service** (P3-2), with an administrative reset behind `user.resetMfa`, and every security change now **notifies the account holder** (P2-2). Origins stay inert; the MFA *policy* switch stays `pending` until there is a forced-enrolment flow to make it true (P3-2b) |
 | 10 Integrations | Missing |
 | 11 Storage & media | Missing as configuration; real limits are constants |
 | 12 Backup & recovery | **Missing entirely** — no backup system exists |

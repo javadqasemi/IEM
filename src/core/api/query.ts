@@ -279,9 +279,32 @@ export type QueryState<T> = {
 export function useQuery<T>(
   key: QueryKey | null,
   fetcher: () => Promise<T>,
-  options: { staleMs?: number } = {},
+  options: {
+    staleMs?: number;
+    /**
+     * Re-ask this often while the component is mounted. Off by default.
+     *
+     * Added for the notification bell, which is the first thing in this
+     * dashboard that has to notice a change **nobody on this tab made** —
+     * every other query is invalidated by the mutation that caused it, and a
+     * notification arrives because of something somebody else did.
+     *
+     * Deliberately a plain interval rather than a realtime transport. There
+     * is no WebSocket or SSE infrastructure in this application, and
+     * introducing one for a bell would be a connection per tab, a
+     * reconnection strategy, a second authentication path and a sticky-session
+     * requirement in front of a count that changes a few times a day. The
+     * seam is here: the day a transport exists, this option is what it
+     * replaces.
+     *
+     * It respects `staleMs` — the tick calls `load`, which serves from cache
+     * if the entry is still fresh — so a poll shorter than the staleness
+     * window costs nothing and is simply the wrong number.
+     */
+    pollMs?: number;
+  } = {},
 ): QueryState<T> {
-  const { staleMs = 30_000 } = options;
+  const { staleMs = 30_000, pollMs = 0 } = options;
   const serialised = key === null ? null : serialise(key);
 
   // The fetcher is a fresh closure on every render, so it cannot be a
@@ -304,6 +327,40 @@ export function useQuery<T>(
     sync();
     return unsubscribe;
   }, [serialised, sync]);
+
+  /**
+   * The poll, and the two things that stop it being wasteful.
+   *
+   * **It pauses when the tab is hidden.** A dashboard left open on a second
+   * monitor overnight would otherwise make a request a minute for fourteen
+   * hours, and nobody is looking at the badge. `visibilitychange` also fires
+   * on the way *back*, which is when a fresh count is actually wanted — so
+   * returning to the tab refreshes immediately rather than up to a minute
+   * later.
+   *
+   * **It goes through `load`, not `refetch`.** `load` honours `staleMs` and
+   * de-duplicates an in-flight request, so a poll that fires while the same
+   * key is already being fetched by a screen costs nothing.
+   */
+  useEffect(() => {
+    if (!serialised || pollMs <= 0) return;
+
+    const tick = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void load(serialised, () => fetcherRef.current(), staleMs);
+    };
+
+    const timer = setInterval(tick, pollMs);
+    const onVisible = () => {
+      if (typeof document !== "undefined" && !document.hidden) tick();
+    };
+    document?.addEventListener?.("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(timer);
+      document?.removeEventListener?.("visibilitychange", onVisible);
+    };
+  }, [serialised, pollMs, staleMs]);
 
   const refetch = useCallback(() => {
     if (!serialised) return;

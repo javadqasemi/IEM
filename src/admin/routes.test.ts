@@ -67,11 +67,32 @@ describe("every route names real permissions", () => {
     },
   );
 
-  it("leaves exactly one route open to any signed-in user", () => {
-    // One's own profile, which also hosts the appearance setting and so has to
-    // stay reachable by every role. A second open route would want justifying.
+  /**
+   * The routes open to any signed-in user, named one at a time.
+   *
+   * It used to be exactly one — `/profil` — with a note saying a second
+   * would want justifying. Three of them now, and the justification is the
+   * same sentence for all three: **they are the reader's own account.**
+   * None takes an id, every one resolves the person from the verified token
+   * on the server, and a permission key that every role had to be granted
+   * for the dashboard to work would be a key that means nothing. It is the
+   * argument `/auth/sessions`, `/auth/mfa` and `/notifications` all make on
+   * the other side.
+   *
+   * The list stays explicit rather than becoming a rule, because the next
+   * open route added without thinking about it is the one that should have
+   * had a permission. The firm's *configuration* of notifications is a
+   * different screen — `/einstellungen/benachrichtigungen`, behind
+   * `notification.configure` — and its absence from this list is the check
+   * that the two were not merged.
+   */
+  it("opens only the reader's own account to every signed-in user", () => {
     const open = ROUTES.filter((r) => r.permissions.length === 0);
-    expect(open.map((r) => r.pattern)).toEqual(["/profil"]);
+    expect(open.map((r) => r.pattern)).toEqual([
+      "/benachrichtigungen/einstellungen",
+      "/benachrichtigungen",
+      "/profil",
+    ]);
   });
 });
 

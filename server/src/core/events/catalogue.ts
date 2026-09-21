@@ -68,8 +68,35 @@ export type DomainEvents = {
   ContentEntryUpdated: { typeKey: string; key: string; version: number };
   ContentEntryDeleted: { typeKey: string; key: string };
   ContentSubmitted: { typeKey: string; key: string };
-  ContentApproved: { typeKey: string; key: string; decidedBy: string };
-  ContentRejected: { typeKey: string; key: string; decidedBy: string; note?: string };
+  /**
+   * `requestedBy` is on both, and it is the payload settling a rule again.
+   *
+   * A decision has to reach **the person who asked for it**, and without the
+   * id on the event the only consumer that could find them would be one
+   * reaching into `ReviewRequest` — a notification listener querying another
+   * module's tables, which is the coupling the bus exists to remove. Who
+   * should be told is part of the fact.
+   */
+  ContentApproved: {
+    typeKey: string;
+    key: string;
+    decidedBy: string;
+    /**
+     * `null` when the submitter's account has since been deleted —
+     * `ReviewRequest.requestedById` is `SetNull`, because a review outlives
+     * the person who asked for it. The consumer is expected to notify nobody
+     * rather than to invent a recipient, which is why the nullability is on
+     * the payload rather than papered over with an empty string.
+     */
+    requestedBy: string | null;
+  };
+  ContentRejected: {
+    typeKey: string;
+    key: string;
+    decidedBy: string;
+    requestedBy: string | null;
+    note?: string;
+  };
   ContentPublished: { version: number; entriesPublished: number; warnings: string[] };
   ContentRolledBack: { typeKey: string; key: string; toVersion: number };
 
@@ -95,6 +122,34 @@ export type DomainEvents = {
   OfficeDeleted: { name: string };
   /** Recorded whether it succeeded, which is the point of testing it. */
   MailTested: { to: string; ok: boolean; error?: string };
+
+  /* ---- Authentication: the second factor --------------------------- */
+  /**
+   * The four MFA facts that happen **to a record**, and the reason they are
+   * events at all.
+   *
+   * This file's rule — restated by `AuditListener` — is that *events describe
+   * things that happened to records; direct audit calls describe things that
+   * happened to nobody*. A failed sign-in has no record it is about. A second
+   * factor being switched off has one: the user. P2-2 wrote all of them as
+   * direct `audit.record` calls out of consistency with the rest of `auth/`,
+   * which predates F8, and that was the wrong consistency to pick — the log
+   * is identical either way (`auditActionFor` derives the same action names),
+   * and the version that goes through the bus is also the one Notifications
+   * can hear.
+   *
+   * The **failures** stayed direct, correctly: `auth.mfa_failed` and
+   * `auth.mfa_challenged` are attempts, not changes.
+   *
+   * `entityId` is the **affected account** on all four, never the actor —
+   * which is what lets a notification reach the person whose protection
+   * changed rather than the administrator who changed it.
+   */
+  MfaEnabled: { email: string };
+  MfaDisabled: { email: string };
+  /** By an administrator, for account recovery. `sessionsRevoked` is the cost. */
+  MfaReset: { email: string; byEmail: string; sessionsRevoked: number };
+  MfaRecoveryRegenerated: { email: string; codes: number };
 
   /* ---- Media, users, applications (exist today) -------------------- */
   MediaUploaded: { filename: string; mimeType: string; size: number };
@@ -290,6 +345,35 @@ export type DomainEvents = {
   /* ---- Compliance and housekeeping ---------------------------------- */
   CertificateExpiring: { employeeId: string; name: string; expiresAt: string };
   RetentionPurged: { entity: string; count: number };
+
+  /* ---- The queue itself --------------------------------------------- */
+  /**
+   * A background job has **given up** — raised once, when it goes `DEAD`, and
+   * never on the retries before it.
+   *
+   * Named `Failed` rather than `Dead` because the catalogue is past tense and
+   * "dead" is not a verb; the terminality is in when it is raised rather than
+   * in the word. An event per attempt would announce three times that
+   * something might be wrong and once that it is, which is the wrong ratio for
+   * the only message an operator has to act on.
+   *
+   * `error` is the job's own truncated message. It reaches an audit row and,
+   * through Notifications, an operator — so it must never be a stack trace,
+   * which is why `JobService.fail` already caps it.
+   */
+  JobFailed: { job: string; jobId: string; attempts: number; error: string };
+
+  /* ---- Notifications ------------------------------------------------- */
+  /**
+   * The firm changed which events produce notifications and through which
+   * channels.
+   *
+   * One event for a whole save rather than one per switch: an administrator
+   * ticking six boxes has taken one decision, and six audit rows would make
+   * the log harder to read than the screen it describes. `types` names what
+   * actually moved, so the row is still specific.
+   */
+  NotificationSettingsUpdated: { types: string[] };
 };
 
 export type DomainEventName = keyof DomainEvents;
@@ -333,6 +417,10 @@ export const DOMAIN_EVENT_NAMES = [
   "OfficeRestored",
   "OfficeDeleted",
   "MailTested",
+  "MfaEnabled",
+  "MfaDisabled",
+  "MfaReset",
+  "MfaRecoveryRegenerated",
   "MediaUploaded",
   "MediaDeleted",
   "UserInvited",
@@ -400,6 +488,8 @@ export const DOMAIN_EVENT_NAMES = [
   "PaymentRecorded",
   "CertificateExpiring",
   "RetentionPurged",
+  "JobFailed",
+  "NotificationSettingsUpdated",
 ] as const satisfies readonly DomainEventName[];
 
 /**

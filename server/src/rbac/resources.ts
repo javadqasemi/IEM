@@ -223,6 +223,36 @@ export const RESOURCES: ResourceDef[] = [
     api: "API-Schlüssel und Integrationen verwalten",
   }),
 
+  /**
+   * Benachrichtigungen — two keys, and the absence of a third.
+   *
+   * **`configure` is the firm's decision about who hears what.** It is not
+   * folded into `settings.update`: somebody who may set the SMTP host is not
+   * thereby somebody who may decide that a security notification stops being
+   * sent, and the two screens are read by different people. It is the same
+   * argument that split `organisation.updateLegal` from `organisation.update`
+   * — one row, two authorities.
+   *
+   * **`readDeliveries` is separate from `configure`** for the reason
+   * `user.readSessions` is separate from `user.revokeSessions`, with the
+   * halves the other way round: configuring says what *would* happen, and the
+   * delivery log says who was told, when, and whether it arrived. The second
+   * is a disclosure about people rather than about policy, so a role that
+   * should be able to answer "did that e-mail go out" does not have to be the
+   * role that decides whether it is sent at all.
+   *
+   * **There is deliberately no key for reading one's own notifications**, and
+   * none for marking them read. Those are operations on the caller's own
+   * account, like `/auth/me`, `/auth/sessions` and `/auth/mfa`, and a key
+   * every role had to be granted for the bell to work is a key that means
+   * nothing. The scope is the control: the routes take the account from the
+   * verified token and never from the request.
+   */
+  resource("notification", "Benachrichtigungen", "System", {
+    configure: "Festlegen, welche Ereignisse wen benachrichtigen",
+    readDeliveries: "Zustellprotokoll einsehen — wer wurde wann womit erreicht",
+  }),
+
   resource("job", "Hintergrundaufgaben", "System", {
     read: "Laufende und vergangene Hintergrundaufgaben ansehen",
     retry: "Fehlgeschlagene Aufgabe erneut ausführen",

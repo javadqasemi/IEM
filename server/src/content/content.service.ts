@@ -8,6 +8,7 @@ import {
 import { Prisma, WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
+import { EventBus } from "../core/events/event-bus";
 import { SettingsService } from "../core/settings/settings.service";
 import { OrganisationService } from "../core/organisation/organisation.service";
 import { contentTypeByKey } from "./content-types";
@@ -60,6 +61,23 @@ export class ContentService {
      * sibling feature, and `architecture.test.ts` distinguishes the two.
      */
     private readonly organisation: OrganisationService,
+    /**
+     * The four workflow transitions are **announced** (P2-3), and only those
+     * four.
+     *
+     * This module predates F8 and writes its audit rows by hand; that has not
+     * changed for `content.created`, `content.updated` and the other seven,
+     * because nothing downstream cares that somebody fixed a typo. What the
+     * notification platform needs is the *review* transitions and the
+     * publish, so exactly those four moved to the bus.
+     *
+     * **The log is byte-identical either way.** `auditActionFor` derives
+     * `content.submitted` from `ContentSubmitted`, `content.approved` from
+     * `ContentApproved` and so on — the same action names the hand-written
+     * calls used — which is what made the migration safe to do four call
+     * sites at a time rather than all eleven.
+     */
+    private readonly events: EventBus,
   ) {}
 
   /* ================================================================ */
@@ -512,7 +530,16 @@ export class ContentService {
     }
   }
 
-  async submitForReview(id: string, message: string | undefined, actor: AuthUser, ctx: Ctx) {
+  /*
+    No `ctx` on these three, and its absence is the migration showing.
+
+    A method that writes its own audit row needs the request's IP and user
+    agent threaded down to it. One that publishes an event does not:
+    `AuditListener` reads them from `AsyncLocalStorage`. The parameter went
+    dead the moment the `audit.record` call became a `publish`, and the
+    eight methods in this file that still write their own rows still take it.
+  */
+  async submitForReview(id: string, message: string | undefined, actor: AuthUser) {
     const entry = await this.prisma.contentEntry.findUniqueOrThrow({ where: { id } });
     this.assertTransition(entry.status, WorkflowState.IN_REVIEW);
 
@@ -536,13 +563,11 @@ export class ContentService {
       }),
     ]);
 
-    this.audit.record({
-      actor,
-      action: "content.submitted",
-      resource: "content_entry",
-      resourceId: id,
+    this.events.publish("ContentSubmitted", {
+      entity: "content_entry",
+      entityId: id,
+      payload: { typeKey: entry.typeKey, key: entry.key },
       message,
-      ...ctx,
     });
   }
 
@@ -551,7 +576,6 @@ export class ContentService {
     decision: "APPROVED" | "REJECTED",
     note: string | undefined,
     actor: AuthUser,
-    ctx: Ctx,
   ) {
     const review = await this.prisma.reviewRequest.findUnique({
       where: { id: reviewId },
@@ -608,14 +632,34 @@ export class ContentService {
       }),
     ]);
 
-    this.audit.record({
-      actor,
-      action: decision === "APPROVED" ? "content.approved" : "content.rejected",
-      resource: "content_entry",
-      resourceId: review.entryId,
-      message: note,
-      ...ctx,
-    });
+    /*
+      `requestedBy` travels on the event, which is what lets the decision
+      reach the person who asked for it without the listener querying
+      `ReviewRequest` — a notification consumer reaching into this module's
+      tables is the coupling the bus exists to remove.
+    */
+    const payload = {
+      typeKey: review.entry.typeKey,
+      key: review.entry.key,
+      decidedBy: actor.id,
+      requestedBy: review.requestedById,
+    };
+
+    if (decision === "APPROVED") {
+      this.events.publish("ContentApproved", {
+        entity: "content_entry",
+        entityId: review.entryId,
+        payload,
+        message: note,
+      });
+    } else {
+      this.events.publish("ContentRejected", {
+        entity: "content_entry",
+        entityId: review.entryId,
+        payload: { ...payload, note },
+        message: note,
+      });
+    }
   }
 
   listPendingReviews() {
@@ -649,7 +693,7 @@ export class ContentService {
    * publish would mean a live page with a missing section, discovered by a
    * visitor rather than by us.
    */
-  async publish(note: string | undefined, actor: AuthUser, ctx: Ctx) {
+  async publish(note: string | undefined, actor: AuthUser) {
     /*
       Read *before* the transaction, not inside it.
 
@@ -713,15 +757,17 @@ export class ContentService {
       return { snapshot, published: approved.length, warnings };
     });
 
-    this.audit.record({
-      actor,
-      action: "content.published",
-      resource: "content_snapshot",
-      resourceId: String(result.snapshot.version),
+    this.events.publish("ContentPublished", {
+      entity: "content_snapshot",
+      entityId: String(result.snapshot.version),
+      payload: {
+        version: result.snapshot.version,
+        entriesPublished: result.published,
+        warnings: result.warnings,
+      },
       message: `${result.published} Eintrag/Einträge veröffentlicht${
         note ? ` — ${note}` : ""
       }`,
-      ...ctx,
     });
 
     if (result.warnings.length) {

@@ -185,16 +185,38 @@ test.describe("Unternehmen", () => {
     await expect(page.getByText("Nicht gebaut").first()).toBeVisible();
   });
 
-  test("a group that is not built says so instead of showing an empty form", async ({ page }) => {
+  /**
+   * This test used to assert the opposite, and the change is the point.
+   *
+   * Benachrichtigungen was the workspace's one `placeholder` section: it said
+   * *"Das Benachrichtigungsmodul ist noch nicht gebaut"* and deliberately
+   * rendered no Speichern button, because an absent section makes an
+   * administrator conclude the system has no such feature and stop looking,
+   * while a form with no effect is worse still. P2-3 built the module, so the
+   * placeholder is gone and asserting it would be asserting a lie.
+   *
+   * What replaces it is the property that actually matters now: the slot is
+   * filled by the **embedded** module rather than by an empty form. The
+   * honest-absence behaviour it used to guard has not gone away — the three
+   * integrations that really are unbuilt are asserted in the System panel
+   * test above, which is where the remaining `Nicht gebaut` rows live.
+   */
+  test("the section that was a placeholder now renders the module itself", async ({ page }) => {
     await page.goto(`${SECTION}/benachrichtigungen`);
     await expect(page.getByText("Seite wird geladen …")).toHaveCount(0, { timeout: 20_000 });
 
-    // An absent section would make an administrator conclude the system has no
-    // such feature and stop looking; a form with no effect is worse still.
-    await expect(page.getByText(/Benachrichtigungsmodul ist noch nicht gebaut/)).toBeVisible({
+    await expect(page.getByText(/Welche Ereignisse benachrichtigen/)).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page.getByRole("button", { name: "Speichern" })).toHaveCount(0);
+    await expect(page.getByText(/noch nicht gebaut/)).toHaveCount(0);
+
+    // Composed by `admin/pages/SettingsPage.tsx`, not by the workspace: the
+    // delivery log is the second half of the embedded slot and carries its
+    // own permission, so seeing it here proves the whole section arrived and
+    // not just its heading.
+    // By role: the table's `<caption>` carries the same word for screen
+    // readers, so a text match resolves to two elements and fails strict mode.
+    await expect(page.getByRole("heading", { name: "Zustellprotokoll" })).toBeVisible();
   });
 });
 

@@ -18,6 +18,7 @@ import { MailModule } from "./mail/mail.module";
 import { MediaModule } from "./media/media.module";
 
 import { CryptoModule } from "./core/crypto/crypto.module";
+import { NotificationsModule } from "./core/notifications/notifications.module";
 import { SettingsModule } from "./core/settings/settings.module";
 import { SettingsRoutesModule } from "./settings/settings.controller.module";
 import { OrganisationModule } from "./core/organisation/organisation.module";
@@ -101,6 +102,17 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     // one of them wrong.
     CryptoModule,
     MailModule,
+    /**
+     * After `MailModule`, which it uses, and after `CoreModule`, whose event
+     * bus it subscribes to.
+     *
+     * Deliberately **not** `@Global`: nothing injects it. Features announce
+     * domain events and `NotificationsListener` is the only thing listening,
+     * which is what keeps the platform from becoming something ten modules
+     * import. Nest resolves by the graph, so the position in this list is
+     * documentation — but the graph is what a reader is reconstructing.
+     */
+    NotificationsModule,
     AuthModule,
     MediaModule,
 

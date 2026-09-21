@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/shared/utils/cn";
 import { EmptyState, SkeletonTable } from "@/shared/ui/primitives";
 import { Pagination } from "@/shared/ui/navigation";
@@ -84,6 +84,44 @@ export function DataTable<T>({
     [columns, hiddenColumns],
   );
 
+  /**
+   * Whether the scroll container below is actually scrolling, measured rather
+   * than assumed.
+   *
+   * ---
+   *
+   * A region that scrolls must be reachable from the keyboard (WCAG 2.1.1),
+   * and axe reports the omission as `scrollable-region-focusable` at
+   * *serious*. It went unseen for a long time because the rule only fires
+   * when a region both overflows **and** contains nothing focusable: nearly
+   * every table here has a link or a button in its rows, which gives the
+   * keyboard a way in by accident. The Zustellprotokoll (P2-3) is six columns
+   * of plain text with no control in any row, so at tablet and phone widths
+   * it was a pane a mouse could scroll and a keyboard could not reach at all.
+   *
+   * **Measured, not unconditional.** Hanging `tabIndex={0}` on every table
+   * would put a tab stop in front of every list in the dashboard, including
+   * the wide majority that fit and have nothing to scroll to — a cost paid on
+   * every screen to fix the few that overflow. So a `ResizeObserver` watches
+   * the pane and the table inside it: the pane changes with the viewport, the
+   * table changes when the column picker hides a column, and either can flip
+   * the answer without the other moving.
+   */
+  const paneRef = useRef<HTMLDivElement | null>(null);
+  const [scrollable, setScrollable] = useState(false);
+
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    // A sub-pixel difference is a rounding artefact, not an overflow.
+    const measure = () => setScrollable(pane.scrollWidth - pane.clientWidth > 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    if (pane.firstElementChild) observer.observe(pane.firstElementChild);
+    return () => observer.disconnect();
+  }, [loading, rows.length, visibleColumns.length]);
+
   const sorted = useMemo(() => {
     // The server already ordered them. Re-sorting here would reorder the page
     // by a different rule and make the result look random across pages.
@@ -139,8 +177,17 @@ export function DataTable<T>({
 
   return (
     // Its own horizontal scroll container, so a wide table scrolls rather than
-    // pushing the whole page sideways.
-    <div className="scroll-thin overflow-x-auto rounded-lg ring-1 ring-line">
+    // pushing the whole page sideways. Focusable only while it overflows —
+    // see `scrollable` above for why that is measured and not assumed. The
+    // caption names it, so a screen reader announces which table the region
+    // belongs to rather than an anonymous "Region".
+    <div
+      ref={paneRef}
+      tabIndex={scrollable ? 0 : undefined}
+      role={scrollable ? "region" : undefined}
+      aria-label={scrollable ? caption : undefined}
+      className="scroll-thin overflow-x-auto rounded-lg ring-1 ring-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    >
       <table className="w-full border-collapse bg-surface text-[14px]">
         <caption className="sr-only">{caption}</caption>
         <thead>

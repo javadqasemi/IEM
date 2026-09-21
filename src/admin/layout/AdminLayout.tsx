@@ -3,6 +3,7 @@ import { cn } from "@/shared/utils/cn";
 import { Button } from "@/shared/ui/primitives";
 import { Breadcrumb } from "@/shared/ui/navigation";
 import { Wordmark } from "@/components/Wordmark";
+import { NotificationBell } from "@/features/notifications";
 import { useAuth } from "@/core/auth";
 import { Link, useRoute, useRouteMeta, type Crumb } from "@/core/router";
 import { useTheme } from "../lib/theme";
@@ -290,7 +291,22 @@ export function AdminLayout({
                 rather than against the group's name. It used to share that job
                 with the entries' `lg:flex-1`; with those gone it is the only
                 thing doing it. */}
-            <div className="order-3 ml-auto shrink-0 lg:order-5 lg:pl-4">
+            <div className="order-3 ml-auto flex shrink-0 items-center gap-1 lg:order-5 lg:pl-4">
+              {/*
+                The bell, immediately left of the account button.
+
+                Imported directly rather than behind a `lazy()` boundary,
+                unlike every other feature the shell touches: this renders on
+                every screen for every signed-in person, so deferring it would
+                put a spinner in the top bar on every page load and fetch the
+                chunk anyway. See the note in `features/notifications/index.ts`
+                — it is the same Rollup argument reaching the opposite
+                conclusion because there is no dynamic import to conflict with.
+
+                No permission check. Everybody has an inbox of their own, and
+                the count endpoint scopes to the verified token.
+              */}
+              <NotificationBell />
               <UserMenu />
             </div>
           </div>
