@@ -48,7 +48,24 @@ export type JobPayloads = {
   "pdf.render": { template: string; entity: string; entityId: string };
   "bim.import": { modelFileId: string; storageKey: string };
   "bim.analyse": { modelFileId: string; kinds: string[] };
-  "backup.create": { scope: "database" | "media" | "all" };
+  /**
+   * One backup run, by id (P2-5).
+   *
+   * Declared in F10 as `{ scope: "database" | "media" | "all" }` and enqueued
+   * by nobody. The payload changed to an **id** when the module was built, for
+   * the reason `notification.deliver` records: the row carries the type, the
+   * trigger, the attempt state and the artifacts, so a job that runs twice
+   * finds a run already past `QUEUED` instead of starting a second dump of the
+   * same database. A payload describing the work rather than naming it is a
+   * second copy of it, free to disagree with the row it belongs to.
+   */
+  "backup.create": { backupRunId: string };
+  /** Proves the artifacts are readable. Separate so a slow check gets its own budget. */
+  "backup.verify": { backupRunId: string };
+  /** Applies the retention policy. Takes nothing: the policy is a setting. */
+  "backup.retention": Record<string, never>;
+  /** Reads a backup back into a database — a drill, or the real thing. */
+  "backup.restore": { restoreRunId: string };
   "reminder.send": { kind: string; entity: string; entityId: string; dueAt: string };
   "report.run": { reportDefinitionId: string; parameters: Record<string, unknown> };
   "notification.digest": { userId: string; period: "DAILY" | "WEEKLY" };
@@ -99,6 +116,9 @@ export const JOB_NAMES = [
   "bim.import",
   "bim.analyse",
   "backup.create",
+  "backup.verify",
+  "backup.retention",
+  "backup.restore",
   "reminder.send",
   "report.run",
   "notification.digest",

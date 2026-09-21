@@ -93,6 +93,8 @@ model User {
   listPreferences   ListPreference[]
   organisationEdits Organisation[]
   officeEdits       Office[]          @relation("OfficeUpdatedBy")
+  backupsTriggered  BackupRun[]
+  restoresRequested RestoreRun[]
 
   /// The person behind the login, when there is one. Optional in both
   /// directions: an engineer exists before their account and after it is
@@ -2757,4 +2759,193 @@ enum TransmittalMedium {
 enum RecipientRole {
   TO
   CC
+}
+
+/* ====================================================================
+   Backup and recovery (P2-5)
+   ==================================================================== */
+
+/// What a backup covers.
+///
+/// `FULL` is the only one that is a *recovery point*: a database dump and a
+/// media archive taken minutes apart still describe one installation, and the
+/// manifest records both timestamps so the gap is visible rather than implied.
+/// The two narrow types exist because media is large and changes rarely while
+/// the database is small and changes constantly, so a firm may reasonably want
+/// them on different schedules.
+enum BackupType {
+  DATABASE
+  MEDIA
+  FULL
+}
+
+/// Where a run is, and every value is a state a reader can act on.
+///
+/// `VERIFYING` is separate from `RUNNING` because the two fail for different
+/// reasons and an operator does different things about them: a dump that fails
+/// is a database or disk problem, a dump that cannot be *read back* is a
+/// corruption problem. `SUCCESS` means written and verified — see
+/// `BackupRun.verification` for the half that says which.
+///
+/// `EXPIRED` and `DELETED` are distinct: the first is retention doing its job,
+/// the second is somebody deciding. Collapsing them would make "who removed our
+/// only March backup" unanswerable.
+enum BackupStatus {
+  QUEUED
+  RUNNING
+  VERIFYING
+  SUCCESS
+  FAILED
+  EXPIRED
+  DELETED
+}
+
+/// Why a run happened. `PRE_RESTORE` is the safety net a restore takes of the
+/// state it is about to replace, and retention may never delete one that
+/// belongs to a restore somebody might still be reasoning about.
+enum BackupTrigger {
+  MANUAL
+  SCHEDULED
+  PRE_RESTORE
+}
+
+/// Whether the artifact has been proved readable, kept apart from whether it
+/// was written. A file existing is not recoverability.
+enum VerificationStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum BackupArtifactKind {
+  DATABASE_DUMP
+  MEDIA_ARCHIVE
+  MANIFEST
+}
+
+/// A restore is a separate record from the backup it reads, because one backup
+/// may be restored many times — a drill every month and, one day, for real.
+enum RestoreMode {
+  /// Into a throwaway database. Proves the artifact restores; touches nothing.
+  DRILL
+  /// Into the live database. The dangerous one.
+  IN_PLACE
+}
+
+enum RestoreStatus {
+  REQUESTED
+  RUNNING
+  VALIDATING
+  SUCCESS
+  FAILED
+  ABORTED
+}
+
+/// One backup run: what was attempted, what came of it, and whether it has
+/// been proved readable.
+///
+/// The version columns are what make a backup restorable *later*. A dump is
+/// only meaningful against a schema, so `migrationVersion` is the field that
+/// decides whether a two-month-old artifact can be restored into today''s
+/// application or needs migrations run over it first — see `restore.rules.ts`.
+model BackupRun {
+  id          String        @id @default(cuid())
+  type        BackupType
+  status      BackupStatus  @default(QUEUED)
+  trigger     BackupTrigger
+  triggeredById String?
+  /// One scheduled occurrence, once. `2026-09-22:FULL` rather than a timestamp,
+  /// so a scheduler that fires twice — a restart, a retry, two workers — finds
+  /// the row already there instead of writing a second copy of the same night.
+  occurrenceKey String?     @unique
+  startedAt   DateTime?
+  completedAt DateTime?
+  durationMs  Int?
+  /// Sum of the artifacts. Nullable until there are any.
+  sizeBytes   BigInt?
+  appVersion       String?
+  databaseVersion  String?
+  migrationVersion String?
+  verification       VerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  /// Sanitized. Never a raw tool message — see `backup.failure.ts`.
+  verificationDetail String?
+  failureCategory String?
+  failureDetail   String?
+  /// Excluded from retention by a person. A backup taken before an upgrade is
+  /// the usual case, and losing it to a rolling window is the usual regret.
+  protected   Boolean       @default(false)
+  /// When retention may take it. Null means it has not been scheduled to go.
+  expiresAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  triggeredBy User?             @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
+  artifacts   BackupArtifact[]
+  restores    RestoreRun[]      @relation("RestoreSource")
+  precedes    RestoreRun[]      @relation("PreRestoreBackup")
+
+  @@index([status, createdAt])
+  @@index([type, status])
+  @@index([expiresAt])
+}
+
+/// One file belonging to a run, with the checksum that proves it arrived whole.
+///
+/// Separate from the run because a `FULL` backup is three files with three
+/// checksums and three sizes, and folding them into columns would mean
+/// `databaseChecksum`, `mediaChecksum`, `manifestChecksum` — and a fourth
+/// artifact kind would mean a migration.
+model BackupArtifact {
+  id          String             @id @default(cuid())
+  backupRunId String
+  kind        BackupArtifactKind
+  /// Path within the backup store. Generated, never supplied by a caller.
+  storageKey  String
+  sizeBytes   BigInt
+  /// SHA-256, hex. Computed while streaming, not by re-reading the file.
+  checksum    String
+  contentType String
+  createdAt   DateTime           @default(now())
+
+  run BackupRun @relation(fields: [backupRunId], references: [id], onDelete: Cascade)
+
+  @@unique([backupRunId, kind])
+  @@index([backupRunId])
+}
+
+/// One attempt to read a backup back into a database.
+///
+/// `targetDatabase` is recorded rather than derived, because "which database
+/// did we restore into" is the first question after an incident and the
+/// configuration may have changed since.
+model RestoreRun {
+  id                 String        @id @default(cuid())
+  backupRunId        String
+  mode               RestoreMode
+  status             RestoreStatus @default(REQUESTED)
+  requestedById      String?
+  /// The database this ran against, by name. Checked before anything destructive.
+  targetDatabase     String
+  /// The backup taken of the state this replaced. Absent for a drill, which
+  /// replaces nothing, and required for `IN_PLACE` — if it fails, so does the
+  /// restore, before touching anything.
+  preRestoreBackupId String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  durationMs         Int?
+  failureCategory    String?
+  failureDetail      String?
+  /// What the post-restore checks found: table counts, migration state,
+  /// whether a Super Admin and an organisation survived.
+  validation         Json?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  source           BackupRun  @relation("RestoreSource", fields: [backupRunId], references: [id], onDelete: Cascade)
+  preRestoreBackup BackupRun? @relation("PreRestoreBackup", fields: [preRestoreBackupId], references: [id], onDelete: SetNull)
+  requestedBy      User?      @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([backupRunId])
 }

@@ -15,6 +15,8 @@ import { JwtAuthGuard, PermissionsGuard } from "./auth/guards";
 
 import { AuthModule } from "./auth/auth.module";
 import { MailModule } from "./mail/mail.module";
+import { BackupModule } from "./core/backup/backup.module";
+import { MaintenanceGuard } from "./core/backup/maintenance.guard";
 import { MediaModule } from "./media/media.module";
 
 import { CryptoModule } from "./core/crypto/crypto.module";
@@ -27,6 +29,7 @@ import { ContentModule } from "./content/content.module";
 import { UsersModule } from "./users/users.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { AuditModule } from "./audit/audit.module";
+import { BackupRoutesModule } from "./backup/backup.module";
 import { ApplicationsModule } from "./applications/applications.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { MeetingsModule } from "./meetings/meetings.module";
@@ -115,6 +118,12 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     NotificationsModule,
     AuthModule,
     MediaModule,
+    /**
+     * After `AuthModule`, which it imports for the restore's re-authentication
+     * gate, and `@Global` for one provider only: `MaintenanceService` is read
+     * by `MaintenanceGuard` below, which is registered on the root injector.
+     */
+    BackupModule,
 
     /**
      * The features (foundation stage F12, weakness W8).
@@ -131,6 +140,8 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
      */
     ApplicationsModule,
     AuditModule,
+    /** The backup *routes*. The services are `core/backup`, above. */
+    BackupRoutesModule,
     BuildingsModule,
     ContentModule,
     CustomersModule,
@@ -157,6 +168,21 @@ import { DisciplinesModule } from "./disciplines/disciplines.module";
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    /**
+     * Last of the guards, and that position is deliberate (P2-5).
+     *
+     * `MaintenanceGuard` refuses mutations while a restore is replacing the
+     * database. It runs **after** authentication and permissions so that an
+     * unauthenticated request still gets 401 rather than 503 — which is the
+     * more accurate answer and keeps the maintenance window from becoming a
+     * way to probe which routes exist.
+     *
+     * Global rather than per-route for the reason `JwtAuthGuard` is: a guard
+     * that has to be remembered on every mutating route is a guard that is
+     * missing from the one somebody adds next month, and that route would be
+     * the one writing into a half-restored database.
+     */
+    { provide: APP_GUARD, useClass: MaintenanceGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     /**
      * Interceptor order is load-bearing too, and the other way round from the
@@ -193,3 +219,5 @@ export class AppModule implements NestModule {
     consumer.apply(RequestContextMiddleware).forRoutes("*");
   }
 }
+
+

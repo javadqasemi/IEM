@@ -126,6 +126,24 @@ const NOTIFICATIONS = [/notifications\.spec\.ts/];
 const MAIL = [/mail\.spec\.ts/];
 
 /**
+ * Sicherung und Wiederherstellung, once, and for the strongest reason on this
+ * list: it **spawns `pg_dump`, writes hundreds of megabytes and creates and
+ * drops a database**.
+ *
+ * Running that at three widths means three processes dumping the same database
+ * at the same time onto the same disk, three drills racing for one
+ * `<db>_restore_drill` target — which the drill drops and recreates, so two
+ * overlapping runs would destroy each other's target mid-restore — and a disk
+ * check that is wrong because two siblings are writing into the space it just
+ * measured.
+ *
+ * It is also the spec whose resource use most distorts anything measured
+ * beside it. The budget failure recorded in CLAUDE.md was a suite measuring a
+ * machine under load; this one *is* the load.
+ */
+const BACKUP = [/backup\.spec\.ts/];
+
+/**
  * Browser suites that run once for a **third** reason: they write.
  *
  * `organisation.spec.ts` edits the company record and tries to archive the
@@ -157,6 +175,7 @@ const RUN_ONCE = [
   ...SECOND_FACTOR,
   ...NOTIFICATIONS,
   ...MAIL,
+  ...BACKUP,
 ];
 
 export default defineConfig({

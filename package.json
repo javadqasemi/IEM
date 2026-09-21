@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "iem-ui",
   "private": true,
   "version": "0.0.1",
@@ -29,6 +29,8 @@
     "e2e:security": "playwright test e2e/security.spec.ts --project=desktop",
     "e2e:versioning": "playwright test e2e/versioning.spec.ts --project=desktop",
     "e2e:mail": "playwright test e2e/mail.spec.ts --project=desktop",
+    "// e2e:backup": "Backup and recovery, including the RECOVERY DRILL — a real pg_dump, a real pg_restore into an isolated database, and the validation that proves the artifact becomes a database an application can read. Needs pg_dump/pg_restore on PATH or PG_BIN_PATH set; skips with a message otherwise. Run it on its own: it writes hundreds of megabytes and creates and drops a database, which distorts anything measured beside it.",
+    "e2e:backup": "node -e \"process.env.E2E_BACKUP='1';require('child_process').execSync('npx playwright test e2e/backup.spec.ts --project=desktop',{stdio:'inherit',env:{...process.env,E2E_BACKUP:'1'}})\"",
     "// mail:catcher": "A real SMTP server for development and for `e2e:mail`, so the last hop of the notification chain is actually exercised rather than resolving to SKIPPED. Mailpit listens on 1025 (SMTP) and 8025 (HTTP API); the E2E spec asks that API whether a message arrived, which is what proves an SMTP transaction happened rather than that a library call returned. It is a DEVELOPMENT dependency and never a production one — nothing in the application knows it exists, it is reached only through the ordinary `mail.smtpHost` setting. Fetch it once with `mail:catcher:install`; `var/` is gitignored, so the binary is not committed.",
     "mail:catcher": "var/tools/mailpit/mailpit.exe --smtp 0.0.0.0:1025 --listen 0.0.0.0:8025",
     "mail:catcher:install": "node scripts/fetch-mailpit.mjs",
@@ -72,3 +74,5 @@
     "vitest": "^3.2.7"
   }
 }
+
+

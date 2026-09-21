@@ -586,6 +586,9 @@ function operationalSections(badges: {
         "system.health",
         "notification.configure",
         "notification.readDeliveries",
+        // P2-5: `system.backup` opens two rows here and nothing else, so a
+        // role holding only it would otherwise see an empty System group.
+        "system.backup",
       ],
       items: [
         {
@@ -593,6 +596,31 @@ function operationalSections(badges: {
           to: "/einstellungen/email",
           label: "E-Mail",
           permissions: ["settings.read"],
+        },
+        /**
+         * Two rows, deliberately (P2-5).
+         *
+         * *Sicherungen* is the operations destination — history, run now,
+         * restore — and *Sicherung* is the configuration section in the
+         * settings workspace. They are separate because they are read by
+         * somebody in two different situations: one is "set this up once",
+         * the other is "something has gone wrong".
+         *
+         * The operations row stands on `system.backup` rather than
+         * `settings.read`: an operator may be trusted with recovery points
+         * and not with the settings store.
+         */
+        {
+          id: "backups",
+          to: "/sicherungen",
+          label: "Sicherungen",
+          permissions: ["system.backup"],
+        },
+        {
+          id: "settings-backup",
+          to: "/einstellungen/sicherung",
+          label: "Sicherung einrichten",
+          permissions: ["system.backup"],
         },
         {
           id: "settings-applications",

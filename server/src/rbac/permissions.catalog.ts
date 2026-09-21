@@ -138,6 +138,21 @@ export const SYSTEM_ROLES: RoleDef[] = [
       "notification.configure", "notification.readDeliveries",
       "audit.read",
       "system.health",
+      /**
+       * `system.backup` and **deliberately not `system.restore`** (P2-5).
+       *
+       * The same shape as `organisation.updateLegal` and `user.resetMfa`
+       * before it: taking a backup, checking it verified and configuring the
+       * schedule are system maintenance, which is exactly what this role is
+       * for. Replacing the production database is not — it is the one action
+       * that can destroy the firm's work, and it stays with Super Admin.
+       *
+       * `system.restore` also gates **downloading** an artifact, which is the
+       * same disclosure by another route: the archive is the whole database
+       * and every applicant dossier. An administrator maintains the system;
+       * that is not the same as being entitled to carry a copy of it out.
+       */
+      "system.backup",
       /*
         §3.9: read and export across the business modules, for support — and
         deliberately nothing more. An administrator maintains the system; that

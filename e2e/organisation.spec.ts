@@ -175,14 +175,27 @@ test.describe("Unternehmen", () => {
     await expect(page.getByText(/\d+ angewendet/)).toBeVisible();
 
     /*
-      And the three honest absences. `version: null` with a reason beats
+      And the honest absences. `version: null` with a reason beats
       `package.json`'s 0.0.1 — a number that never changes and looks like one
       that does — and "Nicht gebaut" beats a grey dash that reads the same as
       "not configured yet".
+
+      This used to assert *"Es gibt keine Sicherungsautomatik"* as its example
+      of an `unbuilt` integration, and P2-5 built it — so asserting it would be
+      asserting a lie, exactly as the note on the next test says about the
+      notifications placeholder. Analytics and Karten are still genuinely
+      unbuilt and carry the `Nicht gebaut` state, which is the property this
+      test is actually about: **the panel distinguishes "not configured" from
+      "not built"**, because one grey dot for both is how a missing feature
+      gets waited on for ever.
     */
     await expect(page.getByText(/Kein Build-Stempel/)).toBeVisible();
-    await expect(page.getByText(/Es gibt keine Sicherungsautomatik/)).toBeVisible();
+    await expect(page.getByText(/Nicht angebunden/)).toBeVisible();
     await expect(page.getByText("Nicht gebaut").first()).toBeVisible();
+
+    // And the row that changed: backup is a real integration now, with a
+    // measured verdict rather than a placeholder sentence.
+    await expect(page.getByText("Sicherung und Wiederherstellung")).toBeVisible();
   });
 
   /**

@@ -341,7 +341,7 @@ separate confirmed action.
 | 9 Security | Partial — session timeout, lockout threshold, lockout duration and password length are all configurable and clamped (P1-5); active sessions are visible and revocable for oneself and, behind `user.readSessions`/`user.revokeSessions`, for another account (P2-9); **MFA is built and self-service** (P3-2), with an administrative reset behind `user.resetMfa`, and every security change now **notifies the account holder** (P2-2). Origins stay inert; the MFA *policy* switch stays `pending` until there is a forced-enrolment flow to make it true (P3-2b) |
 | 10 Integrations | Missing |
 | 11 Storage & media | Missing as configuration; real limits are constants |
-| 12 Backup & recovery | **Missing entirely** — no backup system exists |
+| 12 Backup & recovery | **Built (P2-5)** — three tables, `pg_dump` + `tar` + a manifest with SHA-256 per artifact, verification that parses the archives rather than trusting the exit code, retention that can never leave zero recovery points, and a **recovery drill** that restores into an isolated database and reads the records back. Configuration under *Einstellungen → Sicherung*, operations at `/sicherungen`. Local storage only and no encryption at rest — both stated in the UI and in `docs/BACKUP_RECOVERY_RUNBOOK.md` rather than implied away |
 | 13 System information | Partial — `/dashboard/health` gives database latency, seed sync, snapshot and audit counts, uptime, memory, Node version. No app version, no migration state, no queue state |
 
 ---
@@ -459,3 +459,4 @@ table that already disagree — and that is both the brief's subject and the cor
 piece of work. One defect in that same area is a P0 data-loss path and is fixed first.
 
 The prioritised plan is `docs/ENTERPRISE_ROADMAP.md`.
+

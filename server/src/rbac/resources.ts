@@ -232,9 +232,31 @@ export const RESOURCES: ResourceDef[] = [
     export: "Audit-Log exportieren",
   }),
 
+  /**
+   * System — and the reason `restore` is a key of its own (P2-5).
+   *
+   * `backup` covered "erstellen und einspielen" and was enforced on nothing.
+   * Building the module split it, because the two halves are not the same
+   * authority: **creating a backup adds a recovery point and can harm nothing;
+   * restoring one replaces the production database.** Somebody who may check
+   * that last night's backup ran should not thereby be able to roll the firm
+   * back to it.
+   *
+   * `restore` also gates **downloading** an artifact, which reads oddly for a
+   * moment and is the right place: a backup archive contains the whole
+   * database and every applicant dossier, so obtaining it and applying it give
+   * you the same data. A `backup.download` key would have been a third name
+   * for one disclosure.
+   *
+   * Four keys the brief proposed — `backup.read`, `backup.create`,
+   * `backup.delete`, `backup.configure` — are deliberately **not** minted:
+   * `system.backup` already means all four, and a `backup` resource beside it
+   * would orphan a key that roles already hold.
+   */
   resource("system", "System", "System", {
     health: "Systemzustand und Kennzahlen ansehen",
-    backup: "Sicherungen erstellen und einspielen",
+    backup: "Sicherungen erstellen, prüfen, löschen und konfigurieren",
+    restore: "Sicherungen einspielen und herunterladen — ersetzt Produktivdaten",
     api: "API-Schlüssel und Integrationen verwalten",
   }),
 

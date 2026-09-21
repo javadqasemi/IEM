@@ -356,6 +356,36 @@ test.describe("the permission matrix, by verb", () => {
 
     { who: "guest", method: "GET", path: "/notifications", expect: 200 },
     { who: "guest", method: "GET", path: "/notifications/preferences", expect: 200 },
+
+    /*
+      Sicherung und Wiederherstellung (P2-5), and the pair of keys is the
+      point.
+
+      `system.backup` opens the history and the status; **`system.restore`
+      opens the two operations that hand over the production data** —
+      applying a backup and downloading one. `administrator` holds the first
+      and not the second, which is the cell that proves the split is real
+      rather than two names for one authority.
+
+      These cells live **here** rather than in `backup.spec.ts`, and that is
+      the fourth time the sign-in budget has decided where an assertion goes.
+      This file already signs every role account in once per run; asserting
+      the same thing from `backup.spec.ts` meant `gast@iem.test` and
+      `adm@iem.test` signing in a second time, earlier in the run than any
+      other spec needs them — and the failure surfaced as
+      "Hauptnavigation not found" in `a11y.spec.ts` at tablet width, two
+      projects away. Same misdiagnosis, fifth way in.
+    */
+    { who: "superAdmin", method: "GET", path: "/backups/status", expect: 200 },
+    { who: "administrator", method: "GET", path: "/backups/status", expect: 200 },
+    { who: "management", method: "GET", path: "/backups/status", expect: 403 },
+    { who: "engineer", method: "GET", path: "/backups/status", expect: 403 },
+    { who: "guest", method: "GET", path: "/backups/status", expect: 403 },
+
+    { who: "administrator", method: "GET", path: "/backups", expect: 200 },
+    { who: "guest", method: "GET", path: "/backups", expect: 403 },
+    { who: "administrator", method: "GET", path: "/backups/restores", expect: 200 },
+    { who: "administrator", method: "GET", path: "/backups/retention/preview", expect: 200 },
   ];
 
   for (const cell of READS) {
@@ -397,6 +427,45 @@ test.describe("the permission matrix, by verb", () => {
       // with the Projektleitung.
       { who: "management", method: "POST", path: `/projects/${id}/members`, body: { employeeId: "x" }, expect: 403 },
       { who: "guest", method: "GET", path: `/projects/${id}`, expect: 403 },
+
+      /*
+        The split that P2-5 exists to make real.
+
+        `administrator` holds `system.backup` — it may take a backup, check
+        it verified and configure the schedule, which is system maintenance
+        and exactly what the role is for. It does **not** hold
+        `system.restore`, so it may neither replace the production database
+        nor download an artifact: the archive is the whole database and every
+        applicant dossier, so obtaining it and applying it disclose the same
+        thing, and a `backup.download` key would have been a third name for
+        one authority.
+
+        The restore body is deliberately well-formed. A cell that was refused
+        for a missing field would pass whether or not the permission worked.
+
+        There is deliberately **no `administrator POST /backups → 201` cell**.
+        It was here and it was wrong twice over: creating a backup is throttled
+        at six an hour and shares that budget with `backup.spec.ts`, so the
+        cell passed or failed depending on what had run before it; and a matrix
+        of permission checks should not spawn a `pg_dump` in the middle of
+        itself. The positive case is `backup.spec.ts`'s job. What belongs here
+        is the **refusals**, which cost nothing and are the thing a permission
+        matrix is for.
+      */
+      {
+        who: "administrator",
+        method: "POST",
+        path: "/backups/does-not-exist/restore",
+        body: { mode: "DRILL", confirmation: "WIEDERHERSTELLEN", reauthToken: "x" },
+        expect: 403,
+      },
+      {
+        who: "administrator",
+        method: "GET",
+        path: "/backups/does-not-exist/artifacts/DATABASE_DUMP/download",
+        expect: 403,
+      },
+      { who: "guest", method: "POST", path: "/backups", body: { type: "DATABASE" }, expect: 403 },
     ];
 
     for (const c of cases) {

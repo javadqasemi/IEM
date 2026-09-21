@@ -15,6 +15,7 @@ import {
   TransmittalsRoute,
 } from "@/features/drawings";
 import { NotificationCenterRoute } from "@/features/notifications";
+import { BackupRoute } from "@/features/backup";
 import { match } from "@/core/router";
 
 /**
@@ -380,6 +381,25 @@ export const ROUTES: Route[] = [
     label: "Rollen",
   },
   /**
+   * Sicherungen — the operations half of Backup & Recovery (P2-5).
+   *
+   * A destination of its own rather than a settings section, and that is the
+   * brief's split for a reason worth restating: *Einstellungen → Sicherung*
+   * answers "what should happen" and trains the movement "change a field,
+   * press save". The most dangerous control in the application does not belong
+   * inside that movement.
+   *
+   * **`system.backup` opens it, not `system.restore`.** Seeing the history is
+   * not the same authority as replacing the database, and the screen reveals
+   * the restore action only to somebody holding the second key.
+   */
+  {
+    pattern: "/sicherungen",
+    permissions: ["system.backup"],
+    component: BackupRoute,
+    label: "Sicherungen",
+  },
+  /**
    * Einstellungen — two patterns for one component, like `/projekte/:id`.
    *
    * The section is in the URL, so `/einstellungen/standorte` is a link
@@ -418,6 +438,15 @@ export const ROUTES: Route[] = [
       "system.health",
       "notification.configure",
       "notification.readDeliveries",
+      /*
+        `system.backup` joined the list when Sicherung got its section (P2-5),
+        for the same reason and caught by the same test: the section stands on
+        `system.backup`, so a role holding only it would be shut out of the
+        page its own rail row points at. `routes.test.ts` compares the menu's
+        keys against this table in both directions — the third time that
+        comparison has caught this, which is what makes it worth having.
+      */
+      "system.backup",
     ],
     /**
      * `SettingsPage`, not `SettingsRoute` directly — the wrapper is where
@@ -439,6 +468,15 @@ export const ROUTES: Route[] = [
       "system.health",
       "notification.configure",
       "notification.readDeliveries",
+      /*
+        `system.backup` joined the list when Sicherung got its section (P2-5),
+        for the same reason and caught by the same test: the section stands on
+        `system.backup`, so a role holding only it would be shut out of the
+        page its own rail row points at. `routes.test.ts` compares the menu's
+        keys against this table in both directions — the third time that
+        comparison has caught this, which is what makes it worth having.
+      */
+      "system.backup",
     ],
     component: page(() => import("./pages/SettingsPage"), "SettingsPage"),
     label: "Einstellungen",

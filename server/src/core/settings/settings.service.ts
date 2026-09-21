@@ -117,6 +117,101 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     value: false,
     description: "TLS ab Verbindungsaufbau",
   },
+  /* ---- Sicherung (P2-5) --------------------------------------------- */
+  {
+    key: "backup.automatic",
+    group: "Sicherung",
+    type: "boolean",
+    value: false,
+    description: "Automatische Sicherungen",
+  },
+  {
+    key: "backup.scheduledType",
+    group: "Sicherung",
+    type: "select",
+    value: "FULL",
+    description: "Was automatisch gesichert wird",
+    options: [
+      { value: "FULL", label: "Datenbank und Medien" },
+      { value: "DATABASE", label: "Nur Datenbank" },
+      { value: "MEDIA", label: "Nur Medien" },
+    ],
+  },
+  {
+    key: "backup.hour",
+    group: "Sicherung",
+    type: "number",
+    value: 2,
+    description: "Uhrzeit der automatischen Sicherung",
+    unit: "Uhr",
+    min: 0,
+    max: 23,
+  },
+  {
+    key: "backup.timezoneOffsetMinutes",
+    group: "Sicherung",
+    type: "number",
+    value: 60,
+    description: "Zeitverschiebung zur Weltzeit",
+    unit: "Minuten",
+    /*
+      A fixed offset rather than a timezone name, and `backup.rules.ts` carries
+      the argument: the firm is in one place, the only thing this has to get
+      right is "roughly 02:00 local", and a DST boundary moves it by an hour
+      once a year on a night when 01:00 or 03:00 is equally fine.
+    */
+    min: -720,
+    max: 840,
+  },
+  {
+    key: "backup.keepDatabase",
+    group: "Sicherung",
+    type: "number",
+    value: 14,
+    description: "Aufbewahrung: Datenbank-Sicherungen",
+    unit: "Stück",
+    min: 0,
+    max: 365,
+  },
+  {
+    key: "backup.keepMedia",
+    group: "Sicherung",
+    type: "number",
+    value: 8,
+    description: "Aufbewahrung: Medien-Sicherungen",
+    unit: "Stück",
+    min: 0,
+    max: 365,
+  },
+  {
+    key: "backup.keepFull",
+    group: "Sicherung",
+    type: "number",
+    value: 12,
+    description: "Aufbewahrung: Voll-Sicherungen",
+    unit: "Stück",
+    min: 0,
+    max: 365,
+  },
+  {
+    key: "backup.minimumAgeHours",
+    group: "Sicherung",
+    type: "number",
+    value: 24,
+    description: "Mindestalter, bevor eine Sicherung gelöscht werden darf",
+    unit: "Stunden",
+    /*
+      Minimum one, never zero.
+
+      A `0` would let retention delete a backup the moment it finished — which
+      on a misconfigured `keep` count is the run that just succeeded, and the
+      operator's first clue is an empty history. The floor makes the worst case
+      "yesterday's backups survive today".
+    */
+    min: 1,
+    max: 8760,
+  },
+
   {
     key: "mail.replyTo",
     group: "E-Mail",

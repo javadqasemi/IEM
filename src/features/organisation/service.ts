@@ -207,6 +207,31 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
      */
     source: { kind: "settings", groups: ["E-Mail"], panel: true },
   },
+  /**
+   * Sicherung — the **configuration** half (P2-5).
+   *
+   * A settings group plus a panel, the arrangement E-Mail introduced: the form
+   * is rendered from the declarations in `core/settings/settings.service.ts`,
+   * so adding a backup setting stays a one-line change and the save bar, the
+   * dirty guard and the validation are the same as every other group. The
+   * panel underneath shows what those numbers *mean* — when the next run is,
+   * what retention would delete — which no declaration can express.
+   *
+   * `system.backup`, not `settings.read`: whoever configures backups is an
+   * operator, and the key that opens the operations screen is the one that
+   * should open its settings. The history and the restore live at
+   * `/sicherungen` and deliberately not here.
+   */
+  {
+    slug: "sicherung",
+    label: "Sicherung",
+    zone: "Betrieb",
+    title: "Sicherung und Wiederherstellung",
+    description:
+      "Wann automatisch gesichert wird, wie lange Sicherungen aufbewahrt werden und wohin sie geschrieben werden. Verlauf und Einspielen stehen unter „Sicherungen“.",
+    permissions: ["system.backup"],
+    source: { kind: "settings", groups: ["Sicherung"], panel: true },
+  },
   {
     slug: "bewerbungen",
     label: "Bewerbungen",

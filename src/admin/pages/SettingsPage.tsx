@@ -1,6 +1,7 @@
 import { SettingsRoute } from "@/features/organisation";
 import { NotificationRulesRoute } from "@/features/notifications";
 import { MailSection } from "@/features/mail";
+import { BackupSettingsPanel } from "@/features/backup";
 
 /**
  * Einstellungen, with the sections other features own composed into it.
@@ -35,6 +36,16 @@ const EMBEDDED = {
    * catalogue, none of which a setting declaration can express.
    */
   email: <MailSection />,
+  /**
+   * The second use of the additive `panel: true` slot (P2-5), which is what
+   * stops that arrangement being a one-off.
+   *
+   * The form above it is the schedule and the retention numbers; this shows
+   * what they mean — the next run, and what retention would delete, computed
+   * by the same function the job uses. The history and the restore are at
+   * `/sicherungen` and deliberately not in a settings form.
+   */
+  sicherung: <BackupSettingsPanel />,
 };
 
 export function SettingsPage({ section }: { section?: string }) {

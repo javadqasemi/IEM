@@ -1,4 +1,4 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -85,6 +85,7 @@ permissions and the tests, not a folder with the same names in it.
 | P3·2 | **Zwei-Faktor-Authentisierung** — four tables, AES-256-GCM at rest, a challenge that issues nothing, ten single-use recovery codes, and a re-authentication window that is not MFA-specific. The brief that commissioned it calls it *P2.2*; the roadmap has always called it P3-2 |
 | P2·2 | **Benachrichtigungen** — one platform, four tables, ten typed notifications, two channels, a bell, a centre, and the rule that **no business module sends an e-mail**. Nine domain events feed it and eight of them existed only on paper before it |
 | P2·4 | **E-Mail-Betrieb** — a `MailProvider` seam with SMTP as its one implementation, nine sanitized failure categories, a connection test beside the test send, a template catalogue with previews, and secrets encrypted at rest under a key of their own. No migration, no new permission, and the first route to enforce `job.retry` |
+| P2·5 | **Sicherung und Wiederherstellung** — three tables, `pg_dump`/`tar`/manifest with SHA-256, verification that parses the artifacts, retention that can never leave zero recovery points, and a **recovery drill** that restores into an isolated database and reads the records back. One new permission; `system.backup` finally enforced |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -211,6 +212,7 @@ npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
 npm run e2e:install    # once per machine: downloads the browser
 npm run e2e:mail       # Email Operations, incl. a real SMTP transaction
+npm run e2e:backup     # Backup and recovery, incl. the RECOVERY DRILL
 
 # The development SMTP catcher. `e2e:mail` skips with a message without it.
 npm run mail:catcher:install   # once per machine, into the gitignored var/tools/
@@ -591,6 +593,38 @@ Without the second half the application boots perfectly, the settings page repor
 password as configured — because a row holding an envelope *is* configured — and mail stops
 arriving with the cause several layers from the symptom. `MailStatusService` surfaces the
 same fact as `secretsReadable: false`.
+
+**A backup is `SUCCESS` only after it has been *read back*, and that is still not
+recoverability.** Three claims, kept apart because collapsing any pair is how a backup
+system becomes a folder of files nobody has opened: *written* (the job finished),
+*verified* (`BackupRun.verification` — checksums re-match and `pg_restore --list` /
+`tar -tzf` parse it), and *recoverable* (a **drill** restored it into
+`<database>_restore_drill` and read back the migration state, a Super Admin, the
+organisation, the settings and the content). `pg_restore` exiting 0 proves none of the
+third: it reports ownership notices as errors and restores partially without complaint in
+some failure modes. `refuseRestore` refuses an unverified backup outright — restoring from
+one means discovering it was corrupt *after* replacing the database it was meant to replace.
+
+**Retention may never leave zero recovery points, and `keep: 0` does not mean "delete
+everything".** `planRetention` spares four kinds whatever the counts say: a protected run,
+anything still running, every `PRE_RESTORE` backup, and **the last verified backup of each
+type**. It is also the *same function* the preview calls — a preview computed differently
+from the deletion it previews is a preview that lies exactly when somebody is relying on it.
+
+**The write gate during a restore is a process flag, not `site.maintenanceMode`.** A flag
+stored in the database cannot govern an operation that is *replacing that database*:
+`pg_restore --clean` drops the `Setting` table partway through, so a guard reading it would
+find the row missing, the table missing, or — worst — the **restored** value.
+`MaintenanceService` is in-memory and `MaintenanceGuard` keys on the HTTP verb, so a new
+mutating route inherits the protection without anybody remembering it. The cost is stated
+rather than discovered: **it governs one process**, so a multi-instance deployment must stop
+the others first.
+
+**`PGPASSWORD` in the child's environment, never in `argv`.** An argument is visible in
+`ps`, in a crash dump, and — the one that actually happens — in libpq's own error message,
+which it builds by echoing the connection it attempted. `spawn` with an argument array and
+`shell: false`; `redactToolOutput` is the second line of defence before anything reaches a
+log, and `classifyBackupError` is what makes sure the *API* never sees the raw text at all.
 
 **`smtp.provider.ts` is the only file allowed to import nodemailer**, and
 `server/src/architecture.test.ts` asserts it. Before P2-4 the library was imported straight
@@ -1256,7 +1290,7 @@ string, and adding a module would mean editing the table as well as `screens/tab
 
 Documented in the audit performed on this repo, still open:
 
-- **13 permissions in the catalogue are enforced on no route**, and they are a list rather than a
+- **12 permissions in the catalogue are enforced on no route**, and they are a list rather than a
   paragraph: `KNOWN_UNENFORCED` in `server/src/rbac/permissions.agreement.test.ts`, one line each
   with what it is waiting for. A new one fails the build, and so does an entry that has started
   being enforced and was left on the list. (The audit said twelve; the test found a thirteenth on
@@ -1265,8 +1299,11 @@ Documented in the audit performed on this repo, still open:
   were added with `core/jobs` and have no routes yet.) **`job.retry` left the list in P2-4**:
   `POST /notifications/deliveries/:id/retry` re-runs a failed e-mail delivery, which is exactly
   "re-run failed background work" — so the key was reused rather than a `notification.*` twin
-  being minted beside it. **The prose in that file still says "a thirteenth entry fails the
-  build" and is one behind** — the list is what counts.
+  being minted beside it. **`system.backup` left it in P2-5**, where it was finally enforced by
+  the backup module — and P2-5 minted `system.restore` beside it rather than reusing it,
+  because taking a backup and replacing the production database with one are not the same
+  authority. **The prose in that file still says "a thirteenth entry fails the build" and is
+  two behind** — the list is what counts.
 - `ContentEntry.scheduledAt` is read and cleared by the publish job but set by nothing — no
   endpoint, no UI. Scheduled publishing is half built.
 - ~~The `Notification` and `Redirect` Prisma models have tables and no implementation at all.~~
@@ -1420,3 +1457,4 @@ unknown token renders as itself rather than blanking a number on a live page.
 Everything in the content is checkable against iem.ch. **If you add a number, add its source.** Do
 not invent job titles for the team entries that have no published one — only the three
 Geschäftsleitung members state a function.
+

@@ -103,7 +103,6 @@ const KNOWN_UNENFORCED: Record<string, string> = {
   "seo.read": "no SEO module",
   "seo.update": "no SEO module",
   "system.api": "no API-key management",
-  "system.backup": "no backup endpoint",
   "user.impersonate": "no impersonation flow",
   // Added by F6 for the job runner, ahead of its controller (F10).
   //

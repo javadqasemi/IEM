@@ -1,9 +1,10 @@
-import { Controller, Get } from "@nestjs/common";
+﻿import { Controller, Get } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { WorkflowState } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { SettingsService } from "../core/settings/settings.service";
 import { MailStatusService } from "../mail/mail.status.service";
+import { BackupStatusService } from "../core/backup/backup.status.service";
 import { Public, RequirePermissions } from "../common/decorators";
 import { PERMISSIONS } from "../rbac/permissions.catalog";
 import { CONTENT_TYPES } from "../content/content-types";
@@ -25,8 +26,10 @@ export class DashboardController {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly settings: SettingsService,
-    /** One source for the mail verdict — see `health` on the integration row. */
+    /** One source for the mail verdict — see health on the integration row. */
     private readonly mailStatus: MailStatusService,
+    /** One source for the backup verdict, for the same reason. */
+    private readonly backupStatus: BackupStatusService,
   ) {}
 
   @Get("overview")
@@ -223,6 +226,7 @@ export class DashboardController {
     const smtpFromSettings = typeof mail["mail.smtpHost"] === "string" && mail["mail.smtpHost"].trim();
     const smtpFromEnv = Boolean(this.config.get("SMTP_HOST"));
     const mailStatus = await this.mailStatus.status();
+    const backupStatus = await this.backupStatus.status();
 
     const started = Date.now();
     let database: "ok" | "error" = "ok";
@@ -361,6 +365,28 @@ export class DashboardController {
           health: mailStatus.state,
         },
         {
+          key: "backup",
+          label: "Sicherung und Wiederherstellung",
+          /**
+           * `configured` is the *automatic* schedule, and `health` is whether
+           * there is actually a recovery point (P2-5).
+           *
+           * The two are deliberately different questions, and this row is the
+           * clearest case for keeping them apart: an installation can have
+           * automatic backups switched on and no usable backup — every run
+           * failing, or the tools missing — and a single green dot would say
+           * the opposite of the truth. `BackupStatusService` computes the
+           * verdict, and it is the same service the Sicherungen screen reads,
+           * so the two cannot disagree.
+           */
+          state: backupStatus.automatic ? "configured" : "unconfigured",
+          source: backupStatus.storage.kind === "LOCAL" ? "Lokale Festplatte" : backupStatus.storage.kind,
+          detail: backupStatus.automatic
+            ? `${backupStatus.recoveryPoints} Wiederherstellungspunkt(e)`
+            : "Automatische Sicherungen sind ausgeschaltet.",
+          health: backupStatus.state,
+        },
+        {
           key: "storage",
           label: "Dateiablage",
           state: "configured",
@@ -393,15 +419,15 @@ export class DashboardController {
           source: null,
           detail: "Standorte speichern Koordinaten und einen Kartenlink, es wird keine Karte eingebettet.",
         },
-        {
-          key: "backup",
-          label: "Sicherung",
-          state: "unbuilt",
-          source: null,
-          detail:
-            "Es gibt keine Sicherungsautomatik in dieser Anwendung. Sicherungen laufen ausserhalb " +
-            "(Datenbank und Medienverzeichnis). Siehe docs/ENTERPRISE_ROADMAP.md → P2-5.",
-        },
+        /*
+          The `unbuilt` backup row stood here and is **gone** (P2-5).
+
+          It was replaced *beside* rather than over on the first attempt, which
+          produced two integration rows keyed `backup` and a React duplicate-key
+          warning — the same mistake CLAUDE.md records against `SCREENS` in
+          P2-3, made again in a different list. `screens.spec.ts` fails the run
+          on a console error, which is what caught it within a minute.
+        */
       ],
     };
   }
@@ -413,3 +439,6 @@ export class DashboardController {
     return { status: "ok", time: new Date().toISOString() };
   }
 }
+
+
+

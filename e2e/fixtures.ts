@@ -268,6 +268,46 @@ export async function spendMailProbe(kind: "verify" | "test"): Promise<void> {
   }
 }
 
+/**
+ * Backups and restores, which are their own two buckets again (P2-5).
+ *
+ * `POST /backups` and `POST /backups/:id/restore` each allow **three a
+ * minute**, and both count refusals — which on the restore route are the
+ * common case, since a mistyped confirmation and an expired window both reach
+ * it.
+ *
+ * The failure without this is the one the sign-in budget has produced four
+ * times and the mail probes a fifth: a permission test asserting 400 or 403
+ * gets **429**, because `ThrottlerGuard` runs before `PermissionsGuard` and the
+ * request never reaches the thing under test. Here it is worse than usual,
+ * because the same spec's *positive* path — creating the backup the drill
+ * restores — is spent by the refusals that precede it.
+ *
+ * Two buckets rather than one, because the routes genuinely have two.
+ *
+ * **Call it immediately before every request to either route, including the
+ * ones expected to be refused.**
+ */
+const BACKUP_WINDOW_MS = 60_000;
+/** Two of three, leaving one attempt of headroom for anything unseen. */
+const BACKUP_CEILING = 2;
+
+const backupAttempts: Record<"create" | "restore", number[]> = { create: [], restore: [] };
+
+export async function spendBackupOp(kind: "create" | "restore"): Promise<void> {
+  const attempts = backupAttempts[kind];
+  for (;;) {
+    const now = Date.now();
+    while (attempts.length && now - attempts[0] >= BACKUP_WINDOW_MS) attempts.shift();
+    if (attempts.length < BACKUP_CEILING) {
+      attempts.push(now);
+      return;
+    }
+    const waitMs = BACKUP_WINDOW_MS - (now - attempts[0]) + 250;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
 /* ================================================================== */
 /* The refresh budget                                                  */
 /* ================================================================== */
@@ -827,6 +867,20 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
     rather than a control that might move.
   */
   { path: "/einstellungen/email", name: "settings-mail", heading: /Diagnose/i },
+  /*
+    Both halves of Backup & Recovery (P2-5), because they are different
+    screens with different shapes: one is a settings form with a panel under
+    it, the other is two tables and a destructive action. The axe pass and the
+    three widths have to see both — the history table is the widest thing in
+    the dashboard and is exactly where `scrollable-region-focusable` bit last
+    time.
+  */
+  { path: "/sicherungen", name: "backups", heading: /Wiederherstellungspunkte/i },
+  {
+    path: "/einstellungen/sicherung",
+    name: "settings-backup",
+    heading: /Aufbewahrung/i,
+  },
   /*
     Was the `unbuilt` placeholder until P2-3; it is now the organisation's
     rules plus the delivery log. The entry was *replaced* rather than added

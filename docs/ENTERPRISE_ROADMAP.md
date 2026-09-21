@@ -372,7 +372,88 @@ redirects plus robots.txt plus the fallback patterns from the organisation's web
 defaults. **Acceptance:** a redirect can be created and is served; two permissions leave
 the list.
 
-### P2-5 ○ Backup and recovery
+### P2-5 ✅ Backup and recovery — proved by restoring, not by dumping
+
+**Problem.** There was no backup system of any kind. `/dashboard/system` carried
+an `unbuilt` integration row saying so, `system.backup` had been in the permission
+catalogue since F6 guarding nothing, and `backup.create` had been in the job
+catalogue since F10 with no handler. Recovery was "somebody runs `pg_dump` by hand,
+we think".
+
+**Solution.**
+
+```
+schedule / button → BackupRun → job → pg_dump + tar + manifest
+                                   → checksum → verify (pg_restore --list)
+                                   → SUCCESS
+restore → permission → re-auth → typed word → verified? → compatible?
+        → no conflict → pre-restore backup (blocking) → write gate
+        → pg_restore → validate → gate opens
+```
+
+#### The decisions worth reading
+
+| | |
+| --- | --- |
+| **Completed ≠ verified** | Two columns, never one. A run is `SUCCESS` only after its checksums re-match and `pg_restore --list` / `tar -tzf` parse it. A file existing is not recoverability, and a module that conflated them would report files |
+| **Verified ≠ recoverable** | Which is why the **drill** exists: restore into `<db>_restore_drill`, then read back the migration state, a Super Admin, the organisation, the settings and the content. `pg_restore` exiting 0 proves none of that — it reports ownership notices as errors and restores partially without complaint in some failure modes |
+| **`DRILL` is the default mode** | The dangerous one is never pre-selected. An operator who opens the dialog and presses everything runs a drill, which proves the backup and changes nothing. And the typed word is required for *both*, because the muscle memory built on drills is what they bring to the real thing at 03:00 |
+| **The pre-restore backup blocks** | If it fails the restore is `ABORTED` before anything is overwritten. A safety net taken optimistically and ignored on failure is a gesture |
+| **Retention may never leave zero** | The last verified backup of each type survives whatever the counts say, along with protected runs, anything still running, and every `PRE_RESTORE` backup. `keep: 0` would otherwise mean "delete everything", and a misconfigured form is not a reason to have no backups |
+| **The preview *is* the deletion** | `planRetention` is pure and both the screen and the job call it. A preview computed differently from what it previews is a preview that lies exactly when somebody relies on it |
+| **`occurrenceKey` is a date, not a timestamp** | `2026-09-22:FULL`. A unique index, not a check. A timestamp would make every scheduler retry a separate full backup of the same night, which is how a nightly job fills a disk |
+| **An allowlist, not an exclude list** | The media archive names the directories it *does* take. An exclude list is a promise to remember every future directory somebody adds, and the forgotten one is the one with something in it |
+| **No password in `argv`** | `PGPASSWORD` in the child's environment, `spawn` with an argument array and `shell: false`. An argument is visible in `ps`, in a crash dump, and in libpq's own error text — which is also why `redactToolOutput` exists |
+| **The manifest has nowhere to put a secret** | Same technique as `EmailInput` and `MailProviderDescription`. `findSecretLikeKeys` runs over it before it is written, so a future field named `smtpPassword` fails the backup rather than shipping in it |
+| **Write protection is a process flag** | Not `site.maintenanceMode`. A flag in the database cannot govern an operation that is replacing that database — `pg_restore --clean` drops the `Setting` table partway through, so a guard reading it would find the row missing, the table missing, or the *restored* value |
+
+#### Delivered
+
+| | |
+| --- | --- |
+| Database | Three tables (`BackupRun`, `BackupArtifact`, `RestoreRun`), seven enums. Migration `20260921074026_backup_recovery`, **reviewed before applying** — purely additive, no `DROP`, no `ALTER COLUMN` |
+| Permissions | **One new key.** `system.backup` left `KNOWN_UNENFORCED` (14 → 12 with `job.retry`), and `system.restore` is new — it gates applying *and downloading* a backup, because the archive is the whole database and every applicant dossier. `administrator` holds the first and not the second |
+| Jobs | `backup.create` finally has a handler and its payload became an **id**; `backup.verify`, `backup.retention` and `backup.restore` are new. No second queue |
+| Scheduler | An hourly `@Cron` that decides in the handler, so moving the hour needs no restart. Redis lock for the tick, unique `occurrenceKey` for the night — both, because either alone leaks a duplicate in a case the other covers |
+| Frontend | `features/backup/` on the five layers; `/sicherungen` for operations and *Einstellungen → Sicherung* for configuration, using the additive `panel: true` slot for the second time |
+| Tests | +49 server unit, +13 e2e including the drill |
+| Runbook | `docs/BACKUP_RECOVERY_RUNBOOK.md` — storage, keys, verification, restore, emergency manual recovery, and the recovery-test procedure |
+
+**Acceptance, met and measured.** A `FULL` backup of this database is 9.95 MB in
+1.7 s, verified as *"Datenbank: 483 Objekte lesbar · Medien: 17 Einträge lesbar"*.
+The drill restored it into `iem_cms_restore_drill` and read back: migration
+`20260921074026_backup_recovery`, 16 migrations, 10 users, 1 Super Admin,
+*Ingenieurbüro IEM AG*, 29 settings, 160 content entries. The media archive
+extracted to an isolated path and **all 13 files were byte-identical by SHA-256**.
+
+**The folder was split mid-slice**, and the architecture test is what forced it.
+`backup/` held a controller *and* two services with readers outside the module —
+`MaintenanceService` for a global guard and `BackupStatusService` for
+`/dashboard/system` — which is the "infrastructure wearing a feature's folder
+name" problem `audit/` and `settings/` were fixed for. `core/backup/` holds the
+services; `backup/` holds the routes; the module classes are named for the split.
+
+**Not done, deliberately:**
+
+- **No off-site storage.** `BackupStorageProvider` is the interface; `LOCAL` is
+  the only implementation. The status API returns `offSiteWarning` and the UI
+  renders it, because a backup on the same disk as the database is not disaster
+  recovery and must not be presented as one.
+- **No encryption at rest.** The correct implementation is *streaming* over a
+  multi-gigabyte file, and `SecretEncryptionService` is an in-memory small-secret
+  cipher — using it here would load a dump into Node's heap. It also earns little
+  while artifacts sit on the same disk, readable by the same OS user that can read
+  `server/.env`. It belongs in the same slice as off-site storage, with a dedicated
+  `BACKUP_ENCRYPTION_KEY`. The runbook says all of this.
+- **In-place restore has never been executed against a live database.** Every
+  guard is implemented and the code path is exercised up to the point of
+  divergence; what has been *run and validated* is the drill. Proving
+  recoverability does not require destroying a working database, and the brief
+  says not to.
+- **No automatic drills.** A monthly scheduled drill would be the strongest
+  assurance this module could offer and is one cron entry away.
+
+### P2-5 ○ (superseded — see above)
 There is no backup system. The settings workspace says so rather than showing an empty
 panel, which is the honest interim. **Fix:** a scheduled `pg_dump` to the storage adapter
 as a `core/jobs` job, a retention policy, a restore that requires elevated confirmation.

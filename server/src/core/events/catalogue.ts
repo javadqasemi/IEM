@@ -145,6 +145,28 @@ export type DomainEvents = {
     durationMs?: number;
   };
 
+  /* ---- Backup and recovery (P2-5) ---------------------------------- */
+  /**
+   * Five events, and the **absence of a sixth** is the design.
+   *
+   * There is no `BackupCompleted`. A nightly backup that works is not news,
+   * and a platform that announces one produces 365 notifications a year whose
+   * only effect is to train people to ignore the category — which costs
+   * exactly the night it failed. The successes are visible in *System →
+   * Sicherungen*, where somebody goes to look; the failures come to them.
+   *
+   * `BackupVerified` exists despite that, and is deliberately **not** wired to
+   * a notification: it is the event a future reporting or compliance consumer
+   * will want ("prove this backup was checked"), and raising it costs nothing.
+   * An event nobody consumes is fine; a *notification* nobody wants is noise.
+   */
+  BackupFailed: { category: string };
+  BackupVerified: { type: string; ok: boolean };
+  BackupVerificationFailed: { type: string; category: string };
+  RestoreStarted: { mode: string; backupRunId: string };
+  RestoreCompleted: { mode: string; backupRunId: string };
+  RestoreFailed: { mode: string; category: string };
+
   /* ---- Authentication: the second factor --------------------------- */
   /**
    * The four MFA facts that happen **to a record**, and the reason they are
@@ -439,6 +461,12 @@ export const DOMAIN_EVENT_NAMES = [
   "OfficeRestored",
   "OfficeDeleted",
   "MailTested",
+  "BackupFailed",
+  "BackupVerified",
+  "BackupVerificationFailed",
+  "RestoreStarted",
+  "RestoreCompleted",
+  "RestoreFailed",
   "MfaEnabled",
   "MfaDisabled",
   "MfaReset",
