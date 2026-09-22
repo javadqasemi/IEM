@@ -16,6 +16,7 @@ import {
 } from "@/features/drawings";
 import { NotificationCenterRoute } from "@/features/notifications";
 import { BackupRoute } from "@/features/backup";
+import { SystemRoute } from "@/features/system";
 import { match } from "@/core/router";
 
 /**
@@ -398,6 +399,35 @@ export const ROUTES: Route[] = [
     permissions: ["system.backup"],
     component: BackupRoute,
     label: "Sicherungen",
+  },
+  /**
+   * The System Control Center — two patterns for one component (P2-6).
+   *
+   * The section is in the URL for the reason `/einstellungen/:section` and
+   * `/projekte/:id/:tab` are: `/system/aufgaben` is a link somebody sends a
+   * colleague and a place a reload returns to. The two-segment form is read
+   * first, which is reading order rather than correctness — `match()` is
+   * exact-length — and it keeps the pair legible beside its siblings.
+   *
+   * **`system.health` opens it, and the Aufgaben section additionally needs
+   * `job.read`.** Listing both here would shut somebody holding only
+   * `system.health` out of the overview their rail row points at, which is
+   * exactly what `routes.test.ts` caught on the settings workspace. The
+   * workspace hides the section it cannot open, and the server refuses it
+   * either way.
+   */
+  {
+    pattern: "/system/:section",
+    permissions: ["system.health"],
+    component: SystemRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "System",
+    parent: "/system",
+  },
+  {
+    pattern: "/system",
+    permissions: ["system.health"],
+    component: SystemRoute as LazyExoticComponent<ComponentType<Record<string, string>>>,
+    label: "System",
   },
   /**
    * Einstellungen — two patterns for one component, like `/projekte/:id`.

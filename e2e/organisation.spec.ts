@@ -189,7 +189,24 @@ test.describe("Unternehmen", () => {
       "not built"**, because one grey dot for both is how a missing feature
       gets waited on for ever.
     */
-    await expect(page.getByText(/Kein Build-Stempel/)).toBeVisible();
+    /*
+      The version row, and this assertion changed in P2-6 for the third time
+      on this test — which is the pattern the two notes around it describe.
+
+      It used to assert *"Kein Build-Stempel"* was visible, because nothing
+      stamped a build and `version` was a hardcoded `null`. P2-6 made it real:
+      `scripts/stamp-build.mjs` writes one, and `APP_VERSION`/`APP_COMMIT`
+      override it at deployment. So the old assertion would now be asserting a
+      lie on any machine that has run a build.
+
+      What survives is the property the test is actually about — **the row
+      never goes silently blank**. Either it names a version or a commit, or
+      it says why it cannot. Both are correct states and a developer who has
+      never run `npm run stamp` must not get a red suite for it.
+    */
+    const versionRow = page.getByText(/Kein Build-Stempel|[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{7,12}/);
+    await expect(versionRow.first()).toBeVisible();
+
     await expect(page.getByText(/Nicht angebunden/)).toBeVisible();
     await expect(page.getByText("Nicht gebaut").first()).toBeVisible();
 

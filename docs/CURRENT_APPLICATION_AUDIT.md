@@ -115,7 +115,7 @@ applications (9), auth (8), users (7), rbac (6).
 | --- | --- |
 | Offices / locations | `Office` model exists, is seeded, and has **no API and no screen** |
 | Departments | `Department` model exists, is seeded, **no API, no screen**; the site still uses a hardcoded option list |
-| Background jobs | `Job` table + runner + `job.read/retry/cancel` permissions, **no controller** |
+| ~~Background jobs~~ | ~~`Job` table + runner + `job.read/retry/cancel` permissions, **no controller**~~ — **built (P2-1/P2-6).** A list with filters, a detail with the scrubbed payload, retry and cancel behind a server-computed capability model, and a System Control Center around it. Two findings on the way: `JobStatus.FAILED` is written by nothing, and the runner had no heartbeat |
 | ~~Notifications~~ | ~~`Notification` model, **no implementation at all**~~ — **built (P2-2).** Four tables, ten typed notifications, two channels, a bell and a centre, nine domain events feeding it, and two new permissions. The row that stood here was right about more than the audit knew: the model had a `kind` column and a plaintext-shaped design, and replacing it was the first change |
 | SEO / redirects | `Redirect` model + `seo.read/update` permissions, **no module** |
 | Backups | `system.backup` permission, **no endpoint, no backup system** |
@@ -365,7 +365,7 @@ separate confirmed action.
 | 10 Integrations | Missing |
 | 11 Storage & media | Missing as configuration; real limits are constants |
 | 12 Backup & recovery | **Built (P2-5)** — three tables, `pg_dump` + `tar` + a manifest with SHA-256 per artifact, verification that parses the archives rather than trusting the exit code, retention that can never leave zero recovery points, and a **recovery drill** that restores into an isolated database and reads the records back. Configuration under *Einstellungen → Sicherung*, operations at `/sicherungen`. Local storage only and no encryption at rest — both stated in the UI and in `docs/BACKUP_RECOVERY_RUNBOOK.md` rather than implied away |
-| 13 System information | Partial — `/dashboard/health` gives database latency, seed sync, snapshot and audit counts, uptime, memory, Node version. No app version, no migration state, no queue state |
+| 13 System information | **Complete (P2-6).** `/dashboard/system/overview` gives eight subsystem verdicts with reasons and links, build identity (version, commit, build time, source), migration state, queue state, disk, security aggregates and the two subsystems that honestly do not exist. `/jobs` is the operator surface; `POST /diagnostics` runs eight active checks. **No score** — a maximum plus reasons, because a percentage cannot be acted on |
 
 ---
 

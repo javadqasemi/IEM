@@ -956,6 +956,40 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
     name: "settings-system",
     heading: /Migrationsstand/i,
   },
+  /*
+    The System Control Center, in two of its three sections (P2-6).
+
+    Both, because they are different *shapes* rather than the same screen with
+    different words: the overview is a grid of cards and a definition list,
+    Aufgaben is a filter bar over a wide `DataTable`. The table is what makes
+    the second entry worth the run — `scrollable-region-focusable` fires only
+    when a pane both overflows *and* holds no focusable element, so a
+    six-column table is exactly where it bit before, and it bites at tablet and
+    phone widths rather than at desktop.
+
+    Diagnose is deliberately **not** here. Its content appears only after a
+    button is pressed, and that button opens a real SMTP connection — running
+    it six times per suite (three widths × two themes) would make the
+    screenshot pass a load test against somebody else's mail server. Its empty
+    state is covered by the run on the overview's own axe pass, and its filled
+    state by `system.spec.ts`.
+  */
+  { path: "/system", name: "system-overview", heading: /Systemzustand/i },
+  /*
+    The Aufgaben section is identified by its **description**, not by
+    "Hintergrundaufgaben".
+
+    That word is the section's `usePageTitle`, so it lands in the breadcrumb —
+    which the shell hides at phone width. `getByText(...).first()` therefore
+    resolved to a hidden span ahead of the visible card title, and the test
+    failed at 390 px only. The breadcrumb is behaving correctly; the string
+    was the problem. This one appears once, in the page body, at every width.
+  */
+  {
+    path: "/system/aufgaben",
+    name: "system-jobs",
+    heading: /ausserhalb einer Anfrage/i,
+  },
   { path: "/audit", name: "audit", heading: /Audit/i },
   { path: "/profil", name: "profile", heading: /Profil|Konto/i },
   /**

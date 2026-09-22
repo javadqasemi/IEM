@@ -56,10 +56,38 @@ export function SystemSection({ section }: { section: SettingsSection }) {
             a nested `<dl>` is an axe `definition-list` violation, which is how
             this was written first and how the suite caught it.
           */}
+          {/*
+            Version, commit and build time — real since P2-6, and the fallback
+            is still the point.
+
+            This row carried a hardcoded "Kein Build-Stempel" for three
+            slices, because `package.json`'s `0.0.1` never changes and would
+            answer "ist der Fix deployed?" confidently and wrongly. Now there
+            is something true to show, and the absent case still says why.
+
+            **The `||` chain matters.** A deployment may set `APP_COMMIT` and
+            no `APP_VERSION`, which is a legitimate and common shape — and
+            `version ?? reason` would then render *nothing*, because both are
+            null. A silently blank row is worse than either answer.
+          */}
           <Pair label="Anwendungsversion" className="sm:col-span-2">
-            {info.runtime.version ?? (
+            {info.runtime.version || info.runtime.commit ? (
+              <span className="flex flex-col gap-0.5">
+                <span className="font-mono tnum">
+                  {info.runtime.version ?? "ohne Versionsnummer"}
+                </span>
+                <span className="text-[12px] text-muted">
+                  {[
+                    info.runtime.commit ? `Commit ${info.runtime.commit}` : null,
+                    info.runtime.builtAt ? `gebaut am ${info.runtime.builtAt.slice(0, 10)}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </span>
+            ) : (
               <span className="text-[13px] leading-snug text-muted">
-                {info.runtime.versionReason}
+                {info.runtime.versionReason ?? "Version unbekannt."}
               </span>
             )}
           </Pair>

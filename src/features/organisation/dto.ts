@@ -155,7 +155,10 @@ export type SystemInfoDto = {
     rssBytes: number;
     heapUsedBytes: number;
     version: string | null;
-    versionReason: string;
+    versionReason: string | null;
+    commit: string | null;
+    builtAt: string | null;
+    buildSource: "environment" | "stamp" | "none";
   };
   database: {
     status: "ok" | "error";

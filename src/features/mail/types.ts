@@ -1,3 +1,5 @@
+import type { HealthState } from "@/entities/system";
+
 /**
  * The mail channel as the dashboard understands it.
  *
@@ -50,7 +52,7 @@ export type MailFailureCategory = (typeof MAIL_FAILURE_CATEGORIES)[number];
  * been filled in teaches an operator that green means nothing, which costs
  * exactly the incident where it mattered.
  */
-export type MailState = "healthy" | "warning" | "critical" | "not_configured" | "unknown";
+export type MailState = HealthState;
 
 export type MailProbe = {
   at: string;

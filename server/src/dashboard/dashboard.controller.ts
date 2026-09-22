@@ -5,6 +5,8 @@ import { PrismaService } from "../common/prisma.service";
 import { SettingsService } from "../core/settings/settings.service";
 import { MailStatusService } from "../mail/mail.status.service";
 import { BackupStatusService } from "../core/backup/backup.status.service";
+import { SystemOverviewService } from "./system-overview.service";
+import { buildInfo } from "../common/build-info";
 import { Public, RequirePermissions } from "../common/decorators";
 import { PERMISSIONS } from "../rbac/permissions.catalog";
 import { CONTENT_TYPES } from "../content/content-types";
@@ -30,6 +32,8 @@ export class DashboardController {
     private readonly mailStatus: MailStatusService,
     /** One source for the backup verdict, for the same reason. */
     private readonly backupStatus: BackupStatusService,
+    /** The aggregate behind the System Control Center (P2-6). */
+    private readonly systemOverviewService: SystemOverviewService,
   ) {}
 
   @Get("overview")
@@ -298,6 +302,7 @@ export class DashboardController {
     for (const row of jobRows) jobs[row.status] = row._count._all;
 
     const storageDriver = this.config.get<string>("STORAGE_DRIVER") ?? "local";
+    const build = buildInfo();
 
     return {
       runtime: {
@@ -306,9 +311,26 @@ export class DashboardController {
         uptimeSeconds: Math.round(process.uptime()),
         rssBytes: process.memoryUsage().rss,
         heapUsedBytes: process.memoryUsage().heapUsed,
-        /** See the note above: nothing stamps a build, so nothing is claimed. */
-        version: null as string | null,
-        versionReason: "Kein Build-Stempel — Version und Commit werden nicht mitgeliefert.",
+        /*
+          The version, which used to be a hardcoded `null` (P2-6).
+
+          The note above this method still holds and is the reason this took
+          three slices: `package.json` says `0.0.1` and always has, so
+          returning it would answer "is the fix deployed?" confidently and
+          wrongly. What changed is that there is now something real to
+          return — `APP_VERSION`/`APP_COMMIT` from the deployment, or a stamp
+          written at build time by `scripts/stamp-build.mjs`.
+
+          **It still reports absent when it is absent.** `resolveBuildInfo`
+          falls through to `source: "none"` with a reason, which is the same
+          sentence this field carried before, now computed rather than
+          asserted.
+        */
+        version: build.version,
+        versionReason: build.reason,
+        commit: build.commit,
+        builtAt: build.builtAt,
+        buildSource: build.source,
       },
       database: {
         status: database,
@@ -430,6 +452,28 @@ export class DashboardController {
         */
       ],
     };
+  }
+
+  /**
+   * The System Control Center's one read (P2-6).
+   *
+   * `/dashboard/system` above stays exactly as it was: it is what the
+   * Einstellungen → System panel renders, it is asserted by
+   * `organisation.spec.ts`, and breaking it to reshape a payload would be a
+   * regression bought for tidiness. This is the *aggregate* — one verdict per
+   * subsystem with the reasons behind it — and it lives beside its sibling
+   * rather than in a parallel `/system/*` API, which is what the brief asks
+   * for and what stops two endpoints answering the same question differently.
+   *
+   * Behind `system.health`, like everything else on this controller. Reading
+   * whether the platform is well is not the same authority as operating it:
+   * retrying a job is `job.retry`, taking a backup is `system.backup`, and
+   * restoring one is `system.restore`.
+   */
+  @Get("system/overview")
+  @RequirePermissions("system.health")
+  systemOverview() {
+    return this.systemOverviewService.overview();
   }
 
   /** Liveness, for a load balancer. No auth, no database. */

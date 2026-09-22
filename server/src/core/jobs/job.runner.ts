@@ -44,6 +44,28 @@ export class JobRunner {
    */
   private ticking = false;
 
+  /**
+   * When the poller last completed a tick (P2-6).
+   *
+   * Added for one question the diagnostics could not otherwise answer: **is
+   * the job worker running at all?** Everything else about the queue is
+   * visible in the table — but a queue with waiting rows and no worker looks
+   * exactly like a queue whose jobs are not due yet, and that is the failure
+   * an operator most needs to be able to distinguish. Sixty waiting jobs is a
+   * backlog if a worker is alive and an outage if it is not.
+   *
+   * In memory rather than a row: it describes *this process*, it is written
+   * every ten seconds, and a heartbeat column would be a write per tick per
+   * worker for a value nobody reads between incidents. The cost is stated —
+   * with several instances, this answers for the one serving the request.
+   */
+  private lastTickAt: Date | null = null;
+
+  /** For the diagnostics check. `null` before the first tick completes. */
+  get lastTick(): Date | null {
+    return this.lastTickAt;
+  }
+
   constructor(
     private readonly jobs: JobService,
     private readonly bus: EventBus,
@@ -74,6 +96,15 @@ export class JobRunner {
       this.logger.error(`Job-Tick fehlgeschlagen: ${(err as Error).message}`);
     } finally {
       this.ticking = false;
+      /*
+        Stamped in `finally`, so a tick that threw still counts as a heartbeat.
+
+        The question this answers is "is the poller alive", not "did the last
+        batch succeed" — a worker that is running and failing is a different
+        and less alarming condition than one that has stopped, and the failure
+        above is already a log line and a `DEAD` row.
+      */
+      this.lastTickAt = new Date();
     }
   }
 

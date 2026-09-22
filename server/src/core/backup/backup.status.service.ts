@@ -3,6 +3,7 @@ import { BackupStatus, BackupType, RestoreStatus, VerificationStatus } from "@pr
 import type { Readable } from "node:stream";
 import { PrismaService } from "../../common/prisma.service";
 import { SettingsService } from "../settings/settings.service";
+import type { HealthState } from "../health/health";
 import { BACKUP_STORAGE, type BackupStorageProvider } from "./backup.storage";
 import { PostgresTools } from "./backup.postgres";
 import { nextScheduledRun } from "./backup.rules";
@@ -190,7 +191,15 @@ export class BackupStatusService {
   }
 }
 
-export type BackupState = "healthy" | "warning" | "critical" | "not_configured" | "unknown";
+/**
+ * Re-exported rather than re-declared (P2-6) — see the note on `MailState`.
+ *
+ * The same five values were written out here and in
+ * `mail/mail.status.service.ts`. They agreed, and nothing checked that they
+ * did; `core/health/health.ts` is now the one declaration and
+ * `health.test.ts` asserts over every value of it.
+ */
+export type BackupState = HealthState;
 
 export type BackupOverview = {
   state: BackupState;

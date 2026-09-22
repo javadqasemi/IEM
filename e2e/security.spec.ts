@@ -530,6 +530,55 @@ test.describe("the permission matrix, by verb", () => {
         expect: 404,
       },
       { who: "guest", method: "DELETE", path: "/content/entries/cmzzzznotarealid0000/schedule", expect: 403 },
+
+      /*
+        Job Operations (P2-6), and the three keys F6 declared for a runner
+        that had no surface.
+
+        `job.read` opens the list, `job.retry` re-runs work that did not
+        happen, `job.cancel` stops work that has not started. They are three
+        rather than one because they are three authorities: reading the queue
+        discloses what the system has been doing, and the other two change it.
+
+        The ids are fabricated, so 403 is the guard and 404 is the handler —
+        the two halves of the proof, the same pattern the sessions rows above
+        describe. Nobody but Super Admin holds any of the three in the seeded
+        roles, which makes this block mostly refusals; that is what a
+        permission matrix is for, and the positive path is `system.spec.ts`.
+      */
+      { who: "guest", method: "GET", path: "/jobs", expect: 403 },
+      { who: "engineer", method: "GET", path: "/jobs", expect: 403 },
+      { who: "administrator", method: "GET", path: "/jobs", expect: 403 },
+      { who: "superAdmin", method: "GET", path: "/jobs", expect: 200 },
+      {
+        who: "administrator",
+        method: "POST",
+        path: "/jobs/cmzzzznotarealid0000/retry",
+        body: {},
+        expect: 403,
+      },
+      {
+        who: "superAdmin",
+        method: "POST",
+        path: "/jobs/cmzzzznotarealid0000/retry",
+        body: {},
+        expect: 404,
+      },
+      {
+        who: "management",
+        method: "POST",
+        path: "/jobs/cmzzzznotarealid0000/cancel",
+        body: {},
+        expect: 403,
+      },
+
+      /*
+        The System Control Center's read model, behind `system.health` — the
+        same key `/dashboard/system` has carried since P1-1, deliberately
+        reused rather than minted anew.
+      */
+      { who: "guest", method: "GET", path: "/dashboard/system/overview", expect: 403 },
+      { who: "engineer", method: "GET", path: "/dashboard/system/overview", expect: 200 },
     ];
 
     for (const c of cases) {

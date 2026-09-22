@@ -591,6 +591,27 @@ function operationalSections(badges: {
         "system.backup",
       ],
       items: [
+        /**
+         * First, because it is the way in (P2-6).
+         *
+         * The System Control Center is where somebody goes when they do not
+         * yet know which subsystem is at fault — so it sits above the eight
+         * rows that each assume you already do. Every card on it links to the
+         * module below that owns the detail, which is why this group did not
+         * grow eight more entries.
+         *
+         * `job.read` is **not** listed: the workspace opens on `system.health`
+         * and hides the Aufgaben section from anybody without the second key.
+         * Requiring both here would shut a reader out of the overview their
+         * own row points at — the mistake `routes.test.ts` caught on the
+         * settings workspace.
+         */
+        {
+          id: "system-overview",
+          to: "/system",
+          label: "Systemzustand",
+          permissions: ["system.health"],
+        },
         {
           id: "settings",
           to: "/einstellungen/email",

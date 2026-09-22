@@ -297,8 +297,21 @@ describe("toSystemInfo", () => {
         uptimeSeconds: 120,
         rssBytes: 1,
         heapUsedBytes: 1,
+        /*
+          The absent case, kept deliberately (P2-6).
+
+          The build identity is real now — a deployment sets `APP_VERSION`, or
+          `npm run stamp` writes one — but *absent with a reason* is still a
+          state the mapper has to carry unchanged, and it is the one that used
+          to be hardcoded. A fixture that only exercised the happy path would
+          stop guarding the row that matters: the one where the screen must
+          say why it does not know rather than going blank.
+        */
         version: null,
         versionReason: "kein Build-Stempel",
+        commit: null,
+        builtAt: null,
+        buildSource: "none" as const,
       },
       database: {
         status: "ok" as const,

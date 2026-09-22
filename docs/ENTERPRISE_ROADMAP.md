@@ -114,7 +114,7 @@ weaken a control.
 warns; validation errors appear on the field; dangerous changes confirm; the layout works
 at phone width with no horizontal overflow.
 
-### P1-3 ◐ Operational visibility: system, storage, integrations
+### P1-3 ✅ Operational visibility: system, storage, integrations
 
 **Problem.** `/dashboard/health` reports database latency, seed sync and process figures.
 There is no application version, no migration state, no queue state, no storage
@@ -130,7 +130,15 @@ actually exists* rather than from a table of intentions.
 
 **Done in this pass:** the panel, the endpoint, storage and queue figures, and integration
 status for mail, storage, cache and the two that are genuinely absent.
-**Still open:** deployment identity (commit/build time) — needs a build-time stamp.
+
+~~**Still open:** deployment identity (commit/build time) — needs a build-time stamp.~~
+**Closed in P2-6.** `scripts/stamp-build.mjs` writes `server/build-info.json` before a
+build and `resolveBuildInfo` reads it — after the environment, which a container
+deployment sets and which must win because the image may have been built elsewhere.
+**`git` is run at build time and never at runtime**: a production container has no `.git`,
+may not be allowed to spawn, and would be describing a checkout rather than the artefact.
+When nothing stamped the build it still reports absent *with the reason*, which is the
+answer the field carried before — now computed rather than asserted.
 
 **Acceptance.** No secret is exposed; every figure is measured rather than declared; an
 absent integration says *absent*, never *ok*.
@@ -293,12 +301,46 @@ route.
 
 ## P2 — Important
 
-### P2-1 ○ Background jobs have no operator surface
-`core/jobs` is durable, retried and attributable, and the `Job` table is the row an
-operator needs when an export never arrives — but there is no controller and no screen,
-and `job.read`/`retry`/`cancel` guard nothing. **Fix:** a jobs list with state filter,
-payload, attempts, last error, and retry/cancel actions. **Acceptance:** a failed job can
-be diagnosed and retried from the dashboard; three permissions leave `KNOWN_UNENFORCED`.
+### P2-1 ✅ Background jobs have no operator surface — and the System Control Center around it
+
+**Problem.** `core/jobs` was durable, retried and attributable, and the `Job` table was
+the row an operator needs when an export never arrives — with no controller, no screen,
+and `job.read`/`retry`/`cancel` guarding nothing since F6.
+
+**What was built.** The jobs surface, and the operations page it belongs on.
+
+| | |
+| --- | --- |
+| Rules | `core/jobs/jobs.rules.ts` — a **capability model** (`retryable`/`cancellable` with a refusal sentence each), the derived `phase`, and the queue's own health. 35 tests over every status × every catalogue name |
+| API | `GET /jobs`, `/jobs/stats`, `/jobs/:id`, `POST /jobs/:id/retry`, `/jobs/:id/cancel` — in `core/jobs/`, beside `MetricsController`, because a `system/` feature folder would owe a `*.metrics.ts` it has nothing to fill in |
+| Aggregation | `GET /dashboard/system/overview` — eight subsystems, each with a state, reasons and a link. Extends `/dashboard` rather than opening a parallel `/system/*` API |
+| Health vocabulary | `core/health/health.ts` and `entities/system` — the five-valued union was declared **four times** and agreed by coincidence |
+| Diagnostics | `core/diagnostics/` — eight active checks, `POST` and throttled, audited as `system.diagnostics_run` |
+| Frontend | `features/system/` on the five layers; `/system`, `/system/aufgaben`, `/system/diagnose` |
+| Tests | +51 server unit, +22 client unit, +23 e2e, +9 security-matrix cells |
+
+**Two findings the work turned up, neither of them the feature being built:**
+
+- **`JobStatus.FAILED` is written by nothing.** `JobService.fail` writes `DEAD` when the
+  attempts run out and `QUEUED` when they do not, so no row ever sits in `FAILED` — while
+  `JobService`'s own docstring describes it as "the transient state between a failed
+  attempt and the retry". The enum value is left alone (removing one is a migration) and
+  `UNREACHABLE_STATUSES` records it, because the damage a filter chip for it would do is
+  specific: an empty list that an operator reads as "there are no failures".
+- **`JobRunner` had no heartbeat.** A queue with waiting rows and no worker looks exactly
+  like a queue whose jobs are not due yet, and that is the failure an operator most needs
+  to tell apart. `lastTick` is stamped in a `finally`, so a tick that threw still counts
+  as alive — "is the poller running" and "did the last batch succeed" are different
+  questions.
+
+**Not done, deliberately:** generic cancellation of a running job. There is no
+cancellation token in this queue, so marking a row cancelled while the worker carries on
+writing to it would be a status the system cannot deliver. `refuseCancel` says so in
+those words rather than hiding the button.
+
+**Acceptance.** Met: a dead job can be diagnosed and retried from the dashboard,
+`job.read` and `job.cancel` left `KNOWN_UNENFORCED` (`job.retry` left it in P2-4), and a
+`backup.restore` job is refused in every status.
 
 ### P2-2 ✅ Notifications are a table and nothing else
 

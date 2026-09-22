@@ -1,3 +1,5 @@
+import type { HealthState } from "@/entities/system";
+
 /**
  * Backups as the dashboard understands them.
  *
@@ -34,8 +36,15 @@ export type RestoreStatus =
   | "FAILED"
   | "ABORTED";
 
-/** Five states, and `unknown` means "never taken one" — never `healthy`. */
-export type BackupState = "healthy" | "warning" | "critical" | "not_configured" | "unknown";
+/**
+ * Five states, and `unknown` means "never taken one" — never `healthy`.
+ *
+ * **Re-exported rather than re-declared** (P2-6). The same union was written
+ * out here, in `features/mail/types.ts`, and twice more on the server. All
+ * four agreed, and nothing compared them; `entities/system` is now the one
+ * declaration on this side, together with the label and tone each state gets.
+ */
+export type BackupState = HealthState;
 
 export type BackupArtifact = {
   kind: "DATABASE_DUMP" | "MEDIA_ARCHIVE" | "MANIFEST";

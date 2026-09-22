@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { AuditOutcome, Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma.service";
 import { correlationId } from "../context/request-context";
+import { scrub } from "../redaction/redact";
 import type { AuthUser } from "../../common/decorators";
 
 export type AuditInput = {
@@ -90,42 +91,19 @@ export class AuditService {
   }
 }
 
-/**
- * Field names whose values never belong in the audit log.
- *
- * Matched case-insensitively on the *key*, at any depth. It is a denylist, and
- * a denylist is the weaker choice — but the values being logged are arbitrary
- * content documents, so an allowlist would mean logging almost nothing. The
- * mitigation is that the only records with secrets in them are users, tokens
- * and settings, and all three are covered here.
- */
-const SECRET_KEYS = [
-  "password",
-  "passwordhash",
-  "mfasecret",
-  "tokenhash",
-  "token",
-  "secret",
-  "apikey",
-  "authorization",
-  "cookie",
-  "smtppassword",
-];
+/*
+  The denylist and `scrub` **moved to `core/redaction/redact.ts`** in P2-6.
 
-const REDACTED = "«entfernt»";
+  They were right here, and they stayed right until a second reader needed the
+  same guarantee: the Job Operations screen renders `Job.payload`, which is
+  arbitrary JSON written by whoever enqueued the job. A second copy of the
+  denylist is a second thing to remember to extend, and the failure is the
+  quiet one — somebody adds a key here after an incident and the jobs screen
+  goes on showing the value that was just declared too dangerous to log.
 
-function scrub(value: unknown, depth = 0): unknown {
-  if (value == null || depth > 12) return value ?? undefined;
-  if (Array.isArray(value)) return value.map((v) => scrub(v, depth + 1));
-  if (typeof value !== "object") return value;
-  if (value instanceof Date) return value.toISOString();
-
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = SECRET_KEYS.includes(k.toLowerCase()) ? REDACTED : scrub(v, depth + 1);
-  }
-  return out;
-}
+  The behaviour is unchanged, including the `undefined`-for-null return that
+  keeps Prisma from writing a SQL NULL over a column this row does not set.
+*/
 
 function toJson(value: unknown): Prisma.InputJsonValue | undefined {
   if (value === undefined) return undefined;

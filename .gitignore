@@ -28,6 +28,11 @@ __pycache__/
 
 # Runtime data: uploads, generated media, job-application dossiers.
 var/
+
+# The build stamp (P2-6). Written by `npm run stamp` before a build and read
+# by `resolveBuildInfo`; committing it would put a commit hash in the tree
+# that is wrong the moment anybody commits again.
+server/build-info.json
 # Playwright
 e2e/report/
 e2e/shots/

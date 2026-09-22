@@ -122,8 +122,12 @@ const KNOWN_UNENFORCED: Record<string, string> = {
   // reused rather than a `notification.retryDelivery` being minted beside it —
   // a second name for one authority is two checkboxes a person has to hold
   // together to be useful.
-  "job.read": "the job runner ships before its screen",
-  "job.cancel": "the job runner ships before its screen",
+  /*
+    `job.read` and `job.cancel` **left this list in P2-6**, and with them the
+    last of the three keys F6 declared for a runner that had no operator
+    surface. `job.retry` went first, in P2-4, on the notification-delivery
+    route; `core/jobs/jobs.controller.ts` now enforces all three.
+  */
 };
 
 describe("the catalogue is derived from the resources", () => {

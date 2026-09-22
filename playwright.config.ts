@@ -176,6 +176,23 @@ const MUTATES = [/organisation\.spec\.ts/, /sessions\.spec\.ts/];
 const PUBLISHING = [/publishing\.spec\.ts/];
 
 /**
+ * The System Control Center, once, for the reason `mail.spec.ts` gives: it
+ * **reaches a third party**.
+ *
+ * `system.spec.ts` runs the diagnostics, which opens an SMTP connection and
+ * writes a probe file to the backup volume. That route is throttled at three
+ * a minute server-side, and the spec spends two of them — so at three widths
+ * it would meet its own 429 and report it as a broken diagnostics endpoint.
+ *
+ * Nothing is lost by running it once. Every assertion is about an API
+ * response, a permission or the presence of a control, and `screens.spec.ts`
+ * already photographs `/system` and `/system/aufgaben` at all three widths in
+ * both themes — which is where the responsive question about the job table is
+ * actually answered.
+ */
+const SYSTEM = [/system\.spec\.ts/];
+
+/**
  * Suites that assert about the *repository* rather than about the running
  * application, and are therefore width-independent by construction.
  *
@@ -196,6 +213,7 @@ const RUN_ONCE = [
   ...MAIL,
   ...BACKUP,
   ...PUBLISHING,
+  ...SYSTEM,
 ];
 
 export default defineConfig({

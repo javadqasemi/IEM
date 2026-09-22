@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { NotificationChannel, NotificationDeliveryStatus } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { SecretSettingsService } from "../core/settings/settings.secrets";
+import type { HealthState } from "../core/health/health";
 import { MailService } from "./mail.service";
 import type { MailFailureCategory } from "./mail.failure";
 
@@ -206,7 +207,20 @@ export class MailStatusService {
   }
 }
 
-export type MailState = "healthy" | "warning" | "critical" | "not_configured" | "unknown";
+/**
+ * The five-valued verdict, **re-exported rather than re-declared** (P2-6).
+ *
+ * This union was written out here and identically in
+ * `core/backup/backup.status.service.ts`, and the two agreed by coincidence:
+ * nothing compared them. The System Control Center would have been the fifth
+ * copy, so the declaration moved to `core/health/health.ts` and the name stays
+ * here for every existing caller.
+ *
+ * The alias is not laziness — `MailState` is the right word in mail's own
+ * vocabulary, and a caller reading `MailStatus.state` should not have to know
+ * that the type is shared to understand it.
+ */
+export type MailState = HealthState;
 
 export type MailProbe = {
   at: string;

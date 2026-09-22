@@ -180,9 +180,22 @@ export type SystemInfo = {
     uptimeSeconds: number;
     rssBytes: number;
     heapUsedBytes: number;
-    /** Null: nothing stamps a build here. `versionReason` says so on screen. */
+    /**
+     * The build identity, real since P2-6.
+     *
+     * All four are nullable together: `APP_VERSION`/`APP_COMMIT`/`APP_BUILT_AT`
+     * from the deployment, else the stamp `scripts/stamp-build.mjs` writes,
+     * else nothing — and `versionReason` is present exactly when nothing is,
+     * which is what stops the row going silently blank.
+     *
+     * A deployment may legitimately set only a commit, so the screen checks
+     * `version || commit` rather than `version` alone.
+     */
     version: string | null;
-    versionReason: string;
+    versionReason: string | null;
+    commit: string | null;
+    builtAt: string | null;
+    buildSource: "environment" | "stamp" | "none";
   };
   database: {
     status: "ok" | "error";

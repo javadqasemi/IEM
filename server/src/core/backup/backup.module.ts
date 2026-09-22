@@ -53,6 +53,27 @@ import { BACKUP_STORAGE, LocalBackupStorage } from "./backup.storage";
     PostgresTools,
     { provide: BACKUP_STORAGE, useClass: LocalBackupStorage },
   ],
-  exports: [BackupService, BackupStatusService, RestoreService, MaintenanceService],
+  /*
+    `PostgresTools` and `BACKUP_STORAGE` joined the exports in P2-6.
+
+    Both were internal, correctly: nothing outside the module had business
+    spawning `pg_dump` or writing into the backup volume. Diagnostics does,
+    and for exactly two questions it cannot answer any other way — *are the
+    tools installed* and *is the volume writable*. It calls `available()` and
+    writes one probe file; it does not dump, restore or read an artifact,
+    which remain `BackupService`'s and behind `system.backup`/`system.restore`.
+
+    Widened rather than duplicated: a second `statfs` and a second PATH lookup
+    in a diagnostics module would answer a slightly different question than
+    the backup screen does, and the two would disagree on the day it mattered.
+  */
+  exports: [
+    BackupService,
+    BackupStatusService,
+    RestoreService,
+    MaintenanceService,
+    PostgresTools,
+    BACKUP_STORAGE,
+  ],
 })
 export class BackupModule {}

@@ -87,6 +87,7 @@ permissions and the tests, not a folder with the same names in it.
 | P2·3 | **Publishing** — the three verbs the workflow was short. The transition table moved out of the service into `content.rules.ts` and is now asserted over all thirty-six pairs; `unpublish`, `schedule` and `cancelSchedule` take a **required** `expectedVersion`; `GET /content/queue` derives an effect per row; and a cron that recorded a failed publish as a successful job was fixed |
 | P2·4 | **E-Mail-Betrieb** — a `MailProvider` seam with SMTP as its one implementation, nine sanitized failure categories, a connection test beside the test send, a template catalogue with previews, and secrets encrypted at rest under a key of their own. No migration, no new permission, and the first route to enforce `job.retry` |
 | P2·5 | **Sicherung und Wiederherstellung** — three tables, `pg_dump`/`tar`/manifest with SHA-256, verification that parses the artifacts, retention that can never leave zero recovery points, and a **recovery drill** that restores into an isolated database and reads the records back. One new permission; `system.backup` finally enforced |
+| P2·6 | **System Control Center und Job Operations** — no migration and no new permission. One health vocabulary where there were four, a capability model that decides what an operator may do with a job, eight active diagnostics, and a build identity stamped at build time. `job.read` and `job.cancel` finally enforced |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -212,6 +213,7 @@ npm run e2e:security   # the role x verb x resource matrix, against the live API
 npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
 npm run e2e:publishing # the workflow end to end, asserted against the public document
+npm run e2e:system     # the System Control Center, Job Operations and the diagnostics
 npm run e2e:install    # once per machine: downloads the browser
 npm run e2e:mail       # Email Operations, incl. a real SMTP transaction
 npm run e2e:backup     # Backup and recovery, incl. the RECOVERY DRILL
@@ -571,6 +573,31 @@ never fired because the job never reached `DEAD`, and the entries kept their app
 publication simply never having happened. Publishing twice is not the risk it looks like: the
 publish is a snapshot build, so a second run over the same entries produces the same document.
 
+**One denylist redacts everything that leaves the server.** `core/redaction/redact.ts` holds
+`SECRET_KEYS` and `scrub`; `AuditService` used to own them privately and now imports them, because
+P2-6 gave them a second reader — the Job Operations screen renders `Job.payload`, which is
+arbitrary JSON written by whoever enqueued the job. The failure a second copy produces is quiet:
+somebody adds a key to the audit list after an incident and the jobs screen goes on showing the
+value that was just declared too dangerous to log. `scrubBounded` adds a **visible** size ceiling
+on top — a payload silently cut in half is worse than none, because the reader believes they have
+the whole thing.
+
+**`JobStatus.FAILED` is written by nothing, and a filter for it would lie.** `JobService.fail`
+writes `DEAD` when the attempts are exhausted and `QUEUED` when they are not, so no row ever
+sits in `FAILED` — while `JobService`'s own docstring calls it "the transient state between a
+failed attempt and the retry", which describes a design the implementation did not follow. The
+enum value is left alone, because removing one is a migration and it is inert either way. What
+must not happen is a chip labelled *Fehlgeschlagen* that returns an empty list for ever, which
+an operator reads as "there are no failures". `UNREACHABLE_STATUSES` in `core/jobs/jobs.rules.ts`
+records it and the jobs screen offers *Nur aufgegebene* instead.
+
+**A job's `phase` is derived and its `capabilities` are computed server-side.** `QUEUED` with
+attempts already spent is `RETRYING` — the same row, opposite news, and the database cannot tell
+them apart. `retryable`/`cancellable` travel with every row **with a refusal sentence each**,
+because a dashboard that worked the rules out itself would hold a copy of `NEVER_RETRYABLE` that
+is one entry behind on the day it matters. `backup.restore` is refused in every status: a restore
+that died half way did not leave the database untouched, so "try again" is not the recovery path.
+
 **`ContentPublishFailed` is the one event in the codebase flushed by hand.** `EventBus.publish`
 queues onto the ambient context and `JobRunner` calls `discard()` on a failed job — correctly,
 because an event describing work that did not finish is a lie. This event describes the *failure*,
@@ -583,6 +610,23 @@ index doing the de-duplication a flag on the class would do worse.
 preserve key order, so a plain `JSON.stringify` comparison against a freshly built object reports
 almost every object as changed. `snapshot.builder.ts` sorts keys recursively before comparing; reuse
 that rather than writing a second comparison.
+
+**There is one health vocabulary, and it used to be four.** `healthy | warning | critical |
+not_configured | unknown` was written out in `mail.status.service.ts`,
+`core/backup/backup.status.service.ts`, `features/mail/types.ts` and `features/backup/types.ts`.
+All four agreed — which is what made it worth fixing, because they agreed by coincidence and
+nothing compared them. It is now `core/health/health.ts` on the server and `entities/system` on
+the client; the *labels and tones* are shared and the *explanatory sentence* stays per domain,
+because "Es gibt fehlgeschlagene Zustellungen" is about mail and would be wrong under a backup
+card. `unknown` is the value that earns the union: configured and never tested, drawn neutral
+rather than green, because a green light meaning "the fields are filled in" teaches an operator
+that green means nothing.
+
+**The overall verdict is a maximum plus reasons, never a score.** `overallHealth` returns the
+worst subsystem and the sentences behind it. A percentage — *Systemzustand: 93 %* — cannot be
+acted on without expanding it back into the list it was computed from, it moves when nothing
+anybody cares about has changed, and 93 % reads as "fine" on the morning the backups stopped.
+`service.test.ts` asserts no `%` ever appears in the banner.
 
 **A setting is a typed declaration, not a JSON blob under a string key.** `SettingDef` in
 `core/settings/settings.service.ts` carries a `type`, `min`/`max`, `options` and `unit`, and
@@ -1332,11 +1376,12 @@ Documented in the audit performed on this repo, still open:
   with what it is waiting for. A new one fails the build, and so does an entry that has started
   being enforced and was left on the list. (The audit said twelve; the test found a thirteenth on
   its first run and it was a false positive — `settings.secrets` is checked inside the handler
-  rather than by a decorator, which is the documented `◐` pattern. `job.read` and `job.cancel`
-  were added with `core/jobs` and have no routes yet.) **`job.retry` left the list in P2-4**:
-  `POST /notifications/deliveries/:id/retry` re-runs a failed e-mail delivery, which is exactly
-  "re-run failed background work" — so the key was reused rather than a `notification.*` twin
-  being minted beside it. **`system.backup` left it in P2-5**, where it was finally enforced by
+  rather than by a decorator, which is the documented `◐` pattern.) **`job.retry` left the list
+  in P2-4**: `POST /notifications/deliveries/:id/retry` re-runs a failed e-mail delivery, which
+  is exactly "re-run failed background work" — so the key was reused rather than a
+  `notification.*` twin being minted beside it. **`job.read` and `job.cancel` left it in P2-6**,
+  which is where the runner finally got the operator surface F6 declared them for; all three job
+  keys are now enforced by `core/jobs/jobs.controller.ts`. **`system.backup` left it in P2-5**, where it was finally enforced by
   the backup module — and P2-5 minted `system.restore` beside it rather than reusing it,
   because taking a backup and replacing the production database with one are not the same
   authority. **`content.schedule` and `content.unpublish` left it in P2-3**, both describing the
@@ -1354,6 +1399,24 @@ Documented in the audit performed on this repo, still open:
   **Notification is built (P2-2)** — one platform, four tables, ten types, two channels.
   `Redirect` still has a table, a hits counter, an enable flag and no implementation of any
   kind; `seo.read` and `seo.update` are two of the unenforced keys (P2-4).
+- **There is no application log store**, and the System Control Center says so rather than
+  rendering an empty table. Nest's `Logger` writes to stdout and whatever supervises the
+  process keeps it or does not — there is no `LogEntry` model, no winston and no pino. A
+  "Logs" screen listing nothing is indistinguishable from a quiet system, which is the
+  single most misleading thing an operations page can do. It is also deliberately **not**
+  the audit log wearing a different hat: audit answers *who changed what*, logs answer
+  *what happened technically*, and merging them produces a table that is bad at both and a
+  retention policy that cannot be right for either.
+- **There is no updater.** `/system` reports the mechanism as absent; updates happen through
+  the deployment. A button that appeared to update the application and did not would be
+  worse than the sentence.
+- **A running job cannot be cancelled**, and the refusal says why rather than hiding the
+  button: there is no cancellation token in this queue, so marking a row cancelled while
+  the worker carries on writing to it would be a status the system cannot deliver.
+- **`JobRunner.lastTick` answers for one process.** It is in memory, so on a multi-instance
+  deployment the diagnostics' worker check describes whichever instance served the request.
+  A heartbeat column would be a write per tick per worker for a value nobody reads between
+  incidents.
 - `Department` has a table, a tree and a head, and **no API and no screen**; the team content
   type's `group` is still a hardcoded option list. Standorte got their module first because the
   website reads them; Abteilungen are `docs/ENTERPRISE_ROADMAP.md` → P2-6.
