@@ -1,3 +1,4 @@
+import { markRequirable } from "./requirable";
 import { forwardRef, useEffect, useState, type InputHTMLAttributes } from "react";
 import { Input } from "./inputs";
 
@@ -74,3 +75,6 @@ export const ListInput = forwardRef<HTMLInputElement, ListInputProps>(function L
     />
   );
 });
+
+// Passes `aria-required` to a real input — see `requirable.ts`.
+markRequirable(ListInput);

@@ -1,5 +1,7 @@
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { cn } from "@/shared/utils/cn";
+import { useInForm } from "./Form";
+import { isRequirable } from "./requirable";
 
 /**
  * The wrapper every input sits in.
@@ -25,6 +27,24 @@ import { cn } from "@/shared/utils/cn";
  * child element and supplies `aria-describedby` and `aria-invalid`. A call site
  * that sets either itself still wins — `FieldRenderer` does, and a composite
  * control may have a better answer than this component can guess.
+ *
+ * ---
+ *
+ * **Required, as of P1C.** The *visible* convention stays — "(optional)" on
+ * the exceptions, nothing on the rest — and it now reaches assistive
+ * technology too: inside a `<Form>`, a field that is not `optional` gives its
+ * control `aria-required`, so "Pflichtfeld" is announced where a sighted reader
+ * infers it from the missing marker. Outside a form (a filter bar, a read-only
+ * panel) nothing is claimed. `required` overrides either way. Only controls
+ * known to pass the attribute to a real input receive it — see `requirable.ts`.
+ *
+ * **Hint and error together.** An error used to *replace* the hint, so the
+ * sentence explaining the format disappeared at the moment the reader got the
+ * format wrong. Both are shown and both are in `aria-describedby`, error first.
+ *
+ * **`readOnlyReason`** says why a field cannot be changed — "Nur mit der
+ * Berechtigung für rechtliche Angaben" — in visible text, the field-level twin
+ * of a button's `disabledReason`. It never contains a permission key.
  */
 export function Field({
   label,
@@ -32,6 +52,8 @@ export function Field({
   hint,
   error,
   optional,
+  required,
+  readOnlyReason,
   action,
   children,
   className,
@@ -41,6 +63,9 @@ export function Field({
   hint?: string;
   error?: string;
   optional?: boolean;
+  /** Overrides the in-form default (required unless `optional`). */
+  required?: boolean;
+  readOnlyReason?: string | null;
   /**
    * Shown at the end of the label row — a badge or a small control that
    * qualifies the field rather than being part of it.
@@ -54,7 +79,13 @@ export function Field({
   children: ReactNode;
   className?: string;
 }) {
-  const describedBy = error ? `${htmlFor}-error` : hint ? `${htmlFor}-hint` : undefined;
+  const inForm = useInForm();
+  const isRequired = required ?? (inForm && !optional);
+
+  const errorId = error ? `${htmlFor}-error` : undefined;
+  const hintId = hint ? `${htmlFor}-hint` : undefined;
+  const reasonId = readOnlyReason ? `${htmlFor}-reason` : undefined;
+  const describedBy = [errorId, reasonId, hintId].filter(Boolean).join(" ") || undefined;
 
   /**
    * The child, wired to its own message.
@@ -64,15 +95,21 @@ export function Field({
    * rendered untouched: guessing which of three inputs a description belongs to
    * would be worse than leaving it to the caller.
    */
-  const control =
-    isValidElement(children) && describedBy
-      ? cloneElement(children as ReactElement<Record<string, unknown>>, {
-          "aria-describedby":
-            (children.props as Record<string, unknown>)["aria-describedby"] ?? describedBy,
-          "aria-invalid":
-            (children.props as Record<string, unknown>)["aria-invalid"] ?? (error ? true : undefined),
-        })
-      : children;
+  let control: ReactNode = children;
+  if (isValidElement(children)) {
+    const props = children.props as Record<string, unknown>;
+    const extra: Record<string, unknown> = {};
+    if (describedBy) {
+      extra["aria-describedby"] = props["aria-describedby"] ?? describedBy;
+      extra["aria-invalid"] = props["aria-invalid"] ?? (error ? true : undefined);
+    }
+    if (isRequired && isRequirable(children.type) && props["aria-required"] === undefined) {
+      extra["aria-required"] = true;
+    }
+    if (Object.keys(extra).length) {
+      control = cloneElement(children as ReactElement<Record<string, unknown>>, extra);
+    }
+  }
 
   return (
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
@@ -87,11 +124,17 @@ export function Field({
       </div>
       {control}
       {error ? (
-        <p id={`${htmlFor}-error`} role="alert" className="text-[12px] font-medium text-brand-bronze">
+        <p id={errorId} role="alert" className="text-[12px] font-medium text-brand-bronze">
           {error}
         </p>
-      ) : hint ? (
-        <p id={`${htmlFor}-hint`} className="text-[12px] leading-snug text-muted">
+      ) : null}
+      {readOnlyReason ? (
+        <p id={reasonId} className="text-[12px] leading-snug text-muted">
+          {readOnlyReason}
+        </p>
+      ) : null}
+      {hint ? (
+        <p id={hintId} className="text-[12px] leading-snug text-muted">
           {hint}
         </p>
       ) : null}

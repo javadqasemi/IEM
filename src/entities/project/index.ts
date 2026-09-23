@@ -49,6 +49,7 @@ export {
   disciplineColour,
   type DisciplineColour,
   projectStatusLabel,
+  projectStatusTone,
   projectHealthLabel,
   priorityLabel,
   phaseLabel,

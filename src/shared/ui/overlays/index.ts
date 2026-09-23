@@ -6,5 +6,13 @@
  * hand-written key handler that will be subtly wrong.
  */
 export { Modal, ConfirmDialog } from "./Modal";
+export { ActionMenu, type ActionMenuItem } from "./ActionMenu";
+export { RecordActions } from "./RecordActions";
+export {
+  StatusTransitionDialog,
+  type TransitionReason,
+  type TransitionState,
+  type TransitionTarget,
+} from "./StatusTransitionDialog";
 export { ReauthenticationDialog } from "./ReauthenticationDialog";
 export { Drawer } from "./Drawer";

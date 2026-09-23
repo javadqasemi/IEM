@@ -6,6 +6,7 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { cn } from "@/shared/utils/cn";
+import { markRequirable } from "./requirable";
 
 /**
  * The native controls, styled.
@@ -20,7 +21,7 @@ import { cn } from "@/shared/utils/cn";
 
 type InputProps = InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean };
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
+export const Input = markRequirable(forwardRef<HTMLInputElement, InputProps>(function Input(
   { invalid, className, ...rest },
   ref,
 ) {
@@ -32,11 +33,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       {...rest}
     />
   );
-});
+}));
 
 type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean };
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
+export const Textarea = markRequirable(forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
   { invalid, className, rows = 4, ...rest },
   ref,
 ) {
@@ -49,7 +50,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
       {...rest}
     />
   );
-});
+}));
 
 type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
   invalid?: boolean;
@@ -60,7 +61,7 @@ type SelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
 /**
  * A native `<select>`, styled. Only the chevron is ours.
  */
-export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
+export const Select = markRequirable(forwardRef<HTMLSelectElement, SelectProps>(function Select(
   { invalid, options, placeholder, className, ...rest },
   ref,
 ) {
@@ -97,7 +98,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
       </svg>
     </div>
   );
-});
+}));
 
 export function Checkbox({
   label,

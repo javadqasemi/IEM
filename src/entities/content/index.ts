@@ -1,1 +1,1 @@
-export { WorkflowBadge, workflowLabel } from "./WorkflowBadge";
+export { WorkflowBadge, workflowLabel, workflowTone } from "./WorkflowBadge";

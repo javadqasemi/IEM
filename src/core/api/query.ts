@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { ApiError } from "./client";
+import { toFailure } from "./failure";
 
 /**
  * The query cache (weakness W2).
@@ -477,7 +478,13 @@ export function useQuery<T>(
     // a loading state. Reporting it as one is what makes a list flash back to
     // a skeleton every time something near it is saved.
     loading: Boolean(serialised) && !hasData && !entry?.error,
-    error: entry?.error?.message ?? null,
+    /*
+      Through `toFailure`, like every write (P1C). This was the raw exception
+      message — a second error pipeline beside the classifier, so a load that
+      failed with a 5xx read "Internal server error" and a refused one named
+      its permission key, on every screen that renders `query.error`.
+    */
+    error: entry?.error ? toFailure(entry.error).message : null,
     updatedAt: entry?.updatedAt ?? 0,
     refetch,
     set,

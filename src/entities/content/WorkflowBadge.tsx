@@ -28,6 +28,11 @@ export function workflowLabel(state: string): string {
   return WORKFLOW_TONES[state]?.label ?? state;
 }
 
+/** The badge tone, for a state shown outside `WorkflowBadge` — a transition dialog. */
+export function workflowTone(state: string): BadgeTone {
+  return WORKFLOW_TONES[state]?.tone ?? "neutral";
+}
+
 export function WorkflowBadge({ state }: { state: string }) {
   const meta = WORKFLOW_TONES[state] ?? { tone: "neutral" as BadgeTone, label: state };
   return <Badge tone={meta.tone}>{meta.label}</Badge>;

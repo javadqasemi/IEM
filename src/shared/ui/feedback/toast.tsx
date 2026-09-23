@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { cn } from "@/shared/utils/cn";
 
@@ -99,7 +100,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div
         aria-live="polite"
         aria-atomic="false"
-        className="pointer-events-none fixed bottom-4 right-4 z-[200] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2"
+        className="pointer-events-none fixed bottom-[calc(var(--toast-clearance,0px)+1rem)] right-4 z-[200] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2"
       >
         {toasts.map((toast) => (
           <ToastCard key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />
@@ -158,6 +159,46 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       </button>
     </div>
   );
+}
+
+/**
+ * Keeps the toast stack clear of a sticky save bar (P1C, UX-26).
+ *
+ * Both live at the bottom of the viewport, and at 375 px a toast sat exactly
+ * on top of "Speichern" — the confirmation of one save covering the button
+ * for the next, and an error toast (which never auto-dismisses) covering it
+ * until somebody found the close button. A bar that is on screen publishes its
+ * measured height; the stack sits above the tallest one. Measured rather than
+ * a fixed offset, because the bar wraps to two or three rows on a phone when
+ * it carries a reason line.
+ */
+const clearances = new Map<object, number>();
+
+function publishClearance() {
+  const height = Math.max(0, ...clearances.values());
+  const root = document.documentElement;
+  if (height > 0) root.style.setProperty("--toast-clearance", `${Math.ceil(height)}px`);
+  else root.style.removeProperty("--toast-clearance");
+}
+
+export function useToastClearance(ref: RefObject<HTMLElement | null>, active: boolean): void {
+  useEffect(() => {
+    const el = ref.current;
+    if (!active || !el || typeof ResizeObserver === "undefined") return;
+    const token = {};
+    const measure = () => {
+      clearances.set(token, el.getBoundingClientRect().height);
+      publishClearance();
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      clearances.delete(token);
+      publishClearance();
+    };
+  }, [ref, active]);
 }
 
 export function useToast(): ToastApi {

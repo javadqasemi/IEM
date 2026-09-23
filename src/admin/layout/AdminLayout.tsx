@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/shared/utils/cn";
-import { Button } from "@/shared/ui/primitives";
+import { Button, PageActionsSlot } from "@/shared/ui/primitives";
 import { Breadcrumb } from "@/shared/ui/navigation";
 import { Wordmark } from "@/components/Wordmark";
 import { NotificationBell } from "@/features/notifications";
@@ -93,6 +93,8 @@ export function AdminLayout({
   const { can } = useAuth();
   const [open, setOpen] = useState(false);
   const [searching, setSearching] = useState(false);
+  /** The bar element `PageHeader` portals its actions into — see `pageActionsSlot.ts`. */
+  const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
   const { title, actions } = useRouteMeta();
 
   /*
@@ -356,7 +358,11 @@ export function AdminLayout({
                 {/* `h2`, not `h1`: the page below keeps its own `h1` in
                     `PageHeader`, and the workspace is the heading above it —
                     "Projekte" over "Pläne › 4723-HZG-EG-101". */}
-                <h2 className="truncate font-display text-[15px] font-semibold text-ink">
+                {/* `data-shell-title`: since P1C the page's header actions are
+                    portalled into this bar, and an action that owns a dialog
+                    brings the dialog's (closed, hidden) `h2` along — so "the
+                    h2 in the bar" is no longer one element. */}
+                <h2 data-shell-title className="truncate font-display text-[15px] font-semibold text-ink">
                   {workspaceLabel}
                 </h2>
                 {/* The trail sits under the group's name rather than beside it:
@@ -379,6 +385,16 @@ export function AdminLayout({
               here so a screen never has to ask twice — it declares the key and
               the shell decides whether to draw it.
             */}
+            {/*
+              The page header's own actions (P1C, UX-18), portalled here so
+              they stay reachable on a long list or form. Empty — and hidden —
+              on a screen that has none.
+            */}
+            <div
+              ref={setActionsSlot}
+              className="order-4 flex shrink-0 flex-wrap items-center gap-2 empty:hidden lg:order-3"
+            />
+
             {visibleActions.length ? (
               <div className="order-4 flex shrink-0 flex-wrap items-center gap-2 lg:order-3">
                 {visibleActions.map((action) => (
@@ -441,7 +457,7 @@ export function AdminLayout({
             {current && current.destinations.length > 1 ? (
               <WorkspaceStrip workspace={current} activeDestination={destinationId} />
             ) : null}
-            {children}
+            <PageActionsSlot.Provider value={actionsSlot}>{children}</PageActionsSlot.Provider>
           </div>
         </main>
       </div>

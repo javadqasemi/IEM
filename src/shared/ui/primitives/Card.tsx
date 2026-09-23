@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/shared/utils/cn";
+import { usePageActionsSlot } from "./pageActionsSlot";
 
 /** The bordered panel every screen groups content in. */
 export function Card({
@@ -48,8 +50,19 @@ export function PageHeader({
   eyebrow?: string;
   title: string;
   description?: string;
+  /**
+   * The screen's actions. Drawn in the shell's sticky bar when there is one
+   * (see `pageActionsSlot.ts`), inline under the title otherwise.
+   */
   actions?: ReactNode;
 }) {
+  const slot = usePageActionsSlot();
+  const group = actions ? (
+    <div className="flex shrink-0 flex-wrap items-center gap-2" data-page-actions>
+      {actions}
+    </div>
+  ) : null;
+
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1.5">
@@ -59,7 +72,7 @@ export function PageHeader({
           <p className="max-w-2xl text-[14px] leading-relaxed text-muted">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+      {group ? (slot ? createPortal(group, slot) : group) : null}
     </div>
   );
 }

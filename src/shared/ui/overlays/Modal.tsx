@@ -1,7 +1,17 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { cn } from "@/shared/utils/cn";
-import { Button } from "@/shared/ui/primitives";
+import { Button, IconButton } from "@/shared/ui/primitives";
 import { Field } from "@/shared/ui/forms/Field";
+import { SUBMIT_ATTEMPT } from "@/shared/ui/forms/Form";
+import { Callout } from "@/shared/ui/feedback/Callout";
 import { Input } from "@/shared/ui/forms/inputs";
 
 /** Inputs in which Enter means "done" — the ones a browser submits a form from. */
@@ -84,10 +94,17 @@ export function pressPrimaryOnEnter(e: KeyboardEvent<HTMLElement>, footer: HTMLE
     variant, and a rule that only found the marked ones would work in four
     dialogs and silently not in twenty.
   */
-  const candidates = footer?.querySelectorAll<HTMLButtonElement>(
-    "button[data-variant]:not([data-variant='ghost'])",
-  );
-  const primary = candidates && candidates.length ? candidates[candidates.length - 1] : null;
+  /*
+    `danger-quiet` (P1C) is skipped like `ghost`, not treated like `danger`:
+    it is a destructive *trigger* — "Löschen" at the left of a details
+    dialog's footer — and must neither be pressed by Enter nor stop Enter
+    reaching the save button to its right.
+  */
+  const candidates = Array.from(
+    footer?.querySelectorAll<HTMLButtonElement>("button[data-variant]:not([data-variant='ghost'])") ??
+      [],
+  ).filter((b) => b.dataset.variant !== "danger-quiet");
+  const primary = candidates.length ? candidates[candidates.length - 1] : null;
   if (!primary || primary.dataset.variant === "danger") return;
 
   e.preventDefault();
@@ -156,6 +173,33 @@ export function Modal({
     xl: "w-[min(72rem,calc(100vw-2rem))]",
   };
 
+  /*
+    Below `sm`, a form dialog takes the whole screen (P1C, UX-26).
+
+    A centred desktop card at 375 px is a 343 px box with a 1 rem gutter of
+    dimmed page around it — the gutter buys nothing on a phone and costs the
+    width every field needs. So `md` and up become a full-screen sheet there:
+    edge to edge, the full dynamic height, no rounding. `sm` — a confirmation,
+    two sentences and two buttons — stays a compact card, because a full
+    screen for "Wirklich löschen?" hides the page the reader is deciding about.
+  */
+  const phone =
+    size === "sm"
+      ? ""
+      : "max-sm:m-0 max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:w-screen max-sm:max-w-none max-sm:rounded-none";
+
+  /*
+    The footer's primary action is outside the body's `<form>`, so pressing
+    it fires no `submit` there — and the form's "focus the first invalid
+    field" never armed. The click is announced to the form instead.
+  */
+  const announceSubmitAttempt = (e: MouseEvent<HTMLElement>) => {
+    const pressed = (e.target as HTMLElement).closest<HTMLElement>("button[data-variant]");
+    const variant = pressed?.dataset.variant;
+    if (!pressed || variant === "ghost" || variant?.startsWith("danger")) return;
+    ref.current?.querySelector("form")?.dispatchEvent(new Event(SUBMIT_ATTEMPT));
+  };
+
   return (
     <dialog
       ref={ref}
@@ -174,6 +218,7 @@ export function Modal({
         "max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-lg bg-surface p-0 text-ink",
         "shadow-card ring-1 ring-line backdrop:bg-ink/40 backdrop:backdrop-blur-sm",
         widths[size],
+        phone,
       )}
     >
       <header className="flex items-start justify-between gap-4 border-b border-line px-6 py-4">
@@ -185,17 +230,22 @@ export function Modal({
             <p className="text-[13px] leading-snug text-muted">{description}</p>
           ) : null}
         </div>
-        <button
-          type="button"
+        {/*
+          `IconButton`: the label is required, so the one icon-only control on
+          every dialog cannot lose its name, and it grows to the 44 px touch
+          target on a coarse pointer.
+        */}
+        <IconButton
+          label="Schliessen"
           onClick={onClose}
           disabled={busy}
-          aria-label="Schliessen"
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-        >
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden>
-            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
-        </button>
+          className="rounded-full"
+          icon={
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none">
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          }
+        />
       </header>
 
       <div className="px-6 py-5">{children}</div>
@@ -214,6 +264,7 @@ export function Modal({
         */
         <footer
           ref={footerRef}
+          onClickCapture={announceSubmitAttempt}
           className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-t border-line px-6 py-4 [background:linear-gradient(rgb(var(--c-surface-2)/0.5),rgb(var(--c-surface-2)/0.5)),rgb(var(--c-surface))]"
         >
           {hint ? (
@@ -235,6 +286,19 @@ export function Modal({
  * unrecoverable cases, `confirmText` requires the operator to type a matching
  * word. That is reserved for deleting a user or a dossier — asking someone to
  * type "LÖSCHEN" for an ordinary delete trains them to type it without reading.
+ *
+ * ---
+ *
+ * **Three levels of friction (P1C), chosen by consequence, never by look:**
+ *
+ * | Level | When | Shape |
+ * | --- | --- | --- |
+ * | LOW | reversible — archive, hide, cancel a schedule | `ConfirmDialog` |
+ * | MEDIUM | a delete or removal with effects beyond the row | `ConfirmDialog` + `consequence` (a `Callout` saying what else goes) |
+ * | HIGH | irreversible *and* consequential — a user, a dossier, a project, a restore, a security reset | `confirmText` (typed word), and for security or data replacement the `ReauthenticationDialog` window first — `RestoreDialog` and the MFA reset are the pattern |
+ *
+ * Visual consistency never lowers a level: a restore keeps its password
+ * prompt and its typed word even though a plain dialog would look tidier.
  */
 export function ConfirmDialog({
   open,
@@ -242,20 +306,29 @@ export function ConfirmDialog({
   onConfirm,
   title,
   message,
+  consequence,
   confirmLabel = "Bestätigen",
   destructive,
   confirmText,
   busy,
+  error,
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
   title: string;
   message: ReactNode;
+  /** MEDIUM level: what else is affected. Rendered as a warning `Callout`. */
+  consequence?: ReactNode;
   confirmLabel?: string;
   destructive?: boolean;
   confirmText?: string;
   busy?: boolean;
+  /**
+   * A refusal, shown *in* the dialog. Office archiving rendered its error
+   * behind the open confirmation, where nobody could read it (Part 10.2).
+   */
+  error?: string | null;
 }) {
   const [typed, setTyped] = useState("");
   const id = useId();
@@ -289,7 +362,13 @@ export function ConfirmDialog({
       }
     >
       <div className="flex flex-col gap-4 text-[14px] leading-relaxed text-muted">
+        {error ? (
+          <Callout tone="danger" announce>
+            <p className="font-medium text-ink">{error}</p>
+          </Callout>
+        ) : null}
         <div>{message}</div>
+        {consequence ? <Callout tone="warning">{consequence}</Callout> : null}
         {confirmText ? (
           <Field
             label={`Zur Bestätigung „${confirmText}“ eingeben`}

@@ -117,8 +117,9 @@ describe("what a failed submit produces", () => {
 
   /**
    * The general message is kept even when there are field errors.
-   * "Fehlende Berechtigung: content.update" belongs to no input, and a form
-   * that swallowed it would show a save that silently did nothing.
+   * A refusal belongs to no input, and a form that swallowed it would show a
+   * save that silently did nothing. Since P1C the route guard's sentence —
+   * which names the permission key — reaches the reader as plain German.
    */
   it("keeps a message that belongs to no field", () => {
     const err = new ApiError({
@@ -128,7 +129,7 @@ describe("what a failed submit produces", () => {
     });
     expect(reducer.errorsFrom(err)).toEqual({
       errors: {},
-      error: "Fehlende Berechtigung: content.update",
+      error: FAILURE_MESSAGES.permissionWithHelp,
     });
   });
 

@@ -26,6 +26,35 @@ describe("toFailure — the six answers", () => {
     expect(f.code).toBe("privilege_ceiling");
   });
 
+  /*
+    P1C: a permission key is not copy. The route guard says "Fehlende
+    Berechtigung: content.publish." and the drawings controller "Dafür fehlt
+    die Berechtigung „drawing.release“." — both reached people verbatim.
+  */
+  it("a 403 that names a permission key reaches the reader without the key", () => {
+    for (const sentence of [
+      "Fehlende Berechtigung: content.publish.",
+      "Fehlende Berechtigung: user.assign, role.update.",
+      "Dafür fehlt die Berechtigung „drawing.release“.",
+    ]) {
+      const f = toFailure(api(403, sentence));
+      expect(f.kind).toBe("permission");
+      expect(f.message).toBe(FAILURE_MESSAGES.permissionWithHelp);
+      expect(f.message).not.toMatch(/[a-z]+\.[a-z][a-zA-Z]*/);
+    }
+  });
+
+  it("a 403 written for a person passes through untouched", () => {
+    for (const sentence of [
+      "Ein archiviertes Projekt ist schreibgeschützt.",
+      "Nur wer alles davon hat, darf es vergeben.",
+      // A dotted word that is not a key must not trip the rewrite.
+      "Diese Berechtigung gilt nur für Adressen unter iem.ch nicht.",
+    ]) {
+      expect(toFailure(api(403, sentence)).message).toBe(sentence);
+    }
+  });
+
   it("a 404 is notFound", () => {
     expect(toFailure(api(404, "Projekt nicht gefunden.")).kind).toBe("notFound");
   });

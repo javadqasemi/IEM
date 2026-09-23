@@ -5,7 +5,7 @@
  * who is *not* looking is a notification and belongs in its own domain
  * (`docs/data-model.md` §3.23), not here.
  */
-export { ToastProvider, useToast, type Toast, type ToastKind } from "./toast";
+export { ToastProvider, useToast, useToastClearance, type Toast, type ToastKind } from "./toast";
 export { ErrorBoundary, RootErrorBoundary } from "./ErrorBoundary";
 /**
  * `ModulePlaceholder` is feedback rather than a primitive: it tells the reader
@@ -14,3 +14,4 @@ export { ErrorBoundary, RootErrorBoundary } from "./ErrorBoundary";
  */
 export { ModulePlaceholder, type ModuleStatus } from "./ModulePlaceholder";
 export { ConflictNotice, CONFLICT_BLOCKS_SAVE } from "./ConflictNotice";
+export { Callout, type CalloutTone } from "./Callout";

@@ -1,3 +1,4 @@
+import { markRequirable } from "./requirable";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebounced } from "@/shared/hooks";
 import { Combobox, type ComboboxOption } from "./Combobox";
@@ -41,8 +42,15 @@ export function EntityPicker({
   disabled,
   invalid,
   className,
+  "aria-describedby": describedBy,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
 }: {
   id: string;
+  /** From `Field`, passed through to the input — see `Combobox`. */
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+  "aria-required"?: boolean;
   value: string | null;
   selected?: EntityOption | null;
   onChange: (next: string | null, option: EntityOption | null) => void;
@@ -106,6 +114,9 @@ export function EntityPicker({
       loading={loading}
       disabled={disabled}
       invalid={invalid}
+      aria-describedby={describedBy}
+      aria-invalid={ariaInvalid}
+      aria-required={ariaRequired}
       placeholder={placeholder}
       emptyLabel={emptyLabel}
       className={className}
@@ -118,3 +129,6 @@ export function EntityPicker({
     />
   );
 }
+
+// Passes `aria-required` to a real input — see `requirable.ts`.
+markRequirable(EntityPicker);

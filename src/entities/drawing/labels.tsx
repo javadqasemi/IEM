@@ -69,6 +69,11 @@ export function drawingStatusLabel(status: string): string {
   return DRAWING_STATUS_TONES[status as DrawingStatus]?.label ?? status;
 }
 
+/** The badge tone, for a status shown outside `DrawingStatusBadge` — a transition dialog. */
+export function drawingStatusTone(status: string): BadgeTone {
+  return DRAWING_STATUS_TONES[status as DrawingStatus]?.tone ?? "neutral";
+}
+
 export function DrawingStatusBadge({ status }: { status: string }) {
   const meta = DRAWING_STATUS_TONES[status as DrawingStatus] ?? {
     tone: "neutral" as BadgeTone,

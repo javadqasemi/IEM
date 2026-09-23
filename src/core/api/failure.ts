@@ -74,6 +74,8 @@ export const FAILURE_MESSAGES = {
   session:
     "Ihre Anmeldung konnte nicht bestätigt werden. Ihre Eingaben sind noch da — bitte erneut versuchen.",
   permission: "Dafür fehlt Ihnen die Berechtigung.",
+  permissionWithHelp:
+    "Dafür fehlt Ihnen die Berechtigung. Wer Rollen verwaltet, kann sie Ihnen erteilen.",
   notFound: "Der Eintrag wurde nicht gefunden. Möglicherweise wurde er inzwischen gelöscht.",
   conflict:
     "Der Eintrag wurde inzwischen von jemand anderem geändert. Ihre Eingaben sind nicht gespeichert.",
@@ -98,7 +100,20 @@ export function toFailure(err: unknown): MutationFailure {
       return { kind: "conflict", message: serverSentence ?? FAILURE_MESSAGES.conflict, fields, code, status };
     }
     if (status === 403) {
-      return { kind: "permission", message: serverSentence ?? FAILURE_MESSAGES.permission, fields, code, status };
+      /*
+        The route guard's refusal names the key — "Fehlende Berechtigung:
+        content.publish." — which is right for the audit log and wrong for a
+        person: a permission key is not a sentence anybody acts on (Part 23,
+        P1C). A refusal written for a reader ("Ein archiviertes Projekt ist
+        schreibgeschützt.") passes through; one that names a key becomes the
+        plain sentence, with who can change it. The key is still in the
+        denial's audit row, where an administrator looks.
+      */
+      const message =
+        serverSentence && !namesPermissionKey(serverSentence)
+          ? serverSentence
+          : FAILURE_MESSAGES.permissionWithHelp;
+      return { kind: "permission", message, fields, code, status };
     }
     if (status === 404) {
       return { kind: "notFound", message: serverSentence ?? FAILURE_MESSAGES.notFound, fields, code, status };
@@ -165,6 +180,19 @@ function usable(message: string | undefined | null): string | null {
   }
   if (/^Die Anfrage ist fehlgeschlagen \(\d+\)\.?$/.test(text)) return null;
   return text;
+}
+
+/**
+ * Whether a refusal names a permission key — `content.publish`,
+ * `drawing.release`. Keys are `resource.action` in lower camel case; the
+ * sentence around one is "Fehlende Berechtigung: …" or "… Berechtigung „…“".
+ * Anchored on the word *Berechtigung* so a domain sentence that happens to
+ * contain a dotted word (a domain name, "iem.ch") is not mistaken for one.
+ */
+export function namesPermissionKey(text: string): boolean {
+  // The key follows a colon, an opening quote or a list comma — never a
+  // plain space, which is how "unter iem.ch" was first misread as one.
+  return /Berechtigung\b[^.]*?(?::\s*|„|"|,\s*)[a-z]+\.[a-z][a-zA-Z]*(?=[.,“"\s]|$)/.test(text);
 }
 
 /** Runs a write and returns its result instead of throwing. */

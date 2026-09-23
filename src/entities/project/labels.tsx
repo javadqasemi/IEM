@@ -42,6 +42,11 @@ export function projectStatusLabel(status: string): string {
   return PROJECT_TONES[status as ProjectStatus]?.label ?? status;
 }
 
+/** The badge tone, for a status shown outside `ProjectStatusBadge` — a transition dialog. */
+export function projectStatusTone(status: string): BadgeTone {
+  return PROJECT_TONES[status as ProjectStatus]?.tone ?? "neutral";
+}
+
 export function ProjectStatusBadge({ status }: { status: string }) {
   const meta = PROJECT_TONES[status as ProjectStatus] ?? {
     tone: "neutral" as BadgeTone,

@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/shared/ui/primitives";
+import { useToastClearance } from "@/shared/ui/feedback/toast";
 
 /**
  * The save state of one form, stated where the reader is looking.
@@ -54,7 +55,19 @@ export function SaveBar({
   children,
   disabled,
   disabledReason,
+  failed,
+  conflict,
 }: {
+  /**
+   * The last save was refused (P1C). The *sentence* is the form's `Callout`
+   * above the fields — see the note on `error` below — so the bar says only
+   * that it did not save and where the reason is. A failure used to read as
+   * "Ungespeicherte Änderungen", which is true and tells the reader nothing
+   * about the save they just pressed.
+   */
+  failed?: boolean;
+  /** A 409: the record changed elsewhere. Pair with `ConflictNotice` above the form. */
+  conflict?: boolean;
   dirty: boolean;
   saving: boolean;
   /** Bumped by the caller on every successful save. */
@@ -98,12 +111,17 @@ export function SaveBar({
     return () => window.clearTimeout(timer);
   }, [savedAt, dismissed]);
 
+  const visible = dirty || saving || showSaved;
+  const barRef = useRef<HTMLDivElement>(null);
+  useToastClearance(barRef, visible);
+
   // Nothing outstanding, nothing to report, nothing to say. The bar is absent
   // rather than empty — see the note above.
-  if (!dirty && !saving && !showSaved) return null;
+  if (!visible) return null;
 
   return (
     <div
+      ref={barRef}
       /*
         `glass-raised` — the material for "anything that floats", which this
         does: it sits in front of the section's own content rather than being
@@ -121,7 +139,17 @@ export function SaveBar({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2 text-[13px]">
           {saving ? (
-            <p className="text-muted">Wird gespeichert …</p>
+            <p role="status" className="text-muted">
+              Wird gespeichert …
+            </p>
+          ) : conflict ? (
+            <p role="status" className="font-medium text-brand-bronze">
+              Nicht gespeichert — inzwischen geändert.
+            </p>
+          ) : failed && dirty ? (
+            <p role="status" className="font-medium text-brand-bronze">
+              Nicht gespeichert — Grund siehe oben.
+            </p>
           ) : showSaved && !dirty ? (
             /*
               `role="status"`, not `role="alert"`. A success is announced when

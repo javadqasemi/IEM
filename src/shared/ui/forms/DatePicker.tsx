@@ -1,3 +1,4 @@
+import { markRequirable } from "./requirable";
 import { forwardRef, useId, type InputHTMLAttributes } from "react";
 import { cn } from "@/shared/utils/cn";
 import { Field } from "./Field";
@@ -205,3 +206,7 @@ export function fromLocalInput(value: string): Date {
   // engine that follows the spec — the absence of a `Z` is what decides it.
   return new Date(value);
 }
+
+// Passes `aria-required` to a real input — see `requirable.ts`.
+markRequirable(DateInput);
+markRequirable(DateTimeInput);

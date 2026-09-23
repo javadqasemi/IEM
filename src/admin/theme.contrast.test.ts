@@ -198,6 +198,43 @@ describe.each([
   });
 });
 
+/**
+ * `Callout` (P1C) draws its text on a wash of its tone, like `Badge` — and a
+ * callout is *sometimes* on screen: a refusal, a conflict, a consequence in a
+ * dialog. Exactly the kind of pair the browser suite may never meet, so it is
+ * asserted here, over both grounds a callout sits on (a dialog or card, and the
+ * page).
+ *
+ * The same entry covers the quiet destructive button (`danger-quiet`) in its
+ * hover state: bronze text on its own 8% wash.
+ */
+const CALLOUT_WASHES: [tone: string, alpha: number][] = [
+  ["brand-bronze", 0.08],
+  ["brand-blue", 0.06],
+  ["accent", 0.06],
+];
+
+describe.each([
+  ["light", light],
+  ["dark", dark],
+])("%s theme — callout text on its wash", (_name, colors) => {
+  it.each(
+    CALLOUT_WASHES.flatMap(([tone, alpha]) =>
+      ["surface", "base"].map((ground) => ({ tone, alpha, ground })),
+    ),
+  )("$tone callout on $ground: muted and ink clear 4.5:1, the glyph 3:1", ({ tone, alpha, ground }) => {
+    const wash = over(colors[tone], colors[ground], alpha);
+    expect(Number(ratio(colors.muted, wash).toFixed(2)), `muted on ${tone} wash`).toBeGreaterThanOrEqual(4.5);
+    expect(Number(ratio(colors.ink, wash).toFixed(2)), `ink on ${tone} wash`).toBeGreaterThanOrEqual(4.5);
+    expect(Number(ratio(colors[tone], wash).toFixed(2)), `${tone} glyph`).toBeGreaterThanOrEqual(3);
+  });
+
+  it("danger-quiet: bronze text on its hover wash clears 4.5:1", () => {
+    const wash = over(colors["brand-bronze"], colors.surface, 0.08);
+    expect(Number(ratio(colors["brand-bronze"], wash).toFixed(2))).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe.each([
   ["light", light],
   ["dark", dark],

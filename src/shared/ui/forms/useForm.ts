@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { toFailure } from "@/core/api";
+import { toFailure, type FailureKind } from "@/core/api";
 import type { FieldErrors } from "./types";
 
 /**
@@ -36,6 +36,12 @@ export type FormState<T extends object> = {
   errors: FieldErrors;
   /** A message that belongs to no field — a 403, a conflict. */
   error: string | null;
+  /**
+   * What kind of failure the last submit was (P1C) — so a page form can tell
+   * a conflict (offer the newer record, block the save) from a refusal (say
+   * why, keep the input) without reading a status code. `null` after success.
+   */
+  failureKind: FailureKind | null;
   dirty: boolean;
   submitting: boolean;
   /** Set one field. Clears that field's error. */
@@ -108,14 +114,14 @@ const rules = {
     values: T,
     validate: ((values: T) => FieldErrors) | undefined,
     onSubmit: (values: T) => Promise<unknown>,
-  ): Promise<{ ok: boolean; errors: FieldErrors; error: string | null }> {
+  ): Promise<{ ok: boolean; errors: FieldErrors; error: string | null; kind: FailureKind | null }> {
     const found = validate?.(values) ?? {};
-    if (rules.hasErrors(found)) return { ok: false, errors: found, error: null };
+    if (rules.hasErrors(found)) return { ok: false, errors: found, error: null, kind: "validation" };
     try {
       await onSubmit(values);
-      return { ok: true, errors: {}, error: null };
+      return { ok: true, errors: {}, error: null, kind: null };
     } catch (err) {
-      return { ok: false, ...rules.errorsFrom(err) };
+      return { ok: false, ...rules.errorsFrom(err), kind: toFailure(err).kind };
     }
   },
 };
@@ -131,6 +137,7 @@ export function useForm<T extends object>({
   const [values, setValues] = useState<T>(initial);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
+  const [failureKind, setFailureKind] = useState<FailureKind | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   /**
@@ -173,6 +180,7 @@ export function useForm<T extends object>({
       setValues(seed);
       setErrors({});
       setError(null);
+      setFailureKind(null);
     },
     [initial],
   );
@@ -182,6 +190,7 @@ export function useForm<T extends object>({
     const result = await rules.runSubmit(values, validate, onSubmit);
     setErrors(result.errors);
     setError(result.error);
+    setFailureKind(result.kind);
     if (result.ok) {
       // The saved values are the new clean state. Without this a form stays
       // "dirty" after a successful save and the unsaved-changes guard fires on
@@ -197,5 +206,5 @@ export function useForm<T extends object>({
 
   const fieldError = useCallback((name: keyof T & string) => errors[name]?.[0], [errors]);
 
-  return { values, errors, error, dirty, submitting, set, patch, reset, submit, fieldError };
+  return { values, errors, error, failureKind, dirty, submitting, set, patch, reset, submit, fieldError };
 }

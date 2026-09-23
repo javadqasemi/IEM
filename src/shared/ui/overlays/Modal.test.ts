@@ -80,6 +80,21 @@ describe("Enter in a dialog presses its primary action", () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
+  it("steps over a quiet destructive trigger to reach the save beside it (P1C)", () => {
+    // "Löschen" at the left of a details dialog's footer is `danger-quiet`:
+    // neither pressed by Enter nor allowed to stop Enter reaching "Speichern".
+    const remove = button("danger-quiet");
+    const cancel = button("ghost");
+    const save = button("primary");
+    pressPrimaryOnEnter(enter({}), footer(remove, cancel, save));
+    expect(save.click).toHaveBeenCalledOnce();
+    expect(remove.click).not.toHaveBeenCalled();
+
+    const onlyTrigger = button("danger-quiet");
+    pressPrimaryOnEnter(enter({}), footer(onlyTrigger));
+    expect(onlyTrigger.click).not.toHaveBeenCalled();
+  });
+
   it("works from a date or number field too", () => {
     for (const type of ["email", "number", "date", "datetime-local", "password"]) {
       const save = button("primary");

@@ -1,3 +1,4 @@
+import { markRequirable } from "./requirable";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/shared/utils/cn";
 import { Spinner } from "@/shared/ui/primitives";
@@ -50,8 +51,20 @@ export function Combobox({
   clearable = true,
   emptyLabel = "Nichts gefunden",
   className,
+  "aria-describedby": describedBy,
+  "aria-invalid": ariaInvalid,
+  "aria-required": ariaRequired,
 }: {
   id: string;
+  /*
+    Supplied by `Field`, which clones its child with them. A composite control
+    has to hand them to its real `<input>` itself — before P1C this one
+    dropped them, so a picker's hint and error were never announced and the
+    "Field owns the relationship" promise held for every control but this.
+  */
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
+  "aria-required"?: boolean;
   options: ComboboxOption[];
   value: string | null;
   onChange: (next: string | null) => void;
@@ -167,7 +180,9 @@ export function Combobox({
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={open && visible[active] ? `${listId}-${active}` : undefined}
-          aria-invalid={invalid || undefined}
+          aria-invalid={invalid || ariaInvalid || undefined}
+          aria-describedby={describedBy}
+          aria-required={ariaRequired || undefined}
           autoComplete="off"
           spellCheck={false}
           disabled={disabled}
@@ -259,3 +274,6 @@ export function Combobox({
     </div>
   );
 }
+
+// Passes `aria-required` to a real input — see `requirable.ts`.
+markRequirable(Combobox);

@@ -46,6 +46,11 @@ export function meetingStatusLabel(status: string): string {
   return MEETING_STATUS_TONES[status as MeetingStatus]?.label ?? status;
 }
 
+/** The badge tone, for a status shown outside `MeetingStatusBadge` — a transition dialog. */
+export function meetingStatusTone(status: string): BadgeTone {
+  return MEETING_STATUS_TONES[status as MeetingStatus]?.tone ?? "neutral";
+}
+
 export function MeetingStatusBadge({ status }: { status: string }) {
   const meta = MEETING_STATUS_TONES[status as MeetingStatus] ?? {
     tone: "neutral" as BadgeTone,
@@ -130,6 +135,11 @@ const DECISION_STATUS_TONES: Record<DecisionStatus, { tone: BadgeTone; label: st
 
 export function decisionStatusLabel(status: string): string {
   return DECISION_STATUS_TONES[status as DecisionStatus]?.label ?? status;
+}
+
+/** The badge tone, for a status shown outside `DecisionStatusBadge` — a transition dialog. */
+export function decisionStatusTone(status: string): BadgeTone {
+  return DECISION_STATUS_TONES[status as DecisionStatus]?.tone ?? "neutral";
 }
 
 export function DecisionStatusBadge({ status }: { status: string }) {

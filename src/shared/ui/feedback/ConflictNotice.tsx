@@ -1,4 +1,5 @@
 import { Button } from "@/shared/ui/primitives";
+import { Callout } from "./Callout";
 
 /**
  * A 409, said in place — above the form, with the form still there.
@@ -41,26 +42,31 @@ export function ConflictNotice({
   /** Where the changes can be read — "Der Verlauf des Projekts zeigt …". */
   compareHint?: string;
 }) {
+  /*
+    On `Callout` since P1C: the one shared box, announced because it appears
+    *because* the reader pressed save. The copy is the standard's two
+    sentences — the record changed elsewhere; your input has not been
+    discarded — and it is the only conflict UI in the dashboard. A future
+    lock (content entries, P2) reuses it rather than drawing its own.
+  */
   return (
-    <div
-      role="alert"
-      className="flex flex-col gap-3 rounded-md bg-brand-bronze/[0.08] px-4 py-3 ring-1 ring-brand-bronze/25"
-    >
-      <div className="flex flex-col gap-1">
-        <p className="text-[14px] font-semibold text-ink">Inzwischen von jemand anderem geändert</p>
-        <p className="text-[13px] leading-relaxed text-muted">{message}</p>
-        <p className="text-[13px] leading-relaxed text-muted">
-          Ihre Eingaben stehen unten noch, sind aber <strong className="font-medium text-ink">nicht gespeichert</strong>.
-          Übernehmen Sie, was Sie behalten möchten, nach dem Laden in die neue Fassung.
-          {compareHint ? ` ${compareHint}` : null}
-        </p>
-      </div>
-      <div>
+    <Callout
+      tone="warning"
+      announce
+      title="Inzwischen von jemand anderem geändert"
+      actions={
         <Button size="sm" variant="secondary" onClick={onReload}>
           Neueste Fassung laden
         </Button>
-      </div>
-    </div>
+      }
+    >
+      <p>{message}</p>
+      <p>
+        Ihre Eingaben stehen unten noch, sind aber <strong>nicht gespeichert</strong>. Übernehmen
+        Sie, was Sie behalten möchten, nach dem Laden in die neue Fassung.
+        {compareHint ? ` ${compareHint}` : null}
+      </p>
+    </Callout>
   );
 }
 

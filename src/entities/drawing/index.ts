@@ -44,6 +44,7 @@ export {
   AcknowledgementBadge,
   drawingTypeLabel,
   drawingStatusLabel,
+  drawingStatusTone,
   revisionReasonLabel,
   formatLabel,
   phaseLabel,
