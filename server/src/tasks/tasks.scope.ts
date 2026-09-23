@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import type { AuthUser } from "../common/decorators";
+import { reachableProject } from "../core/scope/membership.scope";
+import { restrictedTo, unrestricted, type Scope } from "../core/scope/scope";
+
+export type TaskScope = Scope<Prisma.TaskWhereInput>;
 
 /**
  * Row-level visibility for tasks — and it is **not** the project rule with a
@@ -32,9 +36,10 @@ import type { AuthUser } from "../common/decorators";
  * **Why a `where` fragment and not a filter over results.** The same three
  * reasons `projects.scope.ts` gives: a post-filter produces a page of eleven
  * rows out of twenty-five, a `total` that counts rows nobody can open, and a
- * leak in any query that forgot it. The repository takes the fragment as an
- * argument and **defaults to the narrow case**, so a query that forgets it
- * returns the caller's own tasks rather than the firm's.
+ * leak in any query that forgot it. The repository **requires** it as a
+ * `TaskScope` with no default — a query that forgets it does not compile.
+ * (It used to claim a default to the narrow case; the default was `{}`, every
+ * row — SEC-R6, `core/scope/scope.ts`.)
  *
  * **The asymmetry, stated rather than discovered.** This narrows *reads*.
  * Writes are guarded by `task.update` and friends, which are firm-wide — and
@@ -66,29 +71,18 @@ export function seesAllTasks(user: AuthUser): boolean {
  * themselves a to-do, and hiding it the moment they saved it would be the
  * module's most confusing bug.
  */
-export function scopeFor(
-  user: AuthUser,
-  employeeId: string | null,
-  userId: string,
-): Prisma.TaskWhereInput {
-  if (seesAllTasks(user)) return {};
+export function scopeFor(user: AuthUser, employeeId: string | null, userId: string): TaskScope {
+  if (seesAllTasks(user)) return unrestricted(user.isSuperAdmin ? "Super Admin" : "task.readAll");
 
   const reachable: Prisma.TaskWhereInput[] = [{ createdById: userId }];
 
   if (employeeId) {
     reachable.push({ assigneeId: employeeId });
-    reachable.push({
-      project: {
-        deletedAt: null,
-        OR: [
-          { managerId: employeeId },
-          { members: { some: { employeeId, deletedAt: null } } },
-        ],
-      },
-    });
+    // Managing it, or a membership that has not ended (`membership.scope.ts`).
+    reachable.push({ project: reachableProject(employeeId) });
   }
 
-  return { OR: reachable };
+  return restrictedTo({ OR: reachable });
 }
 
 /**

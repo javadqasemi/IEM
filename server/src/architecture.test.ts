@@ -424,3 +424,69 @@ describe("the audit trail cannot be edited", () => {
     expect(controller).not.toMatch(/@(Post|Patch|Put|Delete)\(/);
   });
 });
+
+/**
+ * Row-level scope fails closed (P0, SEC-4).
+ *
+ * Every scoped repository method used to take `scope: Prisma.XWhereInput = {}`,
+ * and `{}` in a `where` is every row — so a caller that forgot the argument
+ * widened the query to the whole firm, silently, and `GET /drawings/:id/versions`
+ * did (`docs/COMPLETE_APPLICATION_AUDIT.md` SEC-R6, 32 signatures). The fix is a
+ * type — `Scope<W>` in `core/scope/scope.ts`, with no default and "every row"
+ * spelled `unrestricted(because)` — and these assertions are what keep the old
+ * shape from coming back one convenient default at a time.
+ */
+describe("row-level scope fails closed", () => {
+  const repositories = featureDirs.flatMap((dir) =>
+    sources(join(SRC, dir)).filter((f) => f.endsWith(".repository.ts")),
+  );
+
+  /** Every `scope` parameter in a file, as `name: type` text up to `,` / `)`. */
+  const scopeParams = (file: string) =>
+    [...code(file).matchAll(/\bscope(\??)\s*:\s*([^,)=]+?)\s*(=\s*[^,)]+)?\s*[,)]/g)].map((m) => ({
+      optional: m[1] === "?",
+      type: m[2].trim(),
+      defaulted: Boolean(m[3]),
+    }));
+
+  it("found the scoped repositories, so the assertions below are not vacuous", () => {
+    const scoped = repositories.filter((f) => scopeParams(f).length > 0).map(rel);
+    expect(scoped.length, `scoped repositories: ${scoped.join(", ")}`).toBeGreaterThanOrEqual(4);
+  });
+
+  it.each(repositories.map(rel))("%s: no scope parameter is optional or defaulted", (file) => {
+    const bad = scopeParams(join(SRC, file)).filter((p) => p.optional || p.defaulted);
+    expect(bad, "a scope that can be omitted is a scope that can be forgotten").toEqual([]);
+  });
+
+  it.each(repositories.map(rel))("%s: every scope parameter is a Scope, never a raw where", (file) => {
+    const raw = scopeParams(join(SRC, file)).filter((p) => !/Scope\b/.test(p.type));
+    expect(
+      raw.map((p) => p.type),
+      "take `Scope<…>` / `XScope` from core/scope/scope.ts — a raw WhereInput has no way to say `nothing`",
+    ).toEqual([]);
+  });
+
+  it.each(repositories.map(rel))("%s: a scope reaches a where only through whereOf()", (file) => {
+    /*
+      A `Scope` is a wrapper, not a predicate. Passed straight into a
+      relation filter — `transmittal: scope` — it typechecks against Prisma's
+      all-optional input types and fails only at runtime, which is how the
+      Planversand acknowledgement broke during P0 with every unit test green.
+    */
+    const text = code(join(SRC, file));
+    const raw = [
+      ...text.matchAll(/\b\w+\s*:\s*scope\s*[,}\n]/g),
+      ...text.matchAll(/\.\.\.scope\b/g),
+    ].map((m) => m[0].trim());
+    expect(raw, "use whereOf(scope)").toEqual([]);
+  });
+
+  it("no feature *.scope.ts hands out `{}` itself — every row is `unrestricted(because)`", () => {
+    const offenders = featureDirs
+      .flatMap((dir) => sources(join(SRC, dir)).filter((f) => f.endsWith(".scope.ts")))
+      .filter((f) => /return\s*\{\s*\}\s*;/.test(code(f)))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+});

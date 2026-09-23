@@ -1,5 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import type { AuthUser } from "../common/decorators";
+import { reachableProject } from "../core/scope/membership.scope";
+import { nothing, restrictedTo, unrestricted, type Scope } from "../core/scope/scope";
+
+export type DrawingScope = Scope<Prisma.DrawingWhereInput>;
+export type TransmittalScope = Scope<Prisma.TransmittalWhereInput>;
 
 /**
  * Row-level visibility for Pläne and Planversand.
@@ -42,16 +47,15 @@ export function seesAllDrawings(user: AuthUser): boolean {
  * row get the same empty list, because a 403 would leak that the distinction
  * exists.
  */
-export function scopeFor(user: AuthUser, employeeId: string | null): Prisma.DrawingWhereInput {
-  if (seesAllDrawings(user)) return {};
-  if (!employeeId) return { projectId: "" };
-
-  return {
-    project: {
-      deletedAt: null,
-      OR: [{ managerId: employeeId }, { members: { some: { employeeId, deletedAt: null } } }],
-    },
-  };
+export function scopeFor(user: AuthUser, employeeId: string | null): DrawingScope {
+  if (seesAllDrawings(user)) {
+    return unrestricted(user.isSuperAdmin ? "Super Admin" : "drawing.readAll");
+  }
+  if (!employeeId) return nothing();
+  // Managing the project, or a membership that has not ended — so the leak
+  // this file names (a plan still visible after leaving the project) is now
+  // closed for an *ended* membership as well as a removed one.
+  return restrictedTo({ project: reachableProject(employeeId) });
 }
 
 /**
@@ -67,17 +71,10 @@ export function scopeFor(user: AuthUser, employeeId: string | null): Prisma.Draw
  * they may see — the same argument `seesAllDecisions` makes for reading
  * `project.readAll` rather than minting a key that means the same thing.
  */
-export function transmittalScopeFor(
-  user: AuthUser,
-  employeeId: string | null,
-): Prisma.TransmittalWhereInput {
-  if (user.isSuperAdmin || user.permissions.has("project.readAll")) return {};
-  if (!employeeId) return { projectId: "" };
-
-  return {
-    project: {
-      deletedAt: null,
-      OR: [{ managerId: employeeId }, { members: { some: { employeeId, deletedAt: null } } }],
-    },
-  };
+export function transmittalScopeFor(user: AuthUser, employeeId: string | null): TransmittalScope {
+  if (user.isSuperAdmin || user.permissions.has("project.readAll")) {
+    return unrestricted(user.isSuperAdmin ? "Super Admin" : "project.readAll");
+  }
+  if (!employeeId) return nothing();
+  return restrictedTo({ project: reachableProject(employeeId) });
 }

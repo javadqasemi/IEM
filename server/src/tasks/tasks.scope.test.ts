@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AuthUser } from "../common/decorators";
 import { ownsTask, scopeFor, seesAllTasks } from "./tasks.scope";
+import { whereOf } from "../core/scope/scope";
+import { reachableProject } from "../core/scope/membership.scope";
 
 /**
  * Row-level visibility, as a predicate.
@@ -43,7 +45,7 @@ describe("seesAllTasks", () => {
 
 describe("scopeFor", () => {
   it("returns an empty fragment for the unrestricted", () => {
-    expect(scopeFor(user(["task.readAll"]), "e1", "u1")).toEqual({});
+    expect(whereOf(scopeFor(user(["task.readAll"]), "e1", "u1"))).toEqual({});
   });
 
   it("is a union of three reachability rules", () => {
@@ -54,28 +56,24 @@ describe("scopeFor", () => {
      * invisible to everyone — including the person it is assigned to. The
      * failure is silent: an empty list looks like an empty backlog.
      */
-    const where = scopeFor(user(["task.read"]), "e1", "u1");
+    const where = whereOf(scopeFor(user(["task.read"]), "e1", "u1"));
     expect(where.OR).toHaveLength(3);
     expect(where.OR).toContainEqual({ createdById: "u1" });
     expect(where.OR).toContainEqual({ assigneeId: "e1" });
   });
 
   it("reaches a task through its project's team", () => {
-    const where = scopeFor(user(["task.read"]), "e1", "u1");
+    const where = whereOf(scopeFor(user(["task.read"]), "e1", "u1"));
     const viaProject = where.OR!.find((clause) => "project" in clause)!;
-    expect(viaProject).toEqual({
-      project: {
-        deletedAt: null,
-        OR: [{ managerId: "e1" }, { members: { some: { employeeId: "e1", deletedAt: null } } }],
-      },
-    });
+    // The shared predicate: managing it, or a membership that has not ended.
+    expect(viaProject).toEqual({ project: reachableProject("e1") });
   });
 
   it("excludes a deleted project from the reachable set", () => {
     // Without `deletedAt: null` on the project, a soft-deleted project's tasks
     // would stay visible to its former team — which reads as the deletion having
     // silently failed.
-    const where = scopeFor(user(["task.read"]), "e1", "u1");
+    const where = whereOf(scopeFor(user(["task.read"]), "e1", "u1"));
     const viaProject = where.OR!.find((clause) => "project" in clause) as {
       project: { deletedAt: null };
     };
@@ -90,7 +88,7 @@ describe("scopeFor", () => {
      * writes themselves a to-do, and hiding it the moment they saved it would be
      * the module's most confusing bug.
      */
-    const where = scopeFor(user(["task.read"]), null, "u1");
+    const where = whereOf(scopeFor(user(["task.read"]), null, "u1"));
     expect(where.OR).toEqual([{ createdById: "u1" }]);
   });
 
@@ -103,7 +101,7 @@ describe("scopeFor", () => {
      * assignment in the domain. Passing one where the other belongs compiles,
      * matches nothing, and reads as "this person has no tasks".
      */
-    const where = scopeFor(user(["task.read"]), "employee-1", "user-1");
+    const where = whereOf(scopeFor(user(["task.read"]), "employee-1", "user-1"));
     expect(where.OR).toContainEqual({ assigneeId: "employee-1" });
     expect(where.OR).toContainEqual({ createdById: "user-1" });
     expect(where.OR).not.toContainEqual({ assigneeId: "user-1" });

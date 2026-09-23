@@ -9,7 +9,10 @@ import {
   type ListParams,
 } from "../core/list/list";
 import type { RawListQuery } from "../core/list/list.decorator";
+import { whereOf, type Scope } from "../core/scope/scope";
+import type { ProjectScope } from "../core/scope/project.scope";
 import { DECISION_LIST, MEETING_ITEM_LIST, MEETING_LIST } from "./meetings.list";
+import type { DecisionScope, MeetingScope } from "./meetings.scope";
 import {
   DECISION_DETAIL_SELECT,
   DECISION_LIST_SELECT,
@@ -41,10 +44,10 @@ export class MeetingsRepository {
     return parseListQuery(query, MEETING_LIST);
   }
 
-  async list(params: ListParams, scope: Prisma.MeetingWhereInput = {}) {
+  async list(params: ListParams, scope: MeetingScope) {
     const where = buildWhere(params, MEETING_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.MeetingWhereInput;
 
     // One transaction for the page and the count: two statements can straddle
@@ -62,10 +65,10 @@ export class MeetingsRepository {
     return { items, total };
   }
 
-  listAll(params: ListParams, scope: Prisma.MeetingWhereInput = {}) {
+  listAll(params: ListParams, scope: MeetingScope) {
     const where = buildWhere(params, MEETING_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.MeetingWhereInput;
 
     return this.prisma.meeting.findMany({
@@ -76,9 +79,9 @@ export class MeetingsRepository {
     });
   }
 
-  findDetail(id: string, scope: Prisma.MeetingWhereInput = {}, tx: PrismaTx = this.prisma) {
+  findDetail(id: string, scope: MeetingScope, tx: PrismaTx = this.prisma) {
     return tx.meeting.findFirst({
-      where: { id, deletedAt: null, ...scope },
+      where: { id, deletedAt: null, ...whereOf(scope) },
       select: MEETING_DETAIL_SELECT,
     });
   }
@@ -128,10 +131,10 @@ export class MeetingsRepository {
     return row?.name ?? null;
   }
 
-  countByStatus(scope: Prisma.MeetingWhereInput = {}) {
+  countByStatus(scope: MeetingScope) {
     return this.prisma.meeting.groupBy({
       by: ["status"],
-      where: { deletedAt: null, ...scope },
+      where: { deletedAt: null, ...whereOf(scope) },
       _count: { _all: true },
     });
   }
@@ -142,9 +145,9 @@ export class MeetingsRepository {
    * The queue a Projektleiter works through on a Friday, and the one figure on
    * this module's stats tile that somebody acts on.
    */
-  countMinutesPending(scope: Prisma.MeetingWhereInput = {}) {
+  countMinutesPending(scope: MeetingScope) {
     return this.prisma.meeting.count({
-      where: { deletedAt: null, status: "HELD", minutesSentAt: null, ...scope },
+      where: { deletedAt: null, status: "HELD", minutesSentAt: null, ...whereOf(scope) },
     });
   }
 
@@ -294,10 +297,10 @@ export class MeetingsRepository {
    * meeting scope applied through the relation, and it is why `disciplineId`
    * sits on the line rather than being reached through the project.
    */
-  async listItems(params: ListParams, scope: Prisma.MeetingWhereInput = {}) {
+  async listItems(params: ListParams, scope: MeetingScope) {
     const where = buildWhere(params, MEETING_ITEM_LIST, {
       deletedAt: null,
-      meeting: { deletedAt: null, ...scope },
+      meeting: { deletedAt: null, ...whereOf(scope) },
     }) as Prisma.MeetingItemWhereInput;
 
     const [items, total] = await this.prisma.$transaction([
@@ -403,10 +406,10 @@ export class MeetingsRepository {
     return parseListQuery(query, DECISION_LIST);
   }
 
-  async listDecisions(params: ListParams, scope: Prisma.DecisionWhereInput = {}) {
+  async listDecisions(params: ListParams, scope: DecisionScope) {
     const where = buildWhere(params, DECISION_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.DecisionWhereInput;
 
     const [items, total] = await this.prisma.$transaction([
@@ -422,10 +425,10 @@ export class MeetingsRepository {
     return { items, total };
   }
 
-  listAllDecisions(params: ListParams, scope: Prisma.DecisionWhereInput = {}) {
+  listAllDecisions(params: ListParams, scope: DecisionScope) {
     const where = buildWhere(params, DECISION_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.DecisionWhereInput;
 
     return this.prisma.decision.findMany({
@@ -436,9 +439,9 @@ export class MeetingsRepository {
     });
   }
 
-  findDecision(id: string, scope: Prisma.DecisionWhereInput = {}, tx: PrismaTx = this.prisma) {
+  findDecision(id: string, scope: DecisionScope, tx: PrismaTx = this.prisma) {
     return tx.decision.findFirst({
-      where: { id, deletedAt: null, ...scope },
+      where: { id, deletedAt: null, ...whereOf(scope) },
       select: DECISION_DETAIL_SELECT,
     });
   }
@@ -525,10 +528,10 @@ export class MeetingsRepository {
     return this.prisma.decision.update({ where: { id }, data: { deletedAt: at } });
   }
 
-  countDecisionsByStatus(scope: Prisma.DecisionWhereInput = {}) {
+  countDecisionsByStatus(scope: DecisionScope) {
     return this.prisma.decision.groupBy({
       by: ["status"],
-      where: { deletedAt: null, ...scope },
+      where: { deletedAt: null, ...whereOf(scope) },
       _count: { _all: true },
     });
   }
@@ -636,6 +639,29 @@ export class MeetingsRepository {
       select: { id: true },
     });
     return row?.id ?? null;
+  }
+
+  /**
+   * Whether a project exists **and** is within the caller's reach — one
+   * question, so "unknown" and "not yours" answer alike (SEC-R7).
+   */
+  async projectReachable(projectId: string, scope: ProjectScope): Promise<boolean> {
+    const row = await this.prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null, ...whereOf(scope) },
+      select: { id: true },
+    });
+    return row !== null;
+  }
+
+  /** The project a task belongs to, when the caller can see the task at all. */
+  async taskProjectIfVisible(
+    taskId: string,
+    scope: Scope<Prisma.TaskWhereInput>,
+  ): Promise<{ projectId: string | null } | null> {
+    return this.prisma.task.findFirst({
+      where: { id: taskId, deletedAt: null, ...whereOf(scope) },
+      select: { projectId: true },
+    });
   }
 
   transaction<T>(fn: (tx: PrismaTx) => Promise<T>): Promise<T> {

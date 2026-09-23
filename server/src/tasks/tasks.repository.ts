@@ -9,8 +9,11 @@ import {
   type ListParams,
 } from "../core/list/list";
 import type { RawListQuery } from "../core/list/list.decorator";
+import { whereOf } from "../core/scope/scope";
+import type { ProjectScope } from "../core/scope/project.scope";
 import { CHECKLIST_LIST, TASK_LIST } from "./tasks.list";
 import { TASK_DETAIL_SELECT, TASK_LIST_SELECT } from "./tasks.mapper";
+import type { TaskScope } from "./tasks.scope";
 
 /** A transaction client, or the plain one. Same seam as `projects.repository.ts`. */
 export type PrismaTx = Prisma.TransactionClient | PrismaService;
@@ -23,9 +26,10 @@ export type PrismaTx = Prisma.TransactionClient | PrismaService;
  *
  * - **The soft-delete predicate.** `deletedAt: null` is written in this file and
  *   a caller cannot forget it.
- * - **The scope predicate.** It arrives as a `where` fragment and is merged into
- *   the base, and every method **defaults to `{}` meaning the caller must have
- *   already narrowed** — see the note on `list`.
+ * - **The scope predicate.** It arrives as a required `TaskScope` and is merged
+ *   into the base. There is no default any more: `{}` used to be it, and `{}` is
+ *   every row (SEC-R6) — a caller who wants all tasks writes
+ *   `unrestricted(because)`.
  * - **The selects**, which are the mapper's, so the shape fetched and the shape
  *   read cannot drift.
  */
@@ -42,19 +46,17 @@ export class TasksRepository {
   /**
    * One page and its total.
    *
-   * **The `scope` default is `{}` and that is a smaller safety property than
-   * Projects'**, where the same default means "no extra narrowing" on a table
-   * whose rows all belong to somebody. Here a task legitimately belongs to
-   * nobody, so `{}` really is everything — which is why `TasksService.scope`
-   * has no early return and always computes a fragment. The place that could go
-   * wrong is a *new* method added later that forgets the argument; the
-   * signature makes the omission visible rather than impossible, and
-   * `tasks.scope.test.ts` asserts the fragment itself.
+   * **The scope is required and has no default** (P0, SEC-4). It used to
+   * default to `{}` — every row — and this comment said that made the omission
+   * "visible rather than impossible". It is impossible now: a method that
+   * forgets the argument does not compile, and "every task" is spelled
+   * `unrestricted(because)` at the call site. `tasks.scope.test.ts` asserts
+   * the fragment itself.
    */
-  async list(params: ListParams, scope: Prisma.TaskWhereInput = {}) {
+  async list(params: ListParams, scope: TaskScope) {
     const where = buildWhere(params, TASK_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.TaskWhereInput;
 
     // One transaction for the page and the count: two statements can straddle a
@@ -74,10 +76,10 @@ export class TasksRepository {
   }
 
   /** Every row a filtered export covers. The `take` is a ceiling, not a page. */
-  async listAll(params: ListParams, scope: Prisma.TaskWhereInput = {}) {
+  async listAll(params: ListParams, scope: TaskScope) {
     const where = buildWhere(params, TASK_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.TaskWhereInput;
 
     return this.prisma.task.findMany({
@@ -88,9 +90,9 @@ export class TasksRepository {
     });
   }
 
-  findDetail(id: string, scope: Prisma.TaskWhereInput = {}, tx: PrismaTx = this.prisma) {
+  findDetail(id: string, scope: TaskScope, tx: PrismaTx = this.prisma) {
     return tx.task.findFirst({
-      where: { id, deletedAt: null, ...scope },
+      where: { id, deletedAt: null, ...whereOf(scope) },
       select: TASK_DETAIL_SELECT,
     });
   }
@@ -147,10 +149,10 @@ export class TasksRepository {
     return row?.name ?? null;
   }
 
-  countByStatus(scope: Prisma.TaskWhereInput = {}) {
+  countByStatus(scope: TaskScope) {
     return this.prisma.task.groupBy({
       by: ["status"],
-      where: { deletedAt: null, ...scope },
+      where: { deletedAt: null, ...whereOf(scope) },
       _count: { _all: true },
     });
   }
@@ -162,13 +164,13 @@ export class TasksRepository {
    * page — the same reason the scope is a `where` fragment. A badge that counted
    * the current page would say "3" on a backlog of forty.
    */
-  countOverdue(scope: Prisma.TaskWhereInput = {}, now: Date = new Date()) {
+  countOverdue(scope: TaskScope, now: Date = new Date()) {
     return this.prisma.task.count({
       where: {
         deletedAt: null,
         dueDate: { lt: now },
         status: { in: ["TODO", "IN_PROGRESS", "IN_REVIEW", "BLOCKED"] },
-        ...scope,
+        ...whereOf(scope),
       },
     });
   }
@@ -473,6 +475,20 @@ export class TasksRepository {
       select: { projectId: true },
     });
     return row?.projectId;
+  }
+
+  /**
+   * Whether a project exists **and** is within the caller's reach.
+   *
+   * One question, deliberately: "unknown" and "not yours" must produce the same
+   * answer, or a create becomes a way to test which project ids exist (SEC-R7).
+   */
+  async projectReachable(projectId: string, scope: ProjectScope): Promise<boolean> {
+    const row = await this.prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null, ...whereOf(scope) },
+      select: { id: true },
+    });
+    return row !== null;
   }
 
   /** The caller's `Employee` row, from their login. `null` is a legitimate state. */

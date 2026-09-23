@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AuthUser } from "../common/decorators";
 import { scopeFor, seesAllDrawings, transmittalScopeFor } from "./drawings.scope";
+import { whereOf } from "../core/scope/scope";
+import { reachableProject } from "../core/scope/membership.scope";
 
 /**
  * Row-level visibility, as a `where` fragment.
@@ -42,8 +44,10 @@ describe("seesAllDrawings", () => {
 });
 
 describe("scopeFor", () => {
-  it("is unrestricted for a caller who sees everything", () => {
-    expect(scopeFor(user({ isSuperAdmin: true }), "e1")).toEqual({});
+  it("is unrestricted — by name — for a caller who sees everything", () => {
+    const scope = scopeFor(user({ isSuperAdmin: true }), "e1");
+    expect(scope.kind).toBe("unrestricted");
+    expect(whereOf(scope)).toEqual({});
   });
 
   /**
@@ -56,35 +60,32 @@ describe("scopeFor", () => {
    * would let somebody keep seeing a plan after leaving the project.
    */
   it("narrows to the caller's projects and nothing else", () => {
-    const where = scopeFor(user({ permissions: new Set(["drawing.read"]) }), "e1");
+    const where = whereOf(scopeFor(user({ permissions: new Set(["drawing.read"]) }), "e1"));
 
-    expect(where).toEqual({
-      project: {
-        deletedAt: null,
-        OR: [{ managerId: "e1" }, { members: { some: { employeeId: "e1", deletedAt: null } } }],
-      },
-    });
+    // Managing the project, or a membership that has not ended — the shared
+    // predicate, so an *ended* membership closes access as a removed one does.
+    expect(where).toEqual({ project: reachableProject("e1") });
   });
 
   it("has no createdBy clause, so leaving a project ends access", () => {
-    const where = scopeFor(user({ permissions: new Set(["drawing.read"]) }), "e1");
+    const where = whereOf(scopeFor(user({ permissions: new Set(["drawing.read"]) }), "e1"));
     expect(JSON.stringify(where)).not.toContain("createdById");
   });
 
   /**
    * A caller with no employee row gets an empty list rather than an error.
    *
-   * `{ projectId: "" }` matches nothing. A 403 would leak that the distinction
+   * `nothing()` matches no row. A 403 would leak that the distinction
    * between "on no project" and "has no employee record" exists.
    */
   it("matches nothing when the caller has no employee record", () => {
-    expect(scopeFor(user({ permissions: new Set(["drawing.read"]) }), null)).toEqual({
-      projectId: "",
-    });
+    const scope = scopeFor(user({ permissions: new Set(["drawing.read"]) }), null);
+    expect(scope.kind).toBe("nothing");
+    expect(whereOf(scope)).toEqual({ id: "" });
   });
 
   it("excludes deleted projects", () => {
-    const where = scopeFor(user(), "e1") as { project?: { deletedAt?: unknown } };
+    const where = whereOf(scopeFor(user(), "e1")) as { project?: { deletedAt?: unknown } };
     expect(where.project?.deletedAt).toBeNull();
   });
 });
@@ -99,29 +100,25 @@ describe("transmittalScopeFor", () => {
    * argument `seesAllDecisions` makes one module earlier.
    */
   it("widens on the project grant", () => {
-    expect(transmittalScopeFor(user({ permissions: new Set(["project.readAll"]) }), "e1")).toEqual(
-      {},
-    );
+    const scope = transmittalScopeFor(user({ permissions: new Set(["project.readAll"]) }), "e1");
+    expect(scope.kind).toBe("unrestricted");
+    expect(whereOf(scope)).toEqual({});
   });
 
   it("does not widen on drawing.readAll", () => {
     // Deliberate: seeing every plan is not the same as seeing every Planversand,
     // which carries who received what.
-    const where = transmittalScopeFor(user({ permissions: new Set(["drawing.readAll"]) }), "e1");
-    expect(where).not.toEqual({});
+    const scope = transmittalScopeFor(user({ permissions: new Set(["drawing.readAll"]) }), "e1");
+    expect(scope.kind).toBe("restricted");
+    expect(whereOf(scope)).not.toEqual({});
   });
 
   it("narrows to the caller's projects", () => {
-    expect(transmittalScopeFor(user(), "e1")).toEqual({
-      project: {
-        deletedAt: null,
-        OR: [{ managerId: "e1" }, { members: { some: { employeeId: "e1", deletedAt: null } } }],
-      },
-    });
+    expect(whereOf(transmittalScopeFor(user(), "e1"))).toEqual({ project: reachableProject("e1") });
   });
 
   it("matches nothing without an employee record", () => {
-    expect(transmittalScopeFor(user(), null)).toEqual({ projectId: "" });
+    expect(whereOf(transmittalScopeFor(user(), null))).toEqual({ id: "" });
   });
 
   /**

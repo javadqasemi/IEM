@@ -12,7 +12,13 @@ import type { AuthUser } from "../common/decorators";
 import type { RawListQuery } from "../core/list/list.decorator";
 import { paginated } from "../core/list/list";
 import { TasksRepository } from "./tasks.repository";
-import { ownsTask, scopeFor, seesAllTasks } from "./tasks.scope";
+import { ownsTask, scopeFor, seesAllTasks, type TaskScope } from "./tasks.scope";
+import { unrestricted } from "../core/scope/scope";
+import {
+  PROJECT_NOT_FOUND,
+  projectScopeFor,
+  seesAllProjects,
+} from "../core/scope/project.scope";
 import {
   toAuditSnapshot,
   toChecklistItem,
@@ -158,10 +164,14 @@ export class TasksService {
 
     this.refuseBadEstimate(dto.estimateHours);
 
+    // Reach before existence: a project the caller cannot see and one that does
+    // not exist must answer alike, or this route tests which ids are real.
+    await this.requireProjectReach(dto.projectId ?? null, user);
+
     const missing = await this.repo.missingReferences(dto);
     if (missing.length) throw new BadRequestException(`Unbekannt: ${missing.join(", ")}.`);
 
-    await this.refuseCrossProject(dto.projectId ?? null, dto.milestoneId, dto.parentTaskId);
+    await this.refuseCrossProject(dto.projectId ?? null, dto.milestoneId, dto.parentTaskId, user);
 
     /*
       Assigning at creation needs `task.assign`, like assigning later does.
@@ -228,11 +238,15 @@ export class TasksService {
 
     this.refuseBadEstimate(dto.estimateHours);
 
+    const projectId = dto.projectId === undefined ? current.projectId : dto.projectId;
+    // Moving a task is creating it somewhere else: the destination must be in
+    // reach, answered the same way whether it is hidden or absent (SEC-R7).
+    if (projectId !== current.projectId) await this.requireProjectReach(projectId, user);
+
     const missing = await this.repo.missingReferences(dto);
     if (missing.length) throw new BadRequestException(`Unbekannt: ${missing.join(", ")}.`);
 
-    const projectId = dto.projectId === undefined ? current.projectId : dto.projectId;
-    await this.refuseCrossProject(projectId, dto.milestoneId, dto.parentTaskId);
+    await this.refuseCrossProject(projectId, dto.milestoneId, dto.parentTaskId, user);
 
     /*
       Reparenting is where the tree can be broken, and the database cannot see
@@ -284,7 +298,11 @@ export class TasksService {
 
       // Re-read inside the transaction: `updateMany` returns a count and not a
       // row, which is the price of being able to put the version in the `where`.
-      const updated = await this.repo.findDetail(id, {}, tx);
+      const updated = await this.repo.findDetail(
+        id,
+        unrestricted("re-read of the row this transaction just wrote; requireWritable() checked reach"),
+        tx,
+      );
       if (!updated) throw new NotFoundException("Aufgabe nicht gefunden.");
 
       await this.versions.record(tx, {
@@ -656,7 +674,10 @@ export class TasksService {
 
   async addDependency(id: string, dto: AddDependencyDto, user: AuthUser) {
     const current = await this.requireWritable(id, user);
-    const predecessor = await this.repo.findForRules(dto.predecessorId);
+    // Through the caller's scope: a task on the same project is visible
+    // anyway, and a project-less one belonging to somebody else must not be
+    // linkable — or confirmable as existing — by guessing its id.
+    const predecessor = await this.findVisible(dto.predecessorId, user);
     if (!predecessor) throw new BadRequestException("Die Vorgänger-Aufgabe gibt es nicht.");
 
     /*
@@ -888,13 +909,40 @@ export class TasksService {
    * task should see it without signing out, which is the same reason permissions
    * are read from the database on every request.
    */
-  private async scope(user: AuthUser) {
-    if (seesAllTasks(user)) return {};
+  private async scope(user: AuthUser): Promise<TaskScope> {
+    if (seesAllTasks(user)) return scopeFor(user, null, user.id);
     return scopeFor(user, await this.employeeId(user), user.id);
   }
 
   private async employeeId(user: AuthUser): Promise<string | null> {
     return this.repo.employeeIdForUser(user.id);
+  }
+
+  /**
+   * Refuses a project the caller cannot reach — as a 404, identical for one
+   * that does not exist (SEC-R7). `null` is a firm-level task and needs no
+   * project.
+   *
+   * Reach is the *project* rule (`core/scope/project.scope.ts`), not the task
+   * rule: `task.readAll` widens which tasks one sees, not which projects one
+   * may put work into.
+   */
+  private async requireProjectReach(projectId: string | null, user: AuthUser): Promise<void> {
+    if (!projectId) return;
+    const scope = seesAllProjects(user)
+      ? projectScopeFor(user, null)
+      : projectScopeFor(user, await this.employeeId(user));
+    if (!(await this.repo.projectReachable(projectId, scope))) {
+      throw new NotFoundException(PROJECT_NOT_FOUND);
+    }
+  }
+
+  /** The rule inputs of a task, or `null` when it is outside the caller's scope. */
+  private async findVisible(id: string, user: AuthUser) {
+    const task = await this.repo.findForRules(id);
+    if (!task) return null;
+    if (seesAllTasks(user)) return task;
+    return (await this.repo.findDetail(id, await this.scope(user))) ? task : null;
   }
 
   /** Fetch-or-404, with the caller's scope applied. Every read of one task starts here. */
@@ -983,8 +1031,9 @@ export class TasksService {
    */
   private async refuseCrossProject(
     projectId: string | null,
-    milestoneId?: string | null,
-    parentTaskId?: string | null,
+    milestoneId: string | null | undefined,
+    parentTaskId: string | null | undefined,
+    user: AuthUser,
   ): Promise<void> {
     if (milestoneId) {
       const owner = await this.repo.milestoneProject(milestoneId);
@@ -995,8 +1044,11 @@ export class TasksService {
       }
     }
     if (parentTaskId) {
-      const parent = await this.repo.findForRules(parentTaskId);
-      const refusal = refuseParentProject(parent?.projectId ?? null, projectId);
+      // Through the caller's scope, like a predecessor: a hidden parent reads
+      // as a missing one.
+      const parent = await this.findVisible(parentTaskId, user);
+      if (!parent) throw new BadRequestException("Die übergeordnete Aufgabe gibt es nicht.");
+      const refusal = refuseParentProject(parent.projectId ?? null, projectId);
       if (refusal) throw new BadRequestException(refusal);
     }
   }

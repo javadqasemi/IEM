@@ -1,5 +1,11 @@
-import type { Prisma } from "@prisma/client";
 import type { AuthUser } from "../common/decorators";
+import {
+  projectScopeFor,
+  seesAllProjects as seesAll,
+  type ProjectScope,
+} from "../core/scope/project.scope";
+
+export type { ProjectScope };
 
 /**
  * Row-level visibility: the `◐` in `docs/permissions.md`.
@@ -11,6 +17,11 @@ import type { AuthUser } from "../common/decorators";
  * rule in the catalogue, where it is grantable, auditable, and visible in the
  * role editor, instead of buried in a service where nobody can ask who has it.
  *
+ * The rule itself now lives in `core/scope/project.scope.ts`, because the
+ * modules that hang off a project need it too — on **create**, to refuse a
+ * `projectId` the caller cannot reach (SEC-R7) — and a feature may not import
+ * a sibling. This file keeps the argument and the names.
+ *
  * ---
  *
  * **Why this is a `where` fragment and not a filter over results.**
@@ -20,9 +31,11 @@ import type { AuthUser } from "../common/decorators";
  * open, and a paginator that skips. Worse, it is a rule applied *after* the
  * database — so any query that forgets the post-filter leaks, silently, and
  * looks exactly like a query that had nothing to hide. A predicate merged into
- * the `where` cannot be forgotten halfway: the repository takes it as an
- * argument and defaults to the *narrow* case, so a caller who omits it sees
- * their own projects rather than everyone's.
+ * the `where` cannot be forgotten halfway: the repository **requires** it as a
+ * `Scope` with no default, so omitting it does not compile, and "every project"
+ * has to be asked for by name with `unrestricted(because)`. (This paragraph used
+ * to say the repository defaulted to the narrow case. It defaulted to `{}` —
+ * every row — which is SEC-R6; see `core/scope/scope.ts`.)
  *
  * **The one asymmetry, stated rather than discovered.** `scopeFor` narrows
  * reads. Writes are guarded by `project.update` and friends, which are
@@ -30,7 +43,10 @@ import type { AuthUser } from "../common/decorators";
  * can *reach*, and reach is what this narrows. That is the intended model
  * (permissions.md §4), and it is worth being explicit because the alternative
  * reading — that the scope also restricts writes — is a reasonable thing to
- * assume and is not true.
+ * assume and is not true. P0 leaves it so deliberately: narrowing writes to
+ * the *managed* projects is a business-model change, recorded in
+ * `docs/COMPLETE_APPLICATION_AUDIT.md` Part 8 (R10) and pinned by
+ * `projects.scope.test.ts` so it cannot drift unnoticed either way.
  */
 
 /**
@@ -41,27 +57,21 @@ import type { AuthUser } from "../common/decorators";
  * than the reasoning keeps one answer to "who is unrestricted".
  */
 export function seesAllProjects(user: AuthUser): boolean {
-  return user.isSuperAdmin || user.permissions.has("project.readAll");
+  return seesAll(user);
 }
 
 /**
- * The `where` fragment for this caller, or `{}` when unrestricted.
+ * The scope for this caller.
  *
  * `employeeId` is the caller's `Employee` row, not their `User` id, and the two
  * are different keys — see the note on `Employee` in the schema. A user with no
  * employee record (an external auditor's account, a service login) and no
  * `readAll` sees **nothing**, which is the correct answer and not an error: the
  * scope is "projects I am on", and they are on none.
+ *
+ * "On" means managing it, or a membership that **has not ended** — see
+ * `reachableProject` in `core/scope/membership.scope.ts`.
  */
-export function scopeFor(user: AuthUser, employeeId: string | null): Prisma.ProjectWhereInput {
-  if (seesAllProjects(user)) return {};
-  if (!employeeId) {
-    // `id: ""` rather than a thrown error. A caller who legitimately has no
-    // projects and a caller who has no employee record should get the same
-    // empty list; a 403 here would leak that the distinction exists.
-    return { id: "" };
-  }
-  return {
-    OR: [{ managerId: employeeId }, { members: { some: { employeeId, deletedAt: null } } }],
-  };
+export function scopeFor(user: AuthUser, employeeId: string | null): ProjectScope {
+  return projectScopeFor(user, employeeId);
 }

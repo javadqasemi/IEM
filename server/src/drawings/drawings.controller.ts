@@ -106,8 +106,9 @@ export class DrawingsController {
 
   @Get(":id/versions")
   @RequirePermissions("drawing.read")
-  history(@Param("id") id: string) {
-    return this.drawings.history(id);
+  history(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    // With the caller: the history is read through `require()` (SEC-R6).
+    return this.drawings.history(id, user);
   }
 
   @Post()

@@ -1,5 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import type { AuthUser } from "../common/decorators";
+import { reachableProject } from "../core/scope/membership.scope";
+import { nothing, restrictedTo, unrestricted, type Scope } from "../core/scope/scope";
+
+export type MeetingScope = Scope<Prisma.MeetingWhereInput>;
+export type DecisionScope = Scope<Prisma.DecisionWhereInput>;
 
 /**
  * Row-level visibility for meetings and decisions.
@@ -47,8 +52,10 @@ export function scopeFor(
   user: AuthUser,
   employeeId: string | null,
   userId: string,
-): Prisma.MeetingWhereInput {
-  if (seesAllMeetings(user)) return {};
+): MeetingScope {
+  if (seesAllMeetings(user)) {
+    return unrestricted(user.isSuperAdmin ? "Super Admin" : "meeting.readAll");
+  }
 
   const reachable: Prisma.MeetingWhereInput[] = [{ createdById: userId }];
 
@@ -56,18 +63,11 @@ export function scopeFor(
     reachable.push({ organiserId: employeeId });
     // Having been in the room. The rule that makes a protocol usable.
     reachable.push({ attendees: { some: { employeeId, deletedAt: null } } });
-    reachable.push({
-      project: {
-        deletedAt: null,
-        OR: [
-          { managerId: employeeId },
-          { members: { some: { employeeId, deletedAt: null } } },
-        ],
-      },
-    });
+    // Managing it, or a membership that has not ended (`membership.scope.ts`).
+    reachable.push({ project: reachableProject(employeeId) });
   }
 
-  return { OR: reachable };
+  return restrictedTo({ OR: reachable });
 }
 
 export function seesAllDecisions(user: AuthUser): boolean {
@@ -89,17 +89,10 @@ export function seesAllDecisions(user: AuthUser): boolean {
  * should get the same empty list, because a 403 would leak that the distinction
  * exists.
  */
-export function decisionScopeFor(
-  user: AuthUser,
-  employeeId: string | null,
-): Prisma.DecisionWhereInput {
-  if (seesAllDecisions(user)) return {};
-  if (!employeeId) return { projectId: "" };
-
-  return {
-    project: {
-      deletedAt: null,
-      OR: [{ managerId: employeeId }, { members: { some: { employeeId, deletedAt: null } } }],
-    },
-  };
+export function decisionScopeFor(user: AuthUser, employeeId: string | null): DecisionScope {
+  if (seesAllDecisions(user)) {
+    return unrestricted(user.isSuperAdmin ? "Super Admin" : "project.readAll");
+  }
+  if (!employeeId) return nothing();
+  return restrictedTo({ project: reachableProject(employeeId) });
 }

@@ -12,7 +12,8 @@ import type { AuthUser } from "../common/decorators";
 import type { RawListQuery } from "../core/list/list.decorator";
 import { paginated } from "../core/list/list";
 import { ProjectsRepository } from "./projects.repository";
-import { scopeFor, seesAllProjects } from "./projects.scope";
+import { scopeFor, seesAllProjects, type ProjectScope } from "./projects.scope";
+import { unrestricted } from "../core/scope/scope";
 import {
   toAuditSnapshot,
   toDate,
@@ -216,7 +217,11 @@ export class ProjectsService {
 
       // Re-read inside the transaction: `updateMany` returns a count and not a
       // row, which is the price of being able to put the version in the `where`.
-      const updated = await this.repo.findDetail(id, {}, tx);
+      const updated = await this.repo.findDetail(
+        id,
+        unrestricted("re-read of the row this transaction just wrote; require() checked reach"),
+        tx,
+      );
       if (!updated) throw new NotFoundException("Projekt nicht gefunden.");
 
       await this.versions.record(tx, {
@@ -677,8 +682,10 @@ export class ProjectsService {
    * project should see it without signing out, which is the same reason
    * permissions are read from the database on every request.
    */
-  private async scope(user: AuthUser) {
-    if (seesAllProjects(user)) return {};
+  private async scope(user: AuthUser): Promise<ProjectScope> {
+    // No employee lookup for a caller who sees everything — `scopeFor`
+    // answers `unrestricted` for them before it reads the id.
+    if (seesAllProjects(user)) return scopeFor(user, null);
     return scopeFor(user, await this.repo.employeeIdForUser(user.id));
   }
 

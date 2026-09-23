@@ -6,6 +6,8 @@ import {
   seesAllDecisions,
   seesAllMeetings,
 } from "./meetings.scope";
+import { whereOf } from "../core/scope/scope";
+import { reachableProject } from "../core/scope/membership.scope";
 
 /**
  * Row-level visibility, as a predicate.
@@ -39,11 +41,11 @@ describe("seesAllMeetings", () => {
 
 describe("scopeFor", () => {
   it("returns an empty fragment for the unrestricted", () => {
-    expect(scopeFor(user(["meeting.readAll"]), "e1", "u1")).toEqual({});
+    expect(whereOf(scopeFor(user(["meeting.readAll"]), "e1", "u1"))).toEqual({});
   });
 
   it("is a union of four reachability rules", () => {
-    const where = scopeFor(user(["meeting.read"]), "e1", "u1");
+    const where = whereOf(scopeFor(user(["meeting.read"]), "e1", "u1"));
     expect(where.OR).toHaveLength(4);
     expect(where.OR).toContainEqual({ createdById: "u1" });
     expect(where.OR).toContainEqual({ organiserId: "e1" });
@@ -56,20 +58,16 @@ describe("scopeFor", () => {
      * in the room; minutes they cannot read are minutes they will ask for by
      * e-mail, which is where the record stops being the record.
      */
-    const where = scopeFor(user(["meeting.read"]), "e1", "u1");
+    const where = whereOf(scopeFor(user(["meeting.read"]), "e1", "u1"));
     expect(where.OR).toContainEqual({
       attendees: { some: { employeeId: "e1", deletedAt: null } },
     });
   });
 
   it("reaches a meeting through its project's team", () => {
-    const where = scopeFor(user(["meeting.read"]), "e1", "u1");
-    expect(where.OR).toContainEqual({
-      project: {
-        deletedAt: null,
-        OR: [{ managerId: "e1" }, { members: { some: { employeeId: "e1", deletedAt: null } } }],
-      },
-    });
+    const where = whereOf(scopeFor(user(["meeting.read"]), "e1", "u1"));
+    // The shared predicate: managing it, or a membership that has not ended.
+    expect(where.OR).toContainEqual({ project: reachableProject("e1") });
   });
 
   it("still shows a user with no employee record what they created", () => {
@@ -78,7 +76,7 @@ describe("scopeFor", () => {
      * administrator — would otherwise vanish the moment they saved it.
      * `Meeting.projectId` is nullable, so the project rule cannot reach it.
      */
-    const where = scopeFor(user(["meeting.read"]), null, "u1");
+    const where = whereOf(scopeFor(user(["meeting.read"]), null, "u1"));
     expect(where.OR).toEqual([{ createdById: "u1" }]);
   });
 
@@ -89,7 +87,7 @@ describe("scopeFor", () => {
      * belongs compiles, matches nothing, and reads as "this person has no
      * meetings".
      */
-    const where = scopeFor(user(["meeting.read"]), "employee-1", "user-1");
+    const where = whereOf(scopeFor(user(["meeting.read"]), "employee-1", "user-1"));
     expect(where.OR).toContainEqual({ organiserId: "employee-1" });
     expect(where.OR).toContainEqual({ createdById: "user-1" });
     expect(where.OR).not.toContainEqual({ organiserId: "user-1" });
@@ -97,7 +95,7 @@ describe("scopeFor", () => {
   });
 
   it("excludes a deleted project from the reachable set", () => {
-    const where = scopeFor(user(["meeting.read"]), "e1", "u1");
+    const where = whereOf(scopeFor(user(["meeting.read"]), "e1", "u1"));
     const viaProject = where.OR!.find((clause) => "project" in clause) as {
       project: { deletedAt: null };
     };
@@ -115,7 +113,7 @@ describe("decisionScopeFor", () => {
      */
     expect(seesAllDecisions(user(["project.readAll"]))).toBe(true);
     expect(seesAllDecisions(user(["decision.read"]))).toBe(false);
-    expect(decisionScopeFor(user(["project.readAll"]), "e1")).toEqual({});
+    expect(whereOf(decisionScopeFor(user(["project.readAll"]), "e1"))).toEqual({});
   });
 
   it("is narrower than the meeting scope — attendance does not open a decision", () => {
@@ -125,23 +123,18 @@ describe("decisionScopeFor", () => {
      * key for a record whose whole purpose is to be found later by project.
      * Somebody who needs a decision they cannot see needs access to the project.
      */
-    const where = decisionScopeFor(user(["decision.read"]), "e1");
+    const where = whereOf(decisionScopeFor(user(["decision.read"]), "e1"));
     expect(JSON.stringify(where)).not.toContain("attendees");
-    expect(where).toEqual({
-      project: {
-        deletedAt: null,
-        OR: [{ managerId: "e1" }, { members: { some: { employeeId: "e1", deletedAt: null } } }],
-      },
-    });
+    expect(where).toEqual({ project: reachableProject("e1") });
   });
 
   it("returns nothing for a restricted caller with no employee record", () => {
     /**
-     * `{ projectId: "" }` rather than a thrown error — the shape
-     * `projects.scope.ts` uses. A caller who is legitimately on no project and
-     * one with no employee row get the same empty list; a 403 would leak that
-     * the distinction exists.
+     * `nothing()` rather than a thrown error — the shape `projects.scope.ts`
+     * uses. A caller who is legitimately on no project and one with no
+     * employee row get the same empty list; a 403 would leak that the
+     * distinction exists.
      */
-    expect(decisionScopeFor(user(["decision.read"]), null)).toEqual({ projectId: "" });
+    expect(whereOf(decisionScopeFor(user(["decision.read"]), null))).toEqual({ id: "" });
   });
 });

@@ -9,8 +9,10 @@ import {
   type ListParams,
 } from "../core/list/list";
 import type { RawListQuery } from "../core/list/list.decorator";
+import { whereOf } from "../core/scope/scope";
 import { MILESTONE_LIST, PROJECT_LIST } from "./projects.list";
 import { PROJECT_DETAIL_SELECT, PROJECT_LIST_SELECT } from "./projects.mapper";
+import type { ProjectScope } from "./projects.scope";
 
 /**
  * A transaction client, or the plain one.
@@ -37,9 +39,10 @@ export type PrismaTx = Prisma.TransactionClient | PrismaService;
  *   place, and a caller cannot forget it. Every `deletedAt` bug in every system
  *   that has them is a query somewhere that omitted the clause.
  * - **The scope predicate.** Row-level visibility (`project.readAll`) arrives
- *   as a `where` fragment and is merged into the base — so a caller who forgets
- *   to pass it gets *their own* projects, never everyone's. The safe direction
- *   is the default.
+ *   as a required `ProjectScope` and is merged into the base. There is no
+ *   default: a caller who forgets it does not compile, and one who wants every
+ *   project writes `unrestricted(because)`. (This used to claim the default was
+ *   the safe direction; the default was `{}`, every row — SEC-R6.)
  * - **The selects**, which are `projects.mapper.ts`'s, so the shape the mapper
  *   reads and the shape the query fetches cannot drift.
  */
@@ -60,10 +63,10 @@ export class ProjectsRepository {
     return parseListQuery(query, PROJECT_LIST);
   }
 
-  async list(params: ListParams, scope: Prisma.ProjectWhereInput = {}) {
+  async list(params: ListParams, scope: ProjectScope) {
     const where = buildWhere(params, PROJECT_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.ProjectWhereInput;
 
     /*
@@ -94,10 +97,10 @@ export class ProjectsRepository {
    * firm will have this century; a request that hits it is a mistake, and
    * truncating is better than reading the table into memory.
    */
-  async listAll(params: ListParams, scope: Prisma.ProjectWhereInput = {}) {
+  async listAll(params: ListParams, scope: ProjectScope) {
     const where = buildWhere(params, PROJECT_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.ProjectWhereInput;
 
     return this.prisma.project.findMany({
@@ -108,9 +111,9 @@ export class ProjectsRepository {
     });
   }
 
-  findDetail(id: string, scope: Prisma.ProjectWhereInput = {}, tx: PrismaTx = this.prisma) {
+  findDetail(id: string, scope: ProjectScope, tx: PrismaTx = this.prisma) {
     return tx.project.findFirst({
-      where: { id, deletedAt: null, ...scope },
+      where: { id, deletedAt: null, ...whereOf(scope) },
       select: PROJECT_DETAIL_SELECT,
     });
   }
@@ -169,10 +172,10 @@ export class ProjectsRepository {
     return rows.map((row) => row.number);
   }
 
-  countByStatus(scope: Prisma.ProjectWhereInput = {}) {
+  countByStatus(scope: ProjectScope) {
     return this.prisma.project.groupBy({
       by: ["status"],
-      where: { deletedAt: null, ...scope },
+      where: { deletedAt: null, ...whereOf(scope) },
       _count: { _all: true },
     });
   }

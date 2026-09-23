@@ -46,7 +46,19 @@ import {
   refuseTransmittal,
   transitionsFrom,
 } from "./drawings.rules";
-import { scopeFor, seesAllDrawings, transmittalScopeFor } from "./drawings.scope";
+import {
+  scopeFor,
+  seesAllDrawings,
+  transmittalScopeFor,
+  type DrawingScope,
+  type TransmittalScope,
+} from "./drawings.scope";
+import { unrestricted } from "../core/scope/scope";
+import {
+  PROJECT_NOT_FOUND,
+  projectScopeFor,
+  seesAllProjects,
+} from "../core/scope/project.scope";
 
 /**
  * Pläne und Planversand — Wave 2, module 3.
@@ -134,7 +146,18 @@ export class DrawingsService {
     return { byStatus, ...totals };
   }
 
-  history(id: string) {
+  /**
+   * A plan's version history — through `require()`, like every other read of
+   * one plan.
+   *
+   * It used to take the id alone and read `EntityVersion` directly, so any
+   * holder of `drawing.read` could fetch the full snapshots of any plan in the
+   * firm by id, whatever its project (SEC-R6, the one route the audit found
+   * where the scope had been forgotten outright). `require()` answers 404 for
+   * a plan the caller cannot see, as `GET /drawings/:id` does.
+   */
+  async history(id: string, user: AuthUser) {
+    await this.require(id, user);
     return this.versions.history("drawing", id);
   }
 
@@ -145,6 +168,10 @@ export class DrawingsService {
   async create(dto: CreateDrawingDto, user: AuthUser) {
     const refusal = refuseDrawingNumber(dto.number);
     if (refusal) throw new BadRequestException(refusal);
+
+    // A plan may only be started in a project the caller can reach, and a
+    // hidden project answers exactly like a missing one (SEC-R7).
+    await this.requireProjectReach(dto.projectId, user);
 
     const row = await this.repo
       .create(toDrawingCreateData(dto, user.id))
@@ -187,7 +214,10 @@ export class DrawingsService {
     const changed = changedFields(dto, VERSION_CONTROL_FIELDS);
     if (!changed.length) return this.detail(id, user);
 
-    const before = await this.repo.findDetail(id);
+    const before = await this.repo.findDetail(
+      id,
+      unrestricted("the row require() has just checked, read for the audit snapshot"),
+    );
 
     /*
       The lock, the re-read and the version row in **one transaction**.
@@ -205,7 +235,10 @@ export class DrawingsService {
 
       if (!ok) await this.refuseStale(id, dto.expectedVersion, user);
 
-      const updated = await this.repo.findDetail(id);
+      const updated = await this.repo.findDetail(
+        id,
+        unrestricted("re-read of the row this transaction just wrote; require() checked reach"),
+      );
       if (!updated) throw new NotFoundException("Plan nicht gefunden.");
 
       await this.versions.record(tx, {
@@ -475,6 +508,10 @@ export class DrawingsService {
    * to consume when module 9 arrives.
    */
   async createTransmittal(dto: CreateTransmittalDto, user: AuthUser) {
+    // The project the Planversand is filed under must be in reach, answered
+    // like a missing one otherwise (SEC-R7). The revisions are then checked
+    // against the plan scope and against this project below.
+    await this.requireProjectReach(dto.projectId, user);
     const scope = await this.scope(user);
     const revisionIds = dto.items.map((item) => item.drawingRevisionId);
 
@@ -667,13 +704,23 @@ export class DrawingsService {
     };
   }
 
-  private async scope(user: AuthUser) {
-    if (seesAllDrawings(user)) return {};
+  private async scope(user: AuthUser): Promise<DrawingScope> {
+    if (seesAllDrawings(user)) return scopeFor(user, null);
     return scopeFor(user, await this.employeeId(user));
   }
 
-  private async transmittalScope(user: AuthUser) {
+  private async transmittalScope(user: AuthUser): Promise<TransmittalScope> {
     return transmittalScopeFor(user, await this.employeeId(user));
+  }
+
+  /** Refuses a project the caller cannot reach — the same 404 as a missing one. */
+  private async requireProjectReach(projectId: string, user: AuthUser): Promise<void> {
+    const scope = seesAllProjects(user)
+      ? projectScopeFor(user, null)
+      : projectScopeFor(user, await this.employeeId(user));
+    if (!(await this.repo.projectReachable(projectId, scope))) {
+      throw new NotFoundException(PROJECT_NOT_FOUND);
+    }
   }
 
   private employeeId(user: AuthUser): Promise<string | null> {
@@ -682,15 +729,11 @@ export class DrawingsService {
 
   /** Fetch-or-404, with the caller's scope applied. Every write starts here. */
   private async require(id: string, user: AuthUser) {
-    const row = await this.repo.findForRules(id);
+    // The rule inputs, read through the caller's scope in one query: a plan
+    // they cannot see and a plan that does not exist are the same 404, because
+    // whether a plan exists is itself information.
+    const row = await this.repo.findForRules(id, await this.scope(user));
     if (!row) throw new NotFoundException("Plan nicht gefunden.");
-
-    if (!seesAllDrawings(user)) {
-      const visible = await this.repo.findDetail(id, await this.scope(user));
-      // A 404 rather than a 403: whether a plan exists is itself information.
-      if (!visible) throw new NotFoundException("Plan nicht gefunden.");
-    }
-
     return row;
   }
 

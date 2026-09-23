@@ -24,7 +24,25 @@ import { paginated } from "../core/list/list";
 // to prevent.
 import { nextPosition } from "../tasks/tasks.rules";
 import { MeetingsRepository, type PrismaTx } from "./meetings.repository";
-import { decisionScopeFor, scopeFor, seesAllDecisions, seesAllMeetings } from "./meetings.scope";
+import {
+  decisionScopeFor,
+  scopeFor,
+  seesAllDecisions,
+  seesAllMeetings,
+  type DecisionScope,
+  type MeetingScope,
+} from "./meetings.scope";
+import { unrestricted } from "../core/scope/scope";
+import {
+  PROJECT_NOT_FOUND,
+  projectScopeFor,
+  seesAllProjects,
+} from "../core/scope/project.scope";
+/*
+  The *task* read rule, imported as a pure function — the same arrangement as
+  the tasks module's `nextPosition` above: a rule over data, not a service.
+*/
+import { scopeFor as taskScopeFor } from "../tasks/tasks.scope";
 import {
   toDate,
   toDecisionAuditSnapshot,
@@ -212,6 +230,10 @@ export class MeetingsService {
     const timeError = refuseTimes(startsAt, toDate(dto.endsAt));
     if (timeError) throw new BadRequestException(timeError);
 
+    // Reach before existence, so a hidden project and a missing one answer
+    // alike (SEC-R7). A meeting without a project is an internal one.
+    await this.requireProjectReach(dto.projectId ?? null, user);
+
     const missing = await this.repo.missingReferences(dto);
     if (missing.length) throw new BadRequestException(`Unbekannt: ${missing.join(", ")}.`);
 
@@ -277,7 +299,11 @@ export class MeetingsService {
       );
       if (changed === 0) await this.refuseStale(id, dto.expectedVersion);
 
-      const updated = await this.repo.findDetail(id, {}, tx);
+      const updated = await this.repo.findDetail(
+        id,
+        unrestricted("re-read of the row this transaction just wrote; require() checked reach"),
+        tx,
+      );
       if (!updated) throw new NotFoundException("Sitzung nicht gefunden.");
 
       await this.versions.record(tx, {
@@ -561,7 +587,8 @@ export class MeetingsService {
     });
     if (missing.length) throw new BadRequestException(`Unbekannt: ${missing.join(", ")}.`);
 
-    await this.refuseForeignDecision(dto.decisionId ?? null, meetingId);
+    await this.refuseForeignDecision(dto.decisionId ?? null, meetingId, user);
+    await this.refuseInvisibleTask(dto.taskId ?? null, user);
 
     const createTask = kind === MeetingItemKind.PENDENZ && dto.createTask !== false && !dto.taskId;
 
@@ -652,7 +679,12 @@ export class MeetingsService {
     });
     if (missing.length) throw new BadRequestException(`Unbekannt: ${missing.join(", ")}.`);
 
-    await this.refuseForeignDecision(decisionId, meetingId);
+    // Only a *changed* reference is judged: a line already citing a decision
+    // keeps it, and re-judging it would make the line uneditable for whoever
+    // has since lost sight of that decision.
+    if (dto.decisionId !== undefined && dto.decisionId !== item.decisionId) {
+      await this.refuseForeignDecision(decisionId, meetingId, user);
+    }
 
     await this.repo.updateItem(itemId, {
       text: dto.text?.trim(),
@@ -853,6 +885,11 @@ export class MeetingsService {
     });
     if (refusal) throw new BadRequestException(refusal);
 
+    // Reach first — the project, and the meeting it was minuted at — so that a
+    // hidden one and a missing one answer alike (SEC-R7).
+    await this.requireProjectReach(dto.projectId, user);
+    if (dto.meetingId) await this.require(dto.meetingId, user);
+
     const missing = await this.repo.missingReferences({
       projectId: dto.projectId,
       employeeId: dto.decidedById,
@@ -947,7 +984,11 @@ export class MeetingsService {
       );
       if (changed === 0) await this.refuseStaleDecision(id, dto.expectedVersion);
 
-      const updated = await this.repo.findDecision(id, {}, tx);
+      const updated = await this.repo.findDecision(
+        id,
+        unrestricted("re-read of the row this transaction just wrote; requireDecision() checked reach"),
+        tx,
+      );
       if (!updated) throw new NotFoundException("Entscheid nicht gefunden.");
 
       await this.versions.record(tx, {
@@ -1014,7 +1055,9 @@ export class MeetingsService {
    */
   async supersede(id: string, dto: SupersedeDecisionDto, user: AuthUser) {
     const replacement = await this.requireDecision(id, user);
-    const target = await this.repo.findDecisionForRules(dto.supersedesId);
+    // Through the caller's scope: a decision they cannot see reads as one that
+    // does not exist, rather than as "belongs to another project".
+    const target = await this.findVisibleDecision(dto.supersedesId, user);
     if (!target) throw new BadRequestException("Den zu ersetzenden Entscheid gibt es nicht.");
 
     const refusal = refuseSupersede({
@@ -1100,14 +1143,51 @@ export class MeetingsService {
   /* Shared                                                            */
   /* ================================================================ */
 
-  private async scope(user: AuthUser) {
-    if (seesAllMeetings(user)) return {};
+  private async scope(user: AuthUser): Promise<MeetingScope> {
+    if (seesAllMeetings(user)) return scopeFor(user, null, user.id);
     return scopeFor(user, await this.employeeId(user), user.id);
   }
 
-  private async decisionScope(user: AuthUser) {
-    if (seesAllDecisions(user)) return {};
+  private async decisionScope(user: AuthUser): Promise<DecisionScope> {
+    if (seesAllDecisions(user)) return decisionScopeFor(user, null);
     return decisionScopeFor(user, await this.employeeId(user));
+  }
+
+  /**
+   * Refuses a project the caller cannot reach, as the same 404 a missing one
+   * gets (SEC-R7). `null` is an internal meeting and needs none.
+   */
+  private async requireProjectReach(projectId: string | null, user: AuthUser): Promise<void> {
+    if (!projectId) return;
+    const scope = seesAllProjects(user)
+      ? projectScopeFor(user, null)
+      : projectScopeFor(user, await this.employeeId(user));
+    if (!(await this.repo.projectReachable(projectId, scope))) {
+      throw new NotFoundException(PROJECT_NOT_FOUND);
+    }
+  }
+
+  /** A decision's rule inputs, or `null` when it is outside the caller's scope. */
+  private async findVisibleDecision(id: string, user: AuthUser) {
+    const decision = await this.repo.findDecisionForRules(id);
+    if (!decision) return null;
+    if (seesAllDecisions(user)) return decision;
+    return (await this.repo.findDecision(id, await this.decisionScope(user))) ? decision : null;
+  }
+
+  /**
+   * A protocol line may link a task only the caller can see.
+   *
+   * The meeting detail renders a linked task's title, status and due date, so
+   * an unchecked `taskId` made any meeting a window onto any task in the firm
+   * (Part 8, R8). Judged by the *task* rule — the same one `GET /tasks/:id`
+   * applies — and answered like a missing task.
+   */
+  private async refuseInvisibleTask(taskId: string | null, user: AuthUser): Promise<void> {
+    if (!taskId) return;
+    const scope = taskScopeFor(user, await this.employeeId(user), user.id);
+    const task = await this.repo.taskProjectIfVisible(taskId, scope);
+    if (!task) throw new BadRequestException("Die Aufgabe gibt es nicht.");
   }
 
   private employeeId(user: AuthUser): Promise<string | null> {
@@ -1159,9 +1239,12 @@ export class MeetingsService {
   private async refuseForeignDecision(
     decisionId: string | null,
     meetingId: string,
+    user: AuthUser,
   ): Promise<void> {
     if (!decisionId) return;
-    const decision = await this.repo.findDecisionForRules(decisionId);
+    // Through the caller's scope: the line renders the decision's number,
+    // title and status, so citing one is reading it (Part 8, R8).
+    const decision = await this.findVisibleDecision(decisionId, user);
     if (!decision) throw new BadRequestException("Den Entscheid gibt es nicht.");
     if (decision.meetingId && decision.meetingId !== meetingId) {
       throw new BadRequestException(

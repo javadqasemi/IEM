@@ -9,7 +9,10 @@ import {
   type ListParams,
 } from "../core/list/list";
 import type { RawListQuery } from "../core/list/list.decorator";
+import { whereOf } from "../core/scope/scope";
+import type { ProjectScope } from "../core/scope/project.scope";
 import { DRAWING_LIST, REVISION_LIST, TRANSMITTAL_LIST } from "./drawings.list";
+import type { DrawingScope, TransmittalScope } from "./drawings.scope";
 import {
   drawingDetailSelect,
   drawingSelect,
@@ -41,10 +44,10 @@ export class DrawingsRepository {
     return parseListQuery(query, DRAWING_LIST);
   }
 
-  async list(params: ListParams, scope: Prisma.DrawingWhereInput = {}) {
+  async list(params: ListParams, scope: DrawingScope) {
     const where = buildWhere(params, DRAWING_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.DrawingWhereInput;
 
     // One transaction for the page and the count: two statements can straddle a
@@ -62,10 +65,10 @@ export class DrawingsRepository {
     return { items, total };
   }
 
-  listAll(params: ListParams, scope: Prisma.DrawingWhereInput = {}) {
+  listAll(params: ListParams, scope: DrawingScope) {
     const where = buildWhere(params, DRAWING_LIST, {
       deletedAt: null,
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.DrawingWhereInput;
 
     return this.prisma.drawing.findMany({
@@ -76,9 +79,9 @@ export class DrawingsRepository {
     });
   }
 
-  findDetail(id: string, scope: Prisma.DrawingWhereInput = {}) {
+  findDetail(id: string, scope: DrawingScope) {
     return this.prisma.drawing.findFirst({
-      where: { id, deletedAt: null, ...scope },
+      where: { id, deletedAt: null, ...whereOf(scope) },
       select: drawingDetailSelect,
     });
   }
@@ -90,9 +93,9 @@ export class DrawingsRepository {
    * fetching the whole detail to decide a status change is a join nobody reads.
    * `projects.repository.ts` draws the same distinction with `findForRules`.
    */
-  findForRules(id: string, scope: Prisma.DrawingWhereInput = {}) {
+  findForRules(id: string, scope: DrawingScope) {
     return this.prisma.drawing.findFirst({
-      where: { id, deletedAt: null, ...scope },
+      where: { id, deletedAt: null, ...whereOf(scope) },
       select: {
         id: true,
         number: true,
@@ -120,16 +123,16 @@ export class DrawingsRepository {
    * before this one is a separate statement for the same reason. The three
    * counts stay batched; they are the ones that must agree with each other.
    */
-  countByStatus(scope: Prisma.DrawingWhereInput = {}) {
+  countByStatus(scope: DrawingScope) {
     return this.prisma.drawing.groupBy({
       by: ["status"],
-      where: { deletedAt: null, ...scope },
+      where: { deletedAt: null, ...whereOf(scope) },
       _count: { _all: true },
     });
   }
 
-  async statsFor(scope: Prisma.DrawingWhereInput = {}) {
-    const where: Prisma.DrawingWhereInput = { deletedAt: null, ...scope };
+  async statsFor(scope: DrawingScope) {
+    const where: Prisma.DrawingWhereInput = { deletedAt: null, ...whereOf(scope) };
 
     const [total, awaitingCheck, released] = await this.prisma.$transaction([
       this.prisma.drawing.count({ where }),
@@ -194,9 +197,9 @@ export class DrawingsRepository {
    * rows out of twenty-five and a total that counts rows nobody can open are
    * both worse than a slower query.
    */
-  async listRevisions(params: ListParams, scope: Prisma.DrawingWhereInput = {}) {
+  async listRevisions(params: ListParams, scope: DrawingScope) {
     const where = buildWhere(params, REVISION_LIST, {
-      drawing: { deletedAt: null, ...scope },
+      drawing: { deletedAt: null, ...whereOf(scope) },
     }) as Prisma.DrawingRevisionWhereInput;
 
     const [items, total] = await this.prisma.$transaction([
@@ -212,17 +215,17 @@ export class DrawingsRepository {
     return { items, total };
   }
 
-  findRevision(id: string, scope: Prisma.DrawingWhereInput = {}) {
+  findRevision(id: string, scope: DrawingScope) {
     return this.prisma.drawingRevision.findFirst({
-      where: { id, drawing: { deletedAt: null, ...scope } },
+      where: { id, drawing: { deletedAt: null, ...whereOf(scope) } },
       select: revisionSelect,
     });
   }
 
   /** What `refuseTransmittal` needs about each revision being sent. */
-  findRevisionsForTransmittal(ids: readonly string[], scope: Prisma.DrawingWhereInput = {}) {
+  findRevisionsForTransmittal(ids: readonly string[], scope: DrawingScope) {
     return this.prisma.drawingRevision.findMany({
-      where: { id: { in: [...ids] }, drawing: { deletedAt: null, ...scope } },
+      where: { id: { in: [...ids] }, drawing: { deletedAt: null, ...whereOf(scope) } },
       select: {
         id: true,
         revision: true,
@@ -275,9 +278,9 @@ export class DrawingsRepository {
     return parseListQuery(query, TRANSMITTAL_LIST);
   }
 
-  async listTransmittals(params: ListParams, scope: Prisma.TransmittalWhereInput = {}) {
+  async listTransmittals(params: ListParams, scope: TransmittalScope) {
     const where = buildWhere(params, TRANSMITTAL_LIST, {
-      ...scope,
+      ...whereOf(scope),
     }) as Prisma.TransmittalWhereInput;
 
     const [items, total] = await this.prisma.$transaction([
@@ -293,8 +296,8 @@ export class DrawingsRepository {
     return { items, total };
   }
 
-  listAllTransmittals(params: ListParams, scope: Prisma.TransmittalWhereInput = {}) {
-    const where = buildWhere(params, TRANSMITTAL_LIST, { ...scope }) as Prisma.TransmittalWhereInput;
+  listAllTransmittals(params: ListParams, scope: TransmittalScope) {
+    const where = buildWhere(params, TRANSMITTAL_LIST, { ...whereOf(scope) }) as Prisma.TransmittalWhereInput;
     return this.prisma.transmittal.findMany({
       where,
       orderBy: buildOrderBy(params, TRANSMITTAL_LIST),
@@ -303,9 +306,9 @@ export class DrawingsRepository {
     });
   }
 
-  findTransmittal(id: string, scope: Prisma.TransmittalWhereInput = {}) {
+  findTransmittal(id: string, scope: TransmittalScope) {
     return this.prisma.transmittal.findFirst({
-      where: { id, ...scope },
+      where: { id, ...whereOf(scope) },
       select: transmittalDetailSelect,
     });
   }
@@ -418,9 +421,9 @@ export class DrawingsRepository {
     });
   }
 
-  findRecipient(id: string, scope: Prisma.TransmittalWhereInput = {}) {
+  findRecipient(id: string, scope: TransmittalScope) {
     return this.prisma.transmittalRecipient.findFirst({
-      where: { id, transmittal: scope },
+      where: { id, transmittal: whereOf(scope) },
       select: {
         id: true,
         acknowledgedAt: true,
@@ -460,6 +463,18 @@ export class DrawingsRepository {
       select: { id: true },
     });
     return row?.id ?? null;
+  }
+
+  /**
+   * Whether a project exists **and** is within the caller's reach — one
+   * question, so "unknown" and "not yours" answer alike (SEC-R7).
+   */
+  async projectReachable(projectId: string, scope: ProjectScope): Promise<boolean> {
+    const row = await this.prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null, ...whereOf(scope) },
+      select: { id: true },
+    });
+    return row !== null;
   }
 
   transaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
