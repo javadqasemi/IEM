@@ -41,6 +41,9 @@ const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
  */
 const API_ONLY = [
   /security\.spec\.ts/,
+  // Matched by the line above as well (`p0-security.spec.ts` contains
+  // `security.spec.ts`); named so the list says what runs once.
+  /p0-security\.spec\.ts/,
   /versioning\.spec\.ts/,
   /budgets\.spec\.ts/,
   /metrics\.spec\.ts/,
