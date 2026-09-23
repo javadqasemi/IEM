@@ -1941,6 +1941,22 @@ const TEST_USERS = [
     role: "guest",
     personnelNumber: null,
   },
+  {
+    email: "redaktion@iem.test",
+    name: "Rita Redaktion (Test)",
+    /**
+     * The Content Editor, for the navigation suite (P1B).
+     *
+     * The persona the workspace model was argued around — somebody who writes
+     * website copy and does nothing else — and the one no account existed for:
+     * every test account above either works on projects or reads nothing. It
+     * is used by `e2e/p1b-navigation.spec.ts` alone, deliberately, because
+     * each account in a spec's `beforeAll` is one more sign-in against a
+     * budget CLAUDE.md records being exhausted three times.
+     */
+    role: "content_editor",
+    personnelNumber: null,
+  },
 ] as const;
 
 async function seedTestUsers() {

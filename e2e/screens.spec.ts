@@ -67,9 +67,15 @@ test.describe("screens", () => {
         // The skeleton has a live region; it must go away.
         await expect(page.getByText("Seite wird geladen …")).toHaveCount(0, { timeout: 20_000 });
 
-        // Something on the page identifies it. `first()` because a heading's
-        // words legitimately appear in the rail as well.
-        await expect(page.getByText(screen.heading).first()).toBeVisible({ timeout: 15_000 });
+        // Something *visible* on the page identifies it. A heading's words
+        // legitimately appear elsewhere too — in the rail, and as the last
+        // breadcrumb, which the shell hides below `sm`. Plain `first()` took
+        // whichever came first in the document: until P1B that was the bar's
+        // group heading, and since the bar names the workspace instead it was
+        // the hidden crumb, failing every content-type screen at phone width.
+        await expect(page.getByText(screen.heading).filter({ visible: true }).first()).toBeVisible({
+          timeout: 15_000,
+        });
 
         // The theme reached the document, not just localStorage.
         const attr = await page.evaluate(() => document.documentElement.getAttribute("data-theme"));

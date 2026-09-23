@@ -80,6 +80,8 @@ const SIGNS_IN_TWICE = [
   /drawings-ui\.spec\.ts/,
   /auth\.spec\.ts/,
   /p1a-ux\.spec\.ts/,
+  // Seven personas sign in through the form; at three widths, twenty-one.
+  /p1b-navigation\.spec\.ts/,
 ];
 
 /**

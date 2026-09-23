@@ -902,9 +902,12 @@ export const SCREENS: { path: string; name: string; heading: RegExp }[] = [
    * column was empty, which is the one failure this sweep exists to catch.
    */
   {
+    // The page's own "Unternehmen und Betrieb" header went with its section
+    // navigation (P1B); the bare route shows Allgemein, anchored by that
+    // section's description.
     path: "/einstellungen",
     name: "settings",
-    heading: /Die Angaben zur Firma, ihre Standorte/i,
+    heading: /Name, Beschreibung und die Vorgaben/i,
   },
   {
     path: "/einstellungen/rechtliches",

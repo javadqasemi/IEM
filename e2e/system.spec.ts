@@ -163,10 +163,13 @@ test.describe("the system overview", () => {
   });
 
   test("moves between sections by URL", async ({ page }) => {
+    // Through the System workspace's navigation in the rail (P1B) — the page's
+    // own three-tab strip was folded into it.
+    const rail = page.getByRole("navigation", { name: "Hauptnavigation" });
     await page.goto("/admin.html#/system");
-    await page.getByRole("link", { name: "Hintergrundaufgaben" }).click();
+    await rail.getByRole("link", { name: "Hintergrundaufgaben" }).click();
     await expect(page).toHaveURL(/#\/system\/aufgaben/);
-    await expect(page.getByRole("link", { name: "Diagnose" })).toBeVisible();
+    await expect(rail.getByRole("link", { name: "Diagnose" })).toBeVisible();
   });
 
   /**

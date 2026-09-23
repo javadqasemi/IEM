@@ -98,15 +98,15 @@ test.describe("Unternehmen", () => {
     await field.fill("wird-verworfen@iem.ch");
 
     /*
-      Scoped to the workspace's own navigation.
+      Through the workspace navigation in the rail (P1B).
 
-      "Allgemein" is a link in **two** places — the rail's Unternehmen group
-      and the section rail beside the form — and an unscoped `getByRole` is a
-      strict-mode violation. Which is the `SideNav`'s `aria-label` earning its
-      keep: the two are distinguishable because each nav landmark is named.
+      The page's own section `SideNav` is gone — its sections belong to the
+      workspaces that own them now, and Allgemein is a destination of the open
+      Unternehmen workspace. Scoped to the rail because the strip above the
+      page (below `lg`) carries the same link.
     */
     await page
-      .getByRole("navigation", { name: "Einstellungsbereiche" })
+      .getByRole("navigation", { name: "Hauptnavigation" })
       .getByRole("link", { name: "Allgemein" })
       .click();
 
