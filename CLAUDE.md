@@ -92,6 +92,7 @@ permissions and the tests, not a folder with the same names in it.
 | P0·SEC | **Sicherheits-Härtung nach dem Gesamtaudit** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 34. A privilege ceiling (nobody grants more than they hold), a restore that runs once, an installer that writes `TRUST_PROXY` and the two real keys and whose nginx headers reach the documents, scope that fails closed with reach checked on create, and settings authority split three ways. One new permission, `settings.security`; no migration |
 | P1A | **UX-Fehlerbereinigung** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 35. A write's result is a `MutationResult` that has to be narrowed before anything is said about it, one failure classifier (`toFailure`), writes that keep the record on screen (`settle`), Enter in every dialog, row links a keyboard can reach, an error that is never an empty list, a home page that asks `/content/pending`, a 409 that keeps the input, and a reorder that persists. No migration, no new permission, no navigation change |
 | P1B | **Arbeitsbereiche** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 36. Seven role-aware workspaces from one registry in place of 21 rail rows, the 35 content types behind *Inhalte* and a Ctrl/Cmd+K palette, one sub-navigation pattern instead of three, and `system.health` no longer opening System on its own. No URL, permission, endpoint or schema changed |
+| P1C | **Formulare und Aktionen** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 37. One interaction standard: page, dialog and filter forms; required-unless-optional reaching assistive technology; SaveBar states incl. failed and conflict; one `ConflictNotice`; the action hierarchy with `danger-quiet` triggers and `danger` confirms; a "Mehr" menu per record; `StatusTransitionDialog`; three confirmation levels; one verb per act; page actions in the sticky bar. No schema, permission or endpoint changed |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -217,6 +218,7 @@ npm run e2e:security   # the role x verb x resource matrix, against the live API
 npm run e2e:p0         # the P0 matrix: privilege ceiling, restore, scope, settings authority
 npm run e2e:p1a        # the P1A defects in a browser: reorder, failed writes, Enter, row links, 409
 npm run e2e:p1b        # the workspace navigation: seven personas, the palette, deep links, the phone drawer
+npm run e2e:p1c        # the forms and actions standard: save/discard/guard, Enter, conflict, confirm once, 375 px
 npm run deploy:test    # the installer's nginx config, statically; + live with NGINX_BIN set
 npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
@@ -1429,9 +1431,11 @@ removed in P1B and the architecture test keeps them out; record tabs (a project'
 record navigation and are fine.
 
 The shell's **sticky top bar** carries the workspace's name as its `h2`, the breadcrumb trail and
-whatever the screen published through `usePageActions`. In e2e, select it as
-`header.glass-bar h2` — `Card` renders `<header>` with an `h2` too, and a bare `header h2` fails
-strict mode.
+whatever the screen published through `usePageActions` — and, since P1C, the page header's own
+actions (see below). In e2e, select the name as `h2[data-shell-title]`. `Card` renders `<header>`
+with an `h2` too, so a bare `header h2` fails strict mode — and `header.glass-bar h2` stopped
+being unique in P1C, because a header action that owns a dialog brings the (closed) dialog's `h2`
+into the bar with it.
 
 The trail is *derived*: a route names its `parent` in `routes.tsx` and `core/router/breadcrumbs.ts`
 walks it. Do not write a `<Breadcrumb>` in a screen — `ContentEditor` did, and a hand-written trail
@@ -1442,6 +1446,50 @@ parent list. `/einstellungen/:section` deliberately names no parent: its section
 workspaces, and the bar already says which.
 
 `redaktion@iem.test` (content editor) is the seed's ninth test account, for the P1B persona matrix.
+
+## Forms and actions — the interaction standard
+
+P1C wrote one standard for every screen; `docs/COMPLETE_APPLICATION_AUDIT.md` Part 37.2 is the
+full text and each primitive's doc comment is its contract. A new module **uses these, it does not
+draw its own**:
+
+- **Three kinds of form.** A record that stays open is `Form` + `SaveBar` + `useUnsavedGuard` +
+  `useForm`. A create or one-shot change is `Modal` › `Form`, footer `Abbrechen` (ghost) then the
+  primary verb. A filter is transient: no save bar.
+- **Fields are required unless `optional`.** Inside a `Form`, `Field` stamps `aria-required` on
+  controls registered in `requirable.ts` — register a new input there, or it silently gets no
+  required semantics. Errors go beside the field; the error of no field is the `Form`'s `Callout`.
+- **Buttons have meanings, not colours** (`Button.tsx`): one `primary` per decision context;
+  `danger-quiet` *triggers* a destructive act, `danger` *confirms* it; `ghost` is never
+  destructive. A record's rare actions go in `RecordActions`' "Mehr" menu. A status change is a
+  `StatusTransitionDialog` with the server's `allowedTransitions` as targets. A confirmation
+  picks its level (LOW / MEDIUM with `consequence` / HIGH with a typed word and re-authentication)
+  by consequence and shows a refusal inside itself (`error`), never behind itself.
+- **One verb per act** — the vocabulary table in Part 37.2. "Freigeben" is content approval
+  only; "Wiederherstellen" is a version or a backup only.
+- **No success toast after a page-form save** — the bar's "Gespeichert." is the signal.
+
+`src/architecture.test.ts` → *P1C* enforces the checkable half with shrink-only lists: `useAsync`
+in the five pages that still have it, destructive verbs on `danger*`, a `Form` in every dialog with
+fields, a `primary` (or `danger`) main action in every footer, and no permission key in visible
+copy.
+
+Four things about it that fail silently:
+
+- **`PageHeader` actions are portalled into the sticky bar** (`PageActionsSlot`), and an action
+  component that renders its own `Modal` brings the dialog along. That is harmless — a closed
+  `<dialog>` is `display: none`, an open one is in the top layer — but it changes what a DOM
+  selector finds in the bar (hence `data-shell-title` above).
+- **A visually hidden description span must be `hidden`, not `sr-only`.** `Button`'s
+  `disabledReason` used an `sr-only` span, which is `position: absolute`; in a table cell with no
+  positioned ancestor it escaped the table's scroll pane and widened the whole page (the job list
+  at 390 px). An `aria-describedby` target is read even when `hidden`.
+- **The unsaved-changes dialog is always in the DOM**, closed, and its message contains
+  "ungespeicherte Änderungen." — so a substring `getByText` for the save bar's sentence counts it.
+  Match the bar's text `exact`.
+- **A legacy page moved to `useQuery` must pass `FRESH_ON_VISIT`** (`admin/lib/queries.ts`), not
+  rely on the 30 s default: its data is changed by other screens' direct API calls that invalidate
+  nothing, and **never `staleMs: 0`**, which makes every settle start another request.
 
 ## Permissions
 

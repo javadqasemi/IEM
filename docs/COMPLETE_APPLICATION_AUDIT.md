@@ -20,7 +20,12 @@ where the two disagree the source wins and the disagreement is listed in Appendi
 > **P1B update, 23 September 2026.** The role-aware workspace navigation — Part 6's proposal — has
 > been implemented. Resolved rows carry **✅ P1B** / **◐ P1B**; **Part 36** records the matrix taken
 > before the change, the registry, the audiences, what each role now sees, and the verification.
-> Forms and actions (P1C) have not been started.
+>
+> **P1C update, 23 September 2026.** The forms, actions and interaction standard — the `UX-2`
+> band of Part 27 — has been implemented. Resolved rows carry **✅ P1C** / **◐ P1C**; **Part 37**
+> records the inventory taken before the change, the standard itself (the rule for every future
+> module), what changed and what it was verified with. The Edit Website workspace (P2) has not
+> been started.
 
 **Relationship to the other audits.** `docs/CURRENT_APPLICATION_AUDIT.md` (19 September) is the
 platform-maturity audit that drove P0–P2; it is still correct about what it covers and is not
@@ -51,7 +56,7 @@ from the code but was not reproduced in a running system. Everything else is cou
 
 | | | | |
 | --- | --- | --- | --- |
-| 1 [Executive summary](#part-1--executive-summary) | 10 [Form UX](#part-10--form-ux-audit) | 19 [API inventory](#part-19--api-inventory) | 28 [Security migration](#part-28--security-migration-plan) · 34 [P0 record](#part-34--p0-resolution-record) · 35 [P1A record](#part-35--p1a-resolution-record) · 36 [P1B record](#part-36--p1b-navigation-record) |
+| 1 [Executive summary](#part-1--executive-summary) | 10 [Form UX](#part-10--form-ux-audit) | 19 [API inventory](#part-19--api-inventory) | 28 [Security migration](#part-28--security-migration-plan) · 34 [P0 record](#part-34--p0-resolution-record) · 35 [P1A record](#part-35--p1a-resolution-record) · 36 [P1B record](#part-36--p1b-navigation-record) · 37 [P1C record](#part-37--p1c-forms-actions-and-interaction-standard) |
 | 2 [Application map](#part-2--complete-application-map) | 11 [Buttons & actions](#part-11--button--action-audit) | 20 [Components](#part-20--global-component--design-system-audit) | 29 [Role migration](#part-29--role--permission-migration-plan) |
 | 3 [Public website](#part-3--public-website-audit) | 12 [Tabs](#part-12--tabs--sub-navigation-audit) | 21 [Layers](#part-21--architectural-layers) | 30 [Website Editor blueprint](#part-30--edit-website-target-architecture) |
 | 4 [Route map](#part-4--dashboard-route-map) | 13 [Tables](#part-13--table-ux-audit) | 22 [Performance](#part-22--performance) | 31 [User journeys](#part-31--user-journeys) |
@@ -1630,7 +1635,7 @@ Severity: **S1** blocks or corrupts work · **S2** major friction or misleading 
 · **S4** polish. Frequency: D daily, W weekly, M monthly, R rare.
 
 **Resolution markers** (added after the audit; the finding text is unchanged): **✅ P0** /
-**✅ P1A** / **✅ P1B** resolved in that phase, **◐** partly resolved — Part 35 (P1A) and Part 36 (P1B) say which part remains.
+**✅ P1A** / **✅ P1B** / **✅ P1C** resolved in that phase, **◐** partly resolved — Parts 35 (P1A), 36 (P1B) and 37 (P1C) say which part remains.
 
 | ID | Area | Problem | User impact | Affected roles | Freq | Sev | Root cause | Recommended solution |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1646,20 +1651,20 @@ Severity: **S1** blocks or corrupts work · **S2** major friction or misleading 
 | UX-10 ◐ P1B | Role complexity | Business users see a System group and website KPIs | Noise; fear of breaking things | engineer, fin, hr, sales | D | S2 | `system.health` in 11 roles; home is website-only | Split the key; role homes |
 | UX-11 ✅ P1B | Role complexity | Freigaben visible to viewers/guests who cannot decide | Dead end | viewer, guest | W | S3 | route opens on `content.read` | Gate on `content.approve` |
 | UX-12 ✅ P1A | Forms | Enter does not submit modal forms | Keyboard users must tab to the button | all | D | S2 | `Modal` footer outside `<form>` | Fix `Modal` once |
-| UX-13 | Forms | Save placed in 7 different ways | Users hunt for Save | all | D | S2 | Three form generations | Form standard (Part 10.4) |
-| UX-14 ◐ P1A | Forms | Silently disabled submit | "Why can't I save?" | all | D | S2 | no inline validation | Visible reasons |
+| UX-13 ◐ P1C | Forms | Save placed in 7 different ways | Users hunt for Save | all | D | S2 | Three form generations | Form standard (Part 10.4) |
+| UX-14 ◐ P1A · ◐ P1C | Forms | Silently disabled submit | "Why can't I save?" | all | D | S2 | no inline validation | Visible reasons |
 | UX-15 ◐ P1A | Forms | 409 handled by reloading the whole app; content has no lock | Lost work; silent overwrite in content | editors, PL | W | S2 | 5 copies of a reload dialog; `updateEntry` without version | `ConflictBanner`; lock content entries |
-| UX-16 | Actions | Destructive triggers look like ordinary links; irreversible confirms are secondary | Mis-clicks on irreversible acts | PL, admin | W | S2 | ghost everywhere, danger 4× | Action hierarchy (Part 11.2) |
-| UX-17 | Actions | Same word, different act (Freigeben ×3, Wiederherstellen ×3, Aufheben ×2) | Misunderstanding consequences | all | W | S3 | no vocabulary | Glossary |
-| UX-18 | Actions | Screen actions scroll away | Scroll up to act | all | D | S3 | `usePageActions` has 1 caller | Sticky actions everywhere |
+| UX-16 ✅ P1C | Actions | Destructive triggers look like ordinary links; irreversible confirms are secondary | Mis-clicks on irreversible acts | PL, admin | W | S2 | ghost everywhere, danger 4× | Action hierarchy (Part 11.2) |
+| UX-17 ✅ P1C | Actions | Same word, different act (Freigeben ×3, Wiederherstellen ×3, Aufheben ×2) | Misunderstanding consequences | all | W | S3 | no vocabulary | Glossary |
+| UX-18 ✅ P1C | Actions | Screen actions scroll away | Scroll up to act | all | D | S3 | `usePageActions` has 1 caller | Sticky actions everywhere |
 | UX-19 ✅ P1A | Tables | Lists cannot be opened by keyboard | Keyboard users blocked | all keyboard/AT users | D | **S1** (a11y) | `onClick` on `<tr>` | Row link in first cell |
 | UX-20 | Tables | Filters differ per list; `FilterBar` used once | Relearn per screen | all | D | S3 | copy-pasted chips | `FilterBar` everywhere |
 | UX-21 ✅ P1A | Tables | Error shown as empty (Backups, Restores, Deliveries) | "No backups" when the request failed | SA | M | S2 | `DataTable` has no error prop | Distinct error state |
 | UX-22 | Tables | Silent truncation (board 200, plans tab 100) | Missing items not noticed | PL | W | S2 | fixed perPage | State the truncation; paginate |
 | UX-23 | Tabs | 14 project tabs, 4 placeholders | Clicks on empty promises; phone strip hides most | PL, GL | D | S3 | tabs per future module | Hide unbuilt; overflow menu |
 | UX-24 ◐ P1B | Tabs | Three active-state styles; five copies of route tabs | Inconsistent orientation | all | D | S4 | no `RouteTabs` | Extract |
-| UX-25 | Mobile | Hover-only controls invisible on touch | Cannot reorder tasks, act on protocol lines, select media on tablet | PL, editors | W | S2 | `group-hover` reveals | Always-visible compact controls on touch |
-| UX-26 ◐ P1A | Mobile | SaveBar and toasts overlap; dialogs not full-screen on phone | Obscured controls | all mobile | W | S3 | fixed positioning | Toasts above SaveBar; full-screen dialogs < sm |
+| UX-25 ◐ P1C | Mobile | Hover-only controls invisible on touch | Cannot reorder tasks, act on protocol lines, select media on tablet | PL, editors | W | S2 | `group-hover` reveals | Always-visible compact controls on touch |
+| UX-26 ◐ P1A · ✅ P1C | Mobile | SaveBar and toasts overlap; dialogs not full-screen on phone | Obscured controls | all mobile | W | S3 | fixed positioning | Toasts above SaveBar; full-screen dialogs < sm |
 | UX-27 | Users | MFA reset and sessions reachable only with `user.assign` | Support staff cannot help locked-out users | admin variants | M | S3 | panel inside role dialog | User detail page |
 | UX-28 ✅ P0 | Users | Super Admin offered in the role picker to administrators | Enables escalation (SEC-R1) | admin | R | S1 (security) | no ceiling | Filter + server ceiling |
 | UX-29 ✅ P1A | Settings | Settings text contradicts code (lockout "noch im Code", Bewerbungen "wohin gemeldet", no-backup notes) | Distrust of the screen | admin | M | S3 | stale copy | Correct text |
@@ -1668,7 +1673,7 @@ Severity: **S1** blocks or corrupts work · **S2** major friction or misleading 
 | UX-32 | Website | SEO type edits nothing; hero CTA tokens not resolved | Edits without effect | marketing | M | S2 | not wired | Wire or remove |
 | UX-33 | Website | `{telefonThun}` = first office by position | Reordering offices changes phone numbers | admin | R | S3 | token semantics | Rename to `{telefonHauptsitz}` bound to `isHeadquarters` |
 | UX-34 | Website | Contact, company facts and e-mail addresses in 2–3 stores | Drift between site and records | admin, marketing | M | S2 | CMS vs Organisation | Single source (Organisation), tokens in copy |
-| UX-35 | Errors | English/technical messages; env var and permission keys on screen | Users cannot act | all | W | S2 | raw messages passed through | Error model (Part 23) |
+| UX-35 ◐ P1C | Errors | English/technical messages; env var and permission keys on screen | Users cannot act | all | W | S2 | raw messages passed through | Error model (Part 23) |
 | UX-36 ◐ P1A | Errors | Page error replaces header and context | Lost orientation | all | R | S3 | `ErrorState` as page | Error inside layout |
 | UX-37 ◐ P1B | Search | No record search; ⌘K documented but absent | Navigation by clicking only | all | D | S2 | widget not built | `CommandPalette` over records and destinations |
 | UX-38 | Tasks | Board has no search; view not in URL | Re-set view each visit | staff | D | S3 | local state | URL state |
@@ -2424,6 +2429,239 @@ tests. The final gates below were run one after another, not side by side:
   - all 17 tests of `mail.spec.ts`, which skips in `beforeEach` when no Mailpit is running.
 - That spec is API-only and opens no page, so the navigation cannot affect it. Mailpit was not started for a UI slice.
 - Tablet + mobile has 5 skips, the same as P1A.
+
+## Part 37 — P1C forms, actions and interaction standard
+
+Added 23 September 2026. The `UX-2` band of Part 27, implemented as **P1C**.
+
+The following were **not** started:
+- the Edit Website workspace;
+- role homes;
+- customer accounts and integrations;
+- the table and tab redesign;
+- content-entry optimistic locking (P2).
+
+**Entry gate.** The complete Desktop project ran on the final P1B commit (`5baa41f`), with the compiled API, Vite and Mailpit up: **436 passed, 0 failed, 12 skipped** (the opt-in backup suite), 16.5 min. This confirms the P1B fix to the duplicate "Hintergrundaufgaben" heading in a full run. P1C began on that baseline.
+
+### 37.1 Form inventory at `5baa41f`, before any change
+
+Counted from the source, not copied from Part 10: P1A had already changed the error and mutation half. Three facts decide the scope:
+
+- **Errors are already standard.** 46 of 57 `catch` blocks in screens go through `toFailure`. The other 11 are sign-in, MFA and task-board flows that handle a failure without showing server text. No screen shows a raw `err.message`. The mutation result type and the error classifier stay as they are.
+- **The legacy pages have no `<form>` at all.** This covers content, media, users/roles, the profile, publishing, applications and sign-in. Enter works in their dialogs only because of P1A's `pressPrimaryOnEnter`.
+- **The Wave-2 dialogs are structurally right and visually wrong.** They use `Form` + `Field` + `ConflictNotice`, but leave the main action on the default `secondary` variant. Across projects, tasks, meetings and drawings, the thing each dialog exists for looks the same as every other button.
+
+| Screen | Current model | Save location | Mutation | Conflict | Errors | Class | Target |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Content list / editor | `useAsync` page, no `<form>`, manual draft | page header, beside three other actions | `useMutation` | **none** (P2) | `toFailure` → banner / fields | LEGACY | Stays on `useAsync` (allowlisted). The page editor (P2) replaces it. Submit for review becomes a status transition |
+| Media | `useAsync`, dialogs without `<form>` | dialog footer | `useMutation` | none | `toFailure` | LEGACY | Dialog form; destructive trigger; the delete consequence stated |
+| Users / Roles | `useAsync`, dialogs without `<form>` | dialog footer | `useMutation` + reauth retry | none | `toFailure` | LEGACY | Dialog form; destructive triggers. The P0 ceiling is untouched |
+| Applications | dialogs without `<form>` | dialog footer | `useMutation` | none | `toFailure` | LEGACY | Dialog form; destructive trigger; typed delete kept |
+| Organisation | `useForm` + `SaveBar` + guard | sticky SaveBar | `useForm.submit` | ConflictNotice-less message | `toFailure` → fields | STANDARD | Reference page form |
+| Offices | `useForm` dialog | dialog footer | `useForm.submit` | none | `toFailure` | STANDARD | Unchanged apart from shared primitives |
+| Settings groups | declaration-driven edits map + `SaveBar` + guard | sticky SaveBar | hand-rolled | none | `toFailure` | SPECIALIZED | Keep the declaration, authority and secret semantics; adopt the shared save states |
+| Profile / Mein Konto | `useAsync`; the password card has no `<form>` | card | `useMutation` | – | `toFailure` | LEGACY | One-shot action form. MFA and sessions keep their own high-risk dialogs |
+| Audit filters | `useAsync`; filters apply immediately | – | – | – | `toFailure` | SPECIALIZED | Transient filter form: no SaveBar, by design |
+| Projects / Tasks / Meetings / Decisions / Drawings | `Form` + `Field` in `Modal`, hand-rolled state | dialog footer, **secondary** | try/catch + `toFailure` | `ConflictNotice` on the edit dialogs | fields + banner | P1A-MODERNIZED | Primary main action; destructive triggers; status transitions for the irreversible acts |
+| Planversand | `Form` in `Modal` → report | dialog footer, secondary | try/catch | – | banner | P1A-MODERNIZED | Primary send with a stated consequence |
+| Publishing (Freigaben / Veröffentlichen) | `useAsync`, dialogs without `<form>` | dialog footer | `useMutation` | the unpublish 409 is shown as a message | `toFailure` | LEGACY | Stays on `useAsync` (P2 rebuilds it). Vocabulary fixed |
+| Backup / Restore | hand-rolled, reauth + typed word | dialog footer | try/catch | – | `toFailure` | SPECIALIZED | HIGH confirmation level, kept exactly |
+| Mail | settings section + probes | SaveBar + card buttons | hand-rolled | – | `toFailure` | SPECIALIZED | Shared primitives only |
+| System / Jobs | `ConfirmDialog` for retry and cancel | – | try/catch | – | `toFailure` | P1A-MODERNIZED | Vocabulary ("Abbrechen" used twice in one dialog) |
+| Home (Übersicht) | `useAsync`, read-only | – | – | – | `toFailure` | LEGACY (read-only) | Stays; role homes are UX-4 |
+
+**Page actions.**
+- 16 screens put their actions in `PageHeader.actions`, which scrolls away.
+- `usePageActions` has one caller.
+- The shell's sticky bar is already the place for page actions (Part 11.2).
+
+**Buttons.**
+
+| Variant | Uses |
+| --- | --- |
+| `ghost` | 114 |
+| `secondary` | 52 |
+| `primary` | 42 |
+| `danger` | 3 |
+| `subtle` | 2 (both in the notification centre) |
+
+Destructive triggers are `ghost`.
+
+### 37.2 The interaction standard
+
+This is the rule every screen follows from now on. Each piece lives in the shared UI and says so in
+its own doc comment; `src/architecture.test.ts` enforces the parts that can be checked.
+
+**Three kinds of form.**
+
+| Kind | When | Frame | Save |
+| --- | --- | --- | --- |
+| Persistent page form | a record that stays open (Unternehmen, Einstellungen) | `Form` › `FormSection`s | sticky `SaveBar` + `useUnsavedGuard` + `useForm` |
+| Dialog form | create, or a one-shot change | `Modal` › `Form` | footer: `Abbrechen` (ghost) … primary verb, rightmost |
+| Transient filter form | lists, the audit log | `FilterBar` / inputs | none — a query is not a record, and it applies as it changes |
+
+**Fields.**
+- Fields are **required unless marked "(optional)"**; that has always been the visible convention.
+- Inside a `Form`, `Field` now gives a non-optional control `aria-required`, so the convention reaches assistive technology. It does this only for controls known to pass the attribute to a real input (`requirable.ts`), so a composite that renders a `<div>` never picks up an attribute axe would reject.
+- The hint and the error are both shown and both described, error first.
+- `readOnlyReason` says in text why a field is locked.
+- `Combobox` and `EntityPicker` now forward the description, invalid and required state to their input. Before P1C they dropped them.
+
+**Validation and errors.**
+- Client validation for what the client can know (empty, mismatch); the server stays the authority.
+- A message belonging to a field sits beside it. The one belonging to no field is a `Callout` above the fields.
+- After a failed submit, focus moves to the first invalid field. That includes dialogs, whose primary button sits outside the form: `Modal` signals the attempt to the form.
+- Every failure goes through `toFailure`. P1C closed its two remaining gaps:
+  - `useQuery`'s `error` was the raw exception text;
+  - a 403 sentence naming a permission key ("Fehlende Berechtigung: content.publish") reached people verbatim and now reads "Dafür fehlt Ihnen die Berechtigung. Wer Rollen verwaltet, kann sie Ihnen erteilen." The key remains in the audit row.
+
+**SaveBar states.** A page form's bar says exactly one of these:
+
+| State | Text |
+| --- | --- |
+| Unsaved | Ungespeicherte Änderungen. |
+| Saving | Wird gespeichert … |
+| Saved | Gespeichert. — fades after 4 s. This is the only success signal: the duplicate toast is gone (Part 10.5). |
+| Failed | Nicht gespeichert — Grund siehe oben. |
+| Conflict | Nicht gespeichert — inzwischen geändert. |
+
+"Verwerfen" returns to the last accepted server baseline without a refetch. A visible bar publishes its height, and the toast stack sits above it at every width (UX-26).
+
+**Conflicts.**
+- `ConflictNotice` is the only conflict UI. It says the record changed elsewhere and that the input has not been discarded.
+- It offers "Neueste Fassung laden", which refetches in place (`revalidate`), never with a page reload. There is no "save anyway".
+- The Unternehmen page form now uses it too; its 409 was previously only an error sentence.
+- Content entries still have no lock; that is P2, and they will reuse this component.
+
+**The action hierarchy** (`Button.tsx`, with a doc table per variant):
+
+| Variant | Meaning |
+| --- | --- |
+| `primary` | the one safe action this view or dialog exists for — at most one per decision context |
+| `secondary` | a safe alternative |
+| `ghost` | dismiss, navigate, reveal — never destructive |
+| `danger-quiet` | **new**: the trigger of a destructive act, in bronze text. It is always followed by a confirmation |
+| `danger` | the confirmation that performs an irreversible or destructive act. Enter never presses it |
+| `subtle` | the pressed state of a toggle |
+
+`IconButton` requires a label, which becomes both the accessible name and the tooltip. It is 44 px on a coarse pointer.
+
+**Record and page actions.**
+- A record screen shows at most one primary (its next workflow step) and one or two secondaries. Everything rare goes in a keyboard-operable "Mehr" `ActionMenu`, destructive items last (`RecordActions`).
+- A page header's actions are portalled into the shell's sticky bar (`PageActionsSlot`), so they stay reachable on a long list or form. This applies to every screen without editing any of them (UX-18).
+
+**Status transitions.**
+- `StatusTransitionDialog` handles every change of state that is not a save. It shows:
+  - where the record is and where it goes (two badges);
+  - what follows (a `Callout`, `warning` when it cannot be undone);
+  - an optional or required reason;
+  - one confirm named for the act, `danger` for a destructive target.
+- Its targets are the server's `allowedTransitions`, never a client table.
+
+**Confirmation levels** (`ConfirmDialog`). Visual consistency never lowers a level.
+
+| Level | For | Shape |
+| --- | --- | --- |
+| LOW | reversible acts | `ConfirmDialog` |
+| MEDIUM | a removal with effects beyond the row | `ConfirmDialog` + `consequence` |
+| HIGH | irreversible and consequential acts | typed word; plus the re-authentication window for security and data replacement (`RestoreDialog`, the MFA reset) |
+
+A refusal is shown **inside** the confirmation (`error`), never behind it.
+
+**Vocabulary.** One verb per act. The backend enum values were not renamed; only the labels a person reads were.
+
+| Label | Means only | Was also used for |
+| --- | --- | --- |
+| Zur Prüfung einreichen | send a content entry to review | "Zur Freigabe" |
+| Freigeben | approve content in review | un-protecting a backup ("Schutz aufheben" now) |
+| Zur Ausführung freigeben | release a plan | "Freigeben" |
+| Veröffentlichen | put content live | — |
+| Veröffentlichung zurückziehen | take content off the site | "Zurückziehen" as the confirm |
+| Terminierung aufheben | cancel a scheduled publish | "Aufheben" as the confirm |
+| Wiederherstellen | restore a previous version or a backup | un-archiving an office ("Reaktivieren" now) |
+| Durch neuen Entscheid ersetzen | supersede a decision | "Aufheben" |
+| Stoppen / Aufgabe stoppen | cancel a queued job | "Abbrechen", which sat beside the dismiss "Abbrechen" |
+| Abbrechen · Schliessen · Verwerfen | dismiss · close a read-only view · discard unsaved edits | — |
+
+### 37.3 What changed
+
+| Area | Change |
+| --- | --- |
+| New primitives | `Callout`, `ActionMenu`, `RecordActions`, `StatusTransitionDialog`, `IconButton`, `PageActionsSlot`, `requirable.ts`, `FRESH_ON_VISIT` |
+| Changed primitives | `Form` (context, focus on the first invalid field, `Callout` error, `FormSection` as a `fieldset`); `Field`; `SaveBar`; `Modal` (full screen below `sm` for form dialogs, submit-attempt signal, `IconButton` close); `ConfirmDialog` (levels, `consequence`, `error`); `Button` (`danger-quiet`, a hidden rather than `sr-only` reason); `useForm` (`failureKind`); `useQuery` (classified errors); `toFailure` (no permission keys) |
+| Destructive triggers | 21 buttons are now `danger-quiet`, and 5 destructive acts are items in a record's "Mehr" menu instead (delete on decisions, projects, plans and meetings; superseding a decision). The attendee, agenda-item and protocol-line removals, which acted on one click, now confirm first |
+| Dialog weight | 16 Wave-2 dialogs and 5 list screens give their main action `primary`; the review dialog's "Ablehnen" is `secondary` (a safe alternative, not a removal) |
+| Status transitions | project, plan, meeting and decision status; protocol approval; submitting content for review |
+| Record actions | decisions, projects, plans and meetings: delete (and supersede) moved to "Mehr"; sending minutes is the meeting's primary |
+| Legacy forms | users (invite, edit, role editor), media (upload, details), applications, publishing (review, publish), the profile's password — all real `Form`s. Every refusal that used to render behind an open confirmation (offices, decisions, projects, plans, meetings) now renders in it |
+| `useAsync` retired | home, the shell's badges, the audit log, the profile |
+| Touch | the protocol row's hover-only actions show wherever there is no hover (UX-25, where touched) |
+| Vocabulary | as in the table above |
+
+### 37.4 Findings resolved
+
+| Finding | Status | What changed |
+| --- | --- | --- |
+| UX-13 save placement | ◐ P1C | One place per kind of form. Header saves (the content editor's) now sit in the sticky bar. The content editor keeps its header save until the page editor (P2) |
+| UX-14 silent disabled | ◐ P1C | Added to the job actions, supersede and the transition dialogs. Not every disabled control in the app has been visited |
+| UX-16 destructive triggers | ✅ P1C | `danger-quiet` triggers, `danger` confirms, guarded by an architecture test |
+| UX-17 same word, different act | ✅ P1C | The vocabulary table |
+| UX-18 actions scroll away | ✅ P1C | Page-header actions are portalled into the sticky bar |
+| UX-25 hover-only controls | ◐ P1C | The protocol rows only. The task board is UX-5 |
+| UX-26 SaveBar/toast, phone dialogs | ✅ P1C | Toasts sit above a visible bar; form dialogs are full screen below `sm` |
+| UX-35 technical text | ◐ P1C | Permission keys never reach a person (classifier + architecture test). Environment-variable names in the System and MFA screens remain; those are technical contexts |
+
+### 37.5 Tests
+
+| File | Tests | What they cover |
+| --- | --- | --- |
+| `architecture.test.ts` | 5 new guards | `useAsync` is allowed only in the 5 remaining pages; destructive buttons are `danger*`; a dialog with fields has a `Form`; a footer's main action is `primary` or `danger`; no permission key in visible copy. Each allowlist is shrink-only, and each guard was proved by planting a violation |
+| `failure.test.ts` | +2 | a keyed 403 is rewritten; a sentence written for a person, and a dotted word such as "iem.ch", are not |
+| `Modal.test.ts` | +1 | Enter steps over a `danger-quiet` trigger to the save beside it |
+| `theme.contrast.test.ts` | +14 | `Callout` washes (bronze, blue, accent over card and page) and the `danger-quiet` hover state, in both themes |
+| `useForm.test.ts` | updated | the refusal belongs to no field and reads as plain German |
+| `e2e/p1c-forms-actions.spec.ts` (`npm run e2e:p1c`) | 15 | the cases in the brief — page form (save, reload, discard), guard via the palette, Enter exactly once, blocked reason, validation and focus, conflict, MEDIUM destructive (cancel inert, confirm once), transition, "Mehr" by keyboard, sticky page actions, and four widths |
+
+### 37.6 Verification
+
+Commits: primitives `bc10d58`, screens `4f34f9e`, browser suite `80cd364`, this documentation after
+them. Run one after another on the final code, with the compiled API, Vite and Mailpit up and no
+build or other browser run alongside.
+
+| Gate | Result |
+| --- | --- |
+| `npm run verify` | PASS. 0 lint errors, 37 warnings (unchanged from P1B). Client **42 files / 1005 tests** (983 + 22); server **63 files / 1725 tests** (unchanged — no backend change). Architecture: 72 (67 + 5 P1C guards) |
+| `npm run e2e:p1c` | **15 / 15** |
+| e2e desktop, complete | **450 passed, 1 failed, 12 skipped** (opt-in backup), 14.0 min. The failure is the refresh throttle, proven below. Rerun of the spec: **15 / 15** |
+| e2e tablet + mobile | **107 passed, 0 failed, 5 skipped**, 8.5 min |
+| `screens` + `a11y`, all three widths | **24 / 24** (after the overflow fix below) |
+| `npm run build`, `npm run server:build` | pass |
+| Compiled boot | `node dist/main.js` on `127.0.0.1:3199`: 28 controllers and 237 routes mapped; empty stderr; `/content/published` 200 once the port was bound; `/users` without a token 401; stopped cleanly |
+| Brand | `globals-B1c5Zfq1.css` byte-identical (SHA-256 `95C19C25…AD52FC66`, 39'061 bytes) |
+
+**What the runs found on the way, and how each was classified:**
+
+| Found | Classification | What was done |
+| --- | --- | --- |
+| The job list overflowed at 390 px (463 px wide) | **Application regression, caused by P1C.** `Button`'s `disabledReason` span was `sr-only` (`position: absolute`); in a table cell it escaped the scroll pane | The span is `hidden` — a description is still computed from it. `screens` + `a11y` 24/24 |
+| `header.glass-bar h2` matched two elements on Medien | Test precision. The page-actions portal brings an action's (closed, invisible) dialog into the bar | The shell's heading carries `data-shell-title`; specs select it |
+| `p1a-ux` openings reorder read `[]` once | **Test race**, not P1C: a hash change between two collections reuses the list component, and the old rows were read | The test now waits for a row of its own collection and asserts ≥ 2 rows. 18/18 |
+| `meetings-ui` "Sitzungen tab" in the final desktop run | **Harness**: the trace shows `429 /api/v1/auth/refresh` immediately before the "Der Server antwortet nicht" screen, after three full runs back to back | Rerun after a quiet minute: 15/15. Limits unchanged |
+| The P1C spec counted the guard dialog's hidden text | Test precision | Exact match on the bar's sentence |
+
+### 37.7 Still open after P1C
+
+**Deferred to P2 (the Edit Website workspace):**
+- **UX-13**: the content editor still has its own header save; since P1C it sits in the sticky bar.
+- **UX-15**: content entries have no optimistic lock, so no conflict path yet.
+- **`useAsync`**: remains in content, media, publishing and users (the architecture test lists them).
+
+**Still open elsewhere:**
+- **UX-14**: disabled reasons, on the controls not yet visited.
+- **UX-25**: hover-only controls on the task board.
+- **UX-35**: environment-variable names in the System and MFA screens.
+- **Dirty dialogs**: a dialog with unsaved input still closes on Esc without asking (Part 10.5's last row).
+- **UX-5**: the table and tab work is untouched.
 
 ## Appendix A — Validation
 

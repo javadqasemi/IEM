@@ -176,6 +176,40 @@ Route access for Freigaben (`content.read`) and Veröffentlichen (`content.histo
 was. Those routes are no longer *offered* to readers who cannot act on them, and the server
 remains the control.
 
+### P1C ✅ Forms, actions and the interaction standard
+
+Opened by `docs/COMPLETE_APPLICATION_AUDIT.md` Parts 10, 11 and 27 (`UX-2`: UX-13, 14, 16, 17,
+18, 26) and closed on 23 September 2026. Evidence is that document's Part 37, which begins with a
+form inventory taken before any change.
+
+**Problem.** Three form generations were in use. The legacy pages had no `<form>`, and the Wave-2
+dialogs drew their main action as `secondary`. Every "Löschen" was a grey `ghost`, and
+irreversible acts had a "Save"-weight confirm. One verb meant three acts. Page actions scrolled
+away. A save was confirmed twice (bar and toast), and on a phone the toast covered the bar.
+Permission keys reached people in error messages.
+
+**Solution.** One standard, written down in Part 37.2 and in each primitive's doc comment:
+
+- **New primitives:** `Callout`, `ActionMenu` / `RecordActions`, `StatusTransitionDialog`, `IconButton`, a page-actions slot in the sticky bar.
+- **Changed primitives:** `Form`, `Field`, `SaveBar`, `Modal` and `ConfirmDialog`; a `danger-quiet` button variant; `useForm` failure kinds; classified `useQuery` errors.
+- **Applied:** to the legacy pages, the Wave-2 dialogs, record headers and status changes.
+- **Retired:** `useAsync` from four screens.
+- **Backend:** no schema, permission, endpoint or rule changed.
+
+**Acceptance.** Met:
+
+- five shrink-only AST guards in `src/architecture.test.ts`, each proved by planting a violation;
+- unit tests for the classifier, Enter handling and contrast;
+- `e2e/p1c-forms-actions.spec.ts` (`npm run e2e:p1c`, 15 cases);
+- the complete browser suite at all three widths.
+
+**Deliberately not in P1C:**
+
+- **Content entries** keep their own editor and have no optimistic lock; the Edit Website page editor (P2) replaces them and will reuse `ConflictNotice`.
+- **`useAsync`** remains in the content, media, publishing and users pages (listed in the architecture test).
+- **Tables and tabs** (UX-5) are unchanged.
+- **Hover-only controls** outside the protocol rows are unchanged.
+
 ### P1-1 ✅ The firm is not an entity — Company / Organisation settings
 
 **Problem.** Company data lives in three stores that do not know about each other: nine

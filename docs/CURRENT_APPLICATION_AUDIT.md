@@ -525,3 +525,24 @@ What did not change:
 
 Evidence: `COMPLETE_APPLICATION_AUDIT.md` Part 36 and `ENTERPRISE_ROADMAP.md` → P1B. The client
 test count has moved to **983** (42 files).
+
+**P1C, same day.** The dashboard now has one interaction standard for forms and actions:
+
+- **Three kinds of form**: page, dialog and filter.
+- **Fields** are required unless marked, and assistive technology is told so.
+- **SaveBar** states say unsaved, saving, saved, failed or conflict.
+- **Conflicts** go through one `ConflictNotice`.
+- **Buttons** follow an action hierarchy with a destructive trigger (`danger-quiet`) distinct from its confirmation (`danger`). Rare actions sit in a "Mehr" menu.
+- **Status transitions** use one dialog that says what follows.
+- **Confirmations** come in three levels.
+- **Vocabulary** gives one verb per act.
+- **Page actions** stay in the sticky bar.
+
+Other changes:
+
+- `useAsync` is retired from the home page, the shell, the audit log and the profile.
+- Permission keys no longer reach a person.
+- No schema, permission, endpoint or backend rule changed.
+
+Evidence: `COMPLETE_APPLICATION_AUDIT.md` Part 37 and `ENTERPRISE_ROADMAP.md` → P1C. The client
+test count has moved to **1005** (42 files).
