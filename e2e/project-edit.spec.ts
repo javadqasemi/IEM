@@ -312,8 +312,11 @@ test.describe("the conflict", () => {
     await dialog.getByLabel(/Interne Notizen/i).fill("meine Version");
     await dialog.getByRole("button", { name: "Speichern" }).click();
 
-    // The conflict screen, by its heading.
-    await expect(page.getByText("Inzwischen geändert")).toBeVisible({ timeout: 15_000 });
+    // The conflict notice, by its heading — above the form since P1A, which
+    // stays on screen rather than being replaced (UX-15).
+    await expect(page.getByText("Inzwischen von jemand anderem geändert")).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(page.getByText(/wurde inzwischen.*geändert/)).toBeVisible();
     // It names both versions: "Sie hatten v3, jetzt v4" is the difference
     // between reloading and wondering how much was lost.
@@ -343,12 +346,20 @@ test.describe("the conflict", () => {
 
     await dialog.getByLabel(/Interne Notizen/i).fill("egal");
     await dialog.getByRole("button", { name: "Speichern" }).click();
-    await expect(page.getByText("Inzwischen geändert")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Inzwischen von jemand anderem geändert")).toBeVisible({
+      timeout: 15_000,
+    });
 
-    await expect(page.getByRole("button", { name: "Neu laden" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Verwerfen" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Neueste Fassung laden" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Abbrechen" })).toBeVisible();
+    // The input stays visible so it can be re-entered — but it cannot be saved.
+    await expect(dialog.getByLabel(/Interne Notizen/i)).toHaveValue("egal");
+    const save = dialog.getByRole("button", { name: "Speichern" });
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    await save.click({ force: true });
+    // Pressing it anyway sends nothing: the other writer's value stands.
+    expect((await record()).notes).toBe("wieder jemand anderes");
     // No second chance at the overwrite, under any wording.
-    await expect(page.getByRole("button", { name: "Speichern" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /trotzdem/i })).toHaveCount(0);
   });
 
@@ -362,10 +373,13 @@ test.describe("the conflict", () => {
 
     await dialog.getByLabel(/Interne Notizen/i).fill("der ältere Stand");
     await dialog.getByRole("button", { name: "Speichern" }).click();
-    await expect(page.getByText("Inzwischen geändert")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Inzwischen von jemand anderem geändert")).toBeVisible({
+      timeout: 15_000,
+    });
 
-    await page.getByRole("button", { name: "Neu laden" }).click();
-    await expect(page.getByText("Seite wird geladen …")).toHaveCount(0, { timeout: 20_000 });
+    // Refetches the project in place and closes the dialog — no page reload.
+    await dialog.getByRole("button", { name: "Neueste Fassung laden" }).click();
+    await expect(dialog).toBeHidden();
 
     // Reopening shows what the *other* person wrote, at the new version — which
     // is the point of sending them back rather than merging silently.

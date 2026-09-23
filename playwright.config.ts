@@ -73,7 +73,14 @@ const API_ONLY = [
  * width-dependent, and `screens.spec.ts` already photographs `/sitzungen` and
  * `/entscheide` at all three widths in both themes and runs axe over them.
  */
-const SIGNS_IN_TWICE = [/meetings-ui\.spec\.ts/, /drawings-ui\.spec\.ts/, /auth\.spec\.ts/];
+// `p1a-ux.spec.ts` for the same reason, and a second one: it reorders real
+// content collections and puts them back, which three widths would race.
+const SIGNS_IN_TWICE = [
+  /meetings-ui\.spec\.ts/,
+  /drawings-ui\.spec\.ts/,
+  /auth\.spec\.ts/,
+  /p1a-ux\.spec\.ts/,
+];
 
 /**
  * The one suite that runs once for **all three** reasons at the same time.
