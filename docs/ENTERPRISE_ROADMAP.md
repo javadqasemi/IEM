@@ -131,6 +131,51 @@ required `error`; `ConflictNotice`; `ListInput`; `refuseReorder` on the server.
 customer accounts, and content-entry optimistic locking (P2). Part 35 lists the UX findings still
 open.
 
+### P1B ✅ Role-aware navigation and workspaces
+
+Opened by `docs/COMPLETE_APPLICATION_AUDIT.md` Parts 5–6 (UX-08, 09, 10, 11, 45) and closed on
+23 September 2026. Evidence is that document's Part 36, which begins with the route matrix taken
+before any change.
+
+**Problem.**
+- The rail mirrored the data model: 21 rows, 73 destinations, 35 of them content types.
+- "Unternehmen" meant two different things.
+- Settings were cut two ways — a rail group and the page's own `SideNav`.
+- System had its own tab strip.
+- Visibility followed single keys. `system.health` put a System group in front of 12 of 15 roles, and `content.read` offered Freigaben to people who cannot approve.
+
+**Solution.** One registry, `src/admin/lib/navigation.ts`:
+- seven workspaces;
+- 33 destinations, each with `visibleWhen(can)`;
+- a per-workspace **audience** rule (System needs an operator key; Website needs content work or a read-only content role).
+
+From it the shell derives:
+- the rail, with one workspace open at a time;
+- a `WorkspaceStrip` below `lg`;
+- the top-bar heading;
+- a Ctrl/Cmd+K `CommandPalette`. It covers destinations and content types, is umlaut-insensitive and ranks results. It does not search records.
+
+No URL changed, and no permission, endpoint or schema was touched.
+
+**Acceptance.** Met:
+- `navigation.test.ts` (62 tests), including a persona matrix derived from the server catalogue by `seededRoles.testing.ts`;
+- routes/smoke agreement tests;
+- architecture guards: one definition, and no permission logic or local sub-navigation in the nav components;
+- `e2e/p1b-navigation.spec.ts` (`npm run e2e:p1b`), with seven personas signed in through the form;
+- the complete browser suite at all three widths.
+
+**Deliberately not in P1B:**
+- forms and actions (P1C);
+- the page editor;
+- role-specific home cards;
+- record search;
+- customer accounts;
+- integrations.
+
+Route access for Freigaben (`content.read`) and Veröffentlichen (`content.history`) was left as it
+was. Those routes are no longer *offered* to readers who cannot act on them, and the server
+remains the control.
+
 ### P1-1 ✅ The firm is not an entity — Company / Organisation settings
 
 **Problem.** Company data lives in three stores that do not know about each other: nine

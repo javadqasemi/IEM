@@ -15,8 +15,12 @@ where the two disagree the source wins and the disagreement is listed in Appendi
 > **P1A update, 23 September 2026.** The UX defect sweep — the `UX-0` band of Part 27 — has been
 > implemented. Resolved rows in the Part 24 register carry **✅ P1A** (or **◐ P1A** where part of
 > the finding remains); the text of each finding is unchanged. **Part 35** records the
-> reconciliation against HEAD, the commits, the tests and what is still open. Navigation (P1B)
-> has not been started.
+> reconciliation against HEAD, the commits, the tests and what is still open.
+>
+> **P1B update, 23 September 2026.** The role-aware workspace navigation — Part 6's proposal — has
+> been implemented. Resolved rows carry **✅ P1B** / **◐ P1B**; **Part 36** records the matrix taken
+> before the change, the registry, the audiences, what each role now sees, and the verification.
+> Forms and actions (P1C) have not been started.
 
 **Relationship to the other audits.** `docs/CURRENT_APPLICATION_AUDIT.md` (19 September) is the
 platform-maturity audit that drove P0–P2; it is still correct about what it covers and is not
@@ -47,7 +51,7 @@ from the code but was not reproduced in a running system. Everything else is cou
 
 | | | | |
 | --- | --- | --- | --- |
-| 1 [Executive summary](#part-1--executive-summary) | 10 [Form UX](#part-10--form-ux-audit) | 19 [API inventory](#part-19--api-inventory) | 28 [Security migration](#part-28--security-migration-plan) · 34 [P0 record](#part-34--p0-resolution-record) · 35 [P1A record](#part-35--p1a-resolution-record) |
+| 1 [Executive summary](#part-1--executive-summary) | 10 [Form UX](#part-10--form-ux-audit) | 19 [API inventory](#part-19--api-inventory) | 28 [Security migration](#part-28--security-migration-plan) · 34 [P0 record](#part-34--p0-resolution-record) · 35 [P1A record](#part-35--p1a-resolution-record) · 36 [P1B record](#part-36--p1b-navigation-record) |
 | 2 [Application map](#part-2--complete-application-map) | 11 [Buttons & actions](#part-11--button--action-audit) | 20 [Components](#part-20--global-component--design-system-audit) | 29 [Role migration](#part-29--role--permission-migration-plan) |
 | 3 [Public website](#part-3--public-website-audit) | 12 [Tabs](#part-12--tabs--sub-navigation-audit) | 21 [Layers](#part-21--architectural-layers) | 30 [Website Editor blueprint](#part-30--edit-website-target-architecture) |
 | 4 [Route map](#part-4--dashboard-route-map) | 13 [Tables](#part-13--table-ux-audit) | 22 [Performance](#part-22--performance) | 31 [User journeys](#part-31--user-journeys) |
@@ -1626,7 +1630,7 @@ Severity: **S1** blocks or corrupts work · **S2** major friction or misleading 
 · **S4** polish. Frequency: D daily, W weekly, M monthly, R rare.
 
 **Resolution markers** (added after the audit; the finding text is unchanged): **✅ P0** /
-**✅ P1A** resolved in that phase, **◐ P1A** partly resolved — Part 35 says which part remains.
+**✅ P1A** / **✅ P1B** resolved in that phase, **◐** partly resolved — Part 35 (P1A) and Part 36 (P1B) say which part remains.
 
 | ID | Area | Problem | User impact | Affected roles | Freq | Sev | Root cause | Recommended solution |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1637,10 +1641,10 @@ Severity: **S1** blocks or corrupts work · **S2** major friction or misleading 
 | UX-05 | Website editing | 35 content types; one section spread over 3–6 types in two groups | Editors cannot find where text lives | editors | D | **S2** | Rail mirrors the data model | Page-based editor |
 | UX-06 | Workflow clarity | Change → live crosses 4 screens / 11 clicks / 3 modals | Slow; approval and publishing feel separate from editing | editors, approvers, publishers | W | **S2** | Actions split across editor, Freigaben, Veröffentlichen, list, iframe | `WorkflowBar` inside the editor |
 | UX-07 ✅ P1A | Home | Dashboard counts APPROVED as "ready to publish" ✔ | "Nothing to publish" while the site is out of date | publishers | W | **S2** | `readyToPublish = entriesApproved` | Use `/content/pending` |
-| UX-08 | Navigation | 21 top-level rows / 73 destinations | Slow scanning; unclear where things are | SA, admin | D | **S2** | Destinations = content types + settings sections | Workspaces (Part 6) |
-| UX-09 | Navigation | "Unternehmen" twice with the same icon | Wrong place, wrong edit | admin, GL | W | S2 | Content group and settings group share a label | Rename/merge (Part 6.3) |
-| UX-10 | Role complexity | Business users see a System group and website KPIs | Noise; fear of breaking things | engineer, fin, hr, sales | D | S2 | `system.health` in 11 roles; home is website-only | Split the key; role homes |
-| UX-11 | Role complexity | Freigaben visible to viewers/guests who cannot decide | Dead end | viewer, guest | W | S3 | route opens on `content.read` | Gate on `content.approve` |
+| UX-08 ✅ P1B | Navigation | 21 top-level rows / 73 destinations | Slow scanning; unclear where things are | SA, admin | D | **S2** | Destinations = content types + settings sections | Workspaces (Part 6) |
+| UX-09 ✅ P1B | Navigation | "Unternehmen" twice with the same icon | Wrong place, wrong edit | admin, GL | W | S2 | Content group and settings group share a label | Rename/merge (Part 6.3) |
+| UX-10 ◐ P1B | Role complexity | Business users see a System group and website KPIs | Noise; fear of breaking things | engineer, fin, hr, sales | D | S2 | `system.health` in 11 roles; home is website-only | Split the key; role homes |
+| UX-11 ✅ P1B | Role complexity | Freigaben visible to viewers/guests who cannot decide | Dead end | viewer, guest | W | S3 | route opens on `content.read` | Gate on `content.approve` |
 | UX-12 ✅ P1A | Forms | Enter does not submit modal forms | Keyboard users must tab to the button | all | D | S2 | `Modal` footer outside `<form>` | Fix `Modal` once |
 | UX-13 | Forms | Save placed in 7 different ways | Users hunt for Save | all | D | S2 | Three form generations | Form standard (Part 10.4) |
 | UX-14 ◐ P1A | Forms | Silently disabled submit | "Why can't I save?" | all | D | S2 | no inline validation | Visible reasons |
@@ -1653,20 +1657,20 @@ Severity: **S1** blocks or corrupts work · **S2** major friction or misleading 
 | UX-21 ✅ P1A | Tables | Error shown as empty (Backups, Restores, Deliveries) | "No backups" when the request failed | SA | M | S2 | `DataTable` has no error prop | Distinct error state |
 | UX-22 | Tables | Silent truncation (board 200, plans tab 100) | Missing items not noticed | PL | W | S2 | fixed perPage | State the truncation; paginate |
 | UX-23 | Tabs | 14 project tabs, 4 placeholders | Clicks on empty promises; phone strip hides most | PL, GL | D | S3 | tabs per future module | Hide unbuilt; overflow menu |
-| UX-24 | Tabs | Three active-state styles; five copies of route tabs | Inconsistent orientation | all | D | S4 | no `RouteTabs` | Extract |
+| UX-24 ◐ P1B | Tabs | Three active-state styles; five copies of route tabs | Inconsistent orientation | all | D | S4 | no `RouteTabs` | Extract |
 | UX-25 | Mobile | Hover-only controls invisible on touch | Cannot reorder tasks, act on protocol lines, select media on tablet | PL, editors | W | S2 | `group-hover` reveals | Always-visible compact controls on touch |
 | UX-26 ◐ P1A | Mobile | SaveBar and toasts overlap; dialogs not full-screen on phone | Obscured controls | all mobile | W | S3 | fixed positioning | Toasts above SaveBar; full-screen dialogs < sm |
 | UX-27 | Users | MFA reset and sessions reachable only with `user.assign` | Support staff cannot help locked-out users | admin variants | M | S3 | panel inside role dialog | User detail page |
 | UX-28 ✅ P0 | Users | Super Admin offered in the role picker to administrators | Enables escalation (SEC-R1) | admin | R | S1 (security) | no ceiling | Filter + server ceiling |
 | UX-29 ✅ P1A | Settings | Settings text contradicts code (lockout "noch im Code", Bewerbungen "wohin gemeldet", no-backup notes) | Distrust of the screen | admin | M | S3 | stale copy | Correct text |
-| UX-30 | Settings | Health in four places, backups in three, mail in four | Which one is true? | SA | W | S3 | features added beside each other | One System workspace |
+| UX-30 ◐ P1B | Settings | Health in four places, backups in three, mail in four | Which one is true? | SA | W | S3 | features added beside each other | One System workspace |
 | UX-31 ◐ P1A | Profile | "Ihre letzten Aktionen" empty for most roles (silent 403) | Looks broken | non-audit roles | D | S3 | needs `audit.read` | `GET /auth/me/activity` scoped to self |
 | UX-32 | Website | SEO type edits nothing; hero CTA tokens not resolved | Edits without effect | marketing | M | S2 | not wired | Wire or remove |
 | UX-33 | Website | `{telefonThun}` = first office by position | Reordering offices changes phone numbers | admin | R | S3 | token semantics | Rename to `{telefonHauptsitz}` bound to `isHeadquarters` |
 | UX-34 | Website | Contact, company facts and e-mail addresses in 2–3 stores | Drift between site and records | admin, marketing | M | S2 | CMS vs Organisation | Single source (Organisation), tokens in copy |
 | UX-35 | Errors | English/technical messages; env var and permission keys on screen | Users cannot act | all | W | S2 | raw messages passed through | Error model (Part 23) |
 | UX-36 ◐ P1A | Errors | Page error replaces header and context | Lost orientation | all | R | S3 | `ErrorState` as page | Error inside layout |
-| UX-37 | Search | No record search; ⌘K documented but absent | Navigation by clicking only | all | D | S2 | widget not built | `CommandPalette` over records and destinations |
+| UX-37 ◐ P1B | Search | No record search; ⌘K documented but absent | Navigation by clicking only | all | D | S2 | widget not built | `CommandPalette` over records and destinations |
 | UX-38 | Tasks | Board has no search; view not in URL | Re-set view each visit | staff | D | S3 | local state | URL state |
 | UX-39 ✅ P0 | Backup | Restore dialog unusable with MFA ✔ | SA cannot restore when it matters most | SA | R | **S1** | no `requiresCode` | Pass `requiresCode` |
 | UX-40 ✅ P1A | Offices | Office dialog seeded once (◇) | Edits start from another office's values | admin | M | S2 | `useForm` initial without reset/key | Key by office id |
@@ -1674,7 +1678,7 @@ Severity: **S1** blocks or corrupts work · **S2** major friction or misleading 
 | UX-42 | Content list | Singleton redirect makes "back" bounce | Trapped in editor | editors | D | S3 | `replace` redirect | Page editor removes the list |
 | UX-43 ✅ P1A | Applications | Form reports all picked files as received although the server skipped some | Applicant believes CV arrived | applicants | W | S2 | client ignores `skipped` | Show server result |
 | UX-44 | Legal | No Impressum / Datenschutz | Legal exposure (provider identification and privacy-information duties; to be confirmed by counsel) | public | – | S2 | not built | Legal pages as content |
-| UX-45 | Navigation | Settings sections as rail rows under two groups | Configuration mistaken for work | admin | W | S3 | nav as data per section | One Einstellungen destination per workspace |
+| UX-45 ✅ P1B | Navigation | Settings sections as rail rows under two groups | Configuration mistaken for work | admin | W | S3 | nav as data per section | One Einstellungen destination per workspace |
 
 ---
 
@@ -2202,6 +2206,224 @@ locking (P2), UX-16/17 action vocabulary, UX-18 sticky page actions, UX-20 Filte
 UX-22 silent truncation, UX-23/24 tabs, UX-25 hover-only controls on touch, UX-26 SaveBar/toast
 overlap and full-screen phone dialogs, UX-27, UX-30, UX-31 endpoint, UX-32–35, UX-36 on untouched
 screens, UX-37/38, UX-42, UX-44.
+
+## Part 36 — P1B navigation record
+
+Added 23 September 2026. Role-aware navigation and workspace architecture (Part 6's proposal),
+implemented as **P1B**. Forms and actions (P1C), the page editor, role homes, integrations and
+customer accounts were **not** started.
+
+### 36.1 Current navigation at HEAD (`5120e4b`), before any change
+
+Read from `src/admin/lib/navigation.ts`, `src/admin/routes.tsx`, `src/admin/ui/Sidebar.tsx`,
+`AdminLayout.tsx`, `SettingsWorkspace.tsx` (its own `SideNav`) and `SystemWorkspace.tsx` (its own
+tab strip). Visibility is "any of" these keys; "nav ≠ route" marks where the rail showed a row the
+reader could not meaningfully use.
+
+| Route | Nav location today | Visible for | Primary user | Target workspace | Target sub-nav | Keep URL | Redirect |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `/` | rail row *Übersicht* | `system.health`, `content.read` | everybody | Übersicht | — | yes | — |
+| `/aufgaben` | rail row | `task.read` | PL, engineers | Aufgaben | — | yes | — |
+| `/projekte` (+`:id`, `:id/:tab`) | rail row | `project.read` | PL, GL | Projekte | Alle Projekte | yes | — |
+| `/sitzungen` (+`:id`, `:id/:tab`) | rail row | `meeting.read` | PL | Projekte | Sitzungen | yes | — |
+| `/entscheide` (+`:id`) | rail row | `decision.read` | PL, GL | Projekte | Entscheide | yes | — |
+| `/plaene` (+`:id`, `:id/:tab`) | rail row | `drawing.read` | engineers | Projekte | Pläne | yes | — |
+| `/planversand` (+`:id`) | rail row | `transmittal.read` | PL | Projekte | Planversand | yes | — |
+| `/freigaben` | rail row (work zone) | `content.approve` **or `content.read`** — nav ≠ use | approvers | Website | Freigaben (`content.approve`) | yes | — |
+| `/veroeffentlichen` | rail row (work zone) | `content.publish` **or `content.history`** — nav ≠ use | publishers | Website | Veröffentlichen (publish / schedule / unpublish) | yes | — |
+| `/inhalte` | rail row *Website bearbeiten* | `content.read` | editors | Website | Inhalte | yes | — |
+| `/inhalte/:type` (+`:id`) | **six rail groups, 35 rows** (one of them labelled *Unternehmen*) | `content.read` | editors | Website | reached from *Inhalte* and the palette, not the rail | yes | — |
+| `/medien` | rail row (admin zone) | `media.read` | editors | Website | Medien | yes | — |
+| `/bewerbungen` | rail row | `application.read` | HR | Personal | Bewerbungen | yes | — |
+| `/benutzer` | group *Benutzer & Rollen* | `user.read` | administrators | Personal | Benutzer | yes | — |
+| `/rollen` | group *Benutzer & Rollen* | `role.read` | administrators | Personal | Rollen (grouped under *Zugang*) | yes | — |
+| `/einstellungen/unternehmen`, `rechtliches`, `standorte`, `kontakt`, `website` | group ***Unternehmen*** (second use of the label) **and** the page's own `SideNav` | `organisation.read` / `office.read` | GL, administrators | Unternehmen | Allgemein · Recht und Identität · Standorte · Kontakt · Website-Vorgaben | yes | — |
+| `/einstellungen/bewerbungen` | group *System* + page `SideNav` | `settings.read` | administrators | Personal | Bewerbungen einrichten | yes | — |
+| `/einstellungen/freigabe` | group *System* + page `SideNav` | `settings.read` | administrators | Website | Freigabe-Regeln | yes | — |
+| `/einstellungen/email`, `sicherung`, `sicherheit`, `benachrichtigungen`, `system` | group *System* + page `SideNav` | `settings.read`, `system.backup`, `notification.*`, `system.health` | administrators | System | E-Mail · Sicherung einrichten · Sicherheit · Benachrichtigungsregeln · Installation | yes | — |
+| `/sicherungen` | group *System* | `system.backup` | administrators | System | Sicherungen | yes | — |
+| `/system`, `/system/aufgaben`, `/system/diagnose` | group *System* row + **the page's own tab strip** | `system.health` (+`job.read`) | administrators | System | Systemzustand · Hintergrundaufgaben · Diagnose | yes | — |
+| `/audit` | group *System* | `audit.read` | administrators, GL | System | Audit-Log | yes | — |
+| `/einstellungen` | nothing links it | any settings key | — | owned by the section it shows | — | yes | — |
+| `/benachrichtigungen` (+`/einstellungen`) | hidden, bell | everybody | everybody | none (account) | palette only | yes | — |
+| `/profil` | hidden, user menu | everybody | everybody | none (account) | palette only | yes | — |
+
+**What the matrix shows.**
+- No URL has to change, so there are no redirects.
+- The rail's shape came from the data model:
+  - 35 content types across six groups;
+  - *Unternehmen* used for a content group **and** a settings group;
+  - two content-workflow steps in the "work" zone beside Projects;
+  - settings split between a rail group and a second, differently-cut sub-navigation inside the settings page.
+- Three pages carried their own local navigation in three different shapes: the settings `SideNav`, the System tab strip and the project detail tabs. The first two are workspace navigation; the project tabs are record navigation and stay.
+- Visibility followed single keys:
+  - `system.health`, held by 12 of the 15 seeded roles, opened the *System* group;
+  - `content.read` opened *Freigaben*;
+  - `content.history` opened *Veröffentlichen*.
+
+### 36.2 What was built
+
+**One declarative registry.** Navigation is defined in one place, `src/admin/lib/navigation.ts`.
+It holds `WORKSPACES` (seven entries) and `DESTINATIONS` (33 entries: 31 in the rail and two
+reachable only through search). Every destination carries four things:
+- its workspace;
+- its path;
+- `visibleWhen(can)`;
+- search aliases and context.
+
+Everything the shell draws is *derived* from that one list:
+- `buildNavigation` produces the rail;
+- `ownerOf` / `activeWorkspace` give the active state and the top-bar heading;
+- `searchIndex` builds the palette.
+
+No component decides visibility. `src/architecture.test.ts` fails if the rail, the strip or the
+palette calls `can(`, `useAuth` or `permissions.has`. It also fails if a second navigation
+definition appears under `src/admin`.
+
+| Workspace | Destinations |
+| --- | --- |
+| Übersicht | Übersicht |
+| Aufgaben | Aufgaben |
+| Projekte | Alle Projekte · Sitzungen · Entscheide · Pläne · Planversand |
+| Website | Inhalte · Freigaben · Veröffentlichen · Medien · *Einstellungen:* Freigabe-Regeln |
+| Personal | Bewerbungen · *Zugang:* Benutzer · Rollen · *Einstellungen:* Bewerbungen einrichten |
+| Unternehmen | Allgemein · Recht und Identität · Standorte · Kontakt · Website-Vorgaben |
+| System | Systemzustand · Hintergrundaufgaben · Diagnose · Sicherungen · Audit-Log · *Einstellungen:* E-Mail · Sicherung einrichten · Sicherheit · Benachrichtigungsregeln · Installation |
+| *(search only)* | Benachrichtigungen · Mein Konto |
+
+**Deviations from the prompt's list, each for a product reason.**
+- *Freigabe-Regeln* sits in Website, not System. It configures who approves website content.
+- *Bewerbungen einrichten* sits in Personal. It configures where applications go and how long they are kept.
+- *Benachrichtigungen* and *Mein Konto* belong to no workspace. They are about the reader, not the firm, and are already reached from the bell and the user menu.
+
+**A workspace has an audience as well as destinations.** A destination is offered only when two
+things hold: its own keys, and its workspace's `AUDIENCES` rule. This is what fixes UX-10 without
+removing a single permission:
+
+| Workspace | Audience |
+| --- | --- |
+| System | Requires an *operator* key: `settings.read`, `audit.read`, `system.backup`, `job.read`, `notification.configure` or `notification.readDeliveries`. `system.health` alone — held by 12 of 15 roles — no longer opens it. |
+| Website | Requires content *work*: create, update, delete, approve, publish, schedule, unpublish, or a media write. The one exception is `content.read` held by a role with no project work: reading the site is that role's job, not a side grant. |
+| All others | Open to everyone. Their destinations' own keys decide. |
+
+**Capability, not role names.** Nothing in the registry names a role. A custom role assembled in
+the role editor gets a correct menu with nobody touching this file.
+
+**Three questions, answered separately.**
+
+| Question | Where it is answered |
+| --- | --- |
+| Route access | `routes.tsx` → `App.tsx`'s *no access* screen |
+| Nav visibility | `isOffered` |
+| Search visibility | `searchIndex` ⊆ `isOffered` |
+
+The server's 403 remains the control.
+
+Route access was deliberately left as it was:
+- a Freigaben deep link still opens for `content.read`;
+- Veröffentlichen still opens for `content.history`.
+
+The rail and the palette no longer *offer* those routes to readers who cannot act on them. The
+unit suite asserts that search never shows more than the rail, and that every destination offered
+to a seeded role opens for that role.
+
+**The shell.**
+
+| Part | Behaviour |
+| --- | --- |
+| Rail | One row per workspace. The open workspace is a heading (not a link) with its destinations nested in a `role="group"`. A closed workspace is a link to its first visible destination. A one-destination workspace is a plain link. Favourites stay; history moved into the palette. Labels wrap rather than truncate. Arrow, Home and End keys move between rows. |
+| Top bar | `h2` = the workspace, with the breadcrumb trail beneath. |
+| Strip (below `lg`) | `WorkspaceStrip`, `nav "Bereiche in {Workspace}"`, shows the open workspace's destinations above the page. The drawer then only has to show one level. |
+| Command palette | Ctrl/Cmd+K, or the search button in the rail and bar. Native `<dialog>`. Combobox, listbox and `aria-activedescendant`. Arrow keys, Enter and Escape; focus returns to the element that opened it. An empty query lists recent pages. Matching ignores umlauts (`plaene` finds *Pläne*) and ranks label prefix > word > substring > alias > context > subsequence. It finds destinations and the 35 content types (only when *Inhalte* is offered). **It does not search records.** |
+| Removed | The settings page's own `SideNav` and the System tab strip. Their destinations are the workspace's now: one sub-navigation pattern, not three. Project detail tabs stay — they are record navigation. |
+| Breadcrumbs | `/einstellungen/:section` no longer names a parent. The owning workspace is in the bar, and a trail pointing at the old settings index was wrong for sections that now live in four workspaces. |
+
+**URLs.** None changed and there are no redirects (36.1). `/einstellungen` itself resolves to
+Unternehmen › Allgemein.
+
+### 36.3 What each role sees (seeded roles, derived by the unit suite from the server catalogue)
+
+| Role | Workspaces |
+| --- | --- |
+| Super Admin, Administrator | all seven |
+| Geschäftsleitung | Übersicht · Aufgaben · Projekte · Personal · Unternehmen · System |
+| Projektleiter, Ingenieur, Finanzen | Übersicht · Aufgaben · Projekte |
+| HR | Übersicht · Projekte · Website · Personal |
+| Redaktion, Marketing, Viewer, Gast, Engineering, Vertrieb | Übersicht · Website |
+| Support | Übersicht · Website · Personal · System |
+| Manager | Übersicht · Website · Personal · Unternehmen · System |
+
+Before P1B, every one of those roles except Viewer, Gast and Redaktion saw a *System* group.
+
+`src/admin/lib/seededRoles.testing.ts` parses `server/src/rbac/permissions.catalog.ts`, so this
+table is computed from the real grants and cannot drift from them. The `*.testing.ts` suffix keeps
+it out of the app build.
+
+A ninth test account, `redaktion@iem.test` (content editor), was added to the seed for the
+browser matrix.
+
+### 36.4 Findings resolved
+
+| Finding | Status | What changed |
+| --- | --- | --- |
+| UX-08 21 rows / 73 destinations | ✅ P1B | 7 workspace rows. At most 10 destinations open at once (System); content types in the palette |
+| UX-09 "Unternehmen" twice | ✅ P1B | One Unternehmen workspace, organisation master data only; the content group is gone from the rail |
+| UX-10 System for business users | ◐ P1B | The *navigation* half: System needs an operator key. Role homes (the website-only KPIs) are later |
+| UX-11 Freigaben for viewers | ✅ P1B | Offered only for `content.approve`; Veröffentlichen only for publish/schedule/unpublish |
+| UX-30 health/backups/mail in several places | ◐ P1B | One System workspace owns all of them in the nav; the screens themselves are unchanged |
+| UX-37 no ⌘K | ◐ P1B | Palette over destinations and content types; record search is not built |
+| UX-45 settings as rail rows under two groups | ✅ P1B | Each settings section is a destination of the workspace that owns what it configures |
+| UX-24 five copies of route tabs | ◐ P1B | Two of the local navigations removed; project/meeting/drawing detail tabs unchanged |
+
+### 36.5 Tests
+
+| Test file | Tests | What they cover |
+| --- | --- | --- |
+| `navigation.test.ts` | 62 | Registry integrity; ownership of every route; content types kept out of the rail; the persona matrix above; the Freigaben/Veröffentlichen/System gates; badges; alias search; umlaut normalisation; search ⊆ rail |
+| `routes.test.ts` | — | Every destination is a served route; every destination offered to a seeded role opens for it; every route has an owner |
+| `smoke.test.tsx` | — | The rail rendered for real roles, a detail route opening Projekte, `/benutzer` appearing once |
+| `architecture.test.ts` | — | One definition; no permission logic in the three nav components; no local navigation in the settings and System workspaces |
+| `e2e/p1b-navigation.spec.ts` (`npm run e2e:p1b`) | 13 | Super Admin path; content types by search; palette keyboard contract; aliases and no-result; deep links with Back/Forward; phone drawer + strip; seven personas signed in through the form — workspaces, every workspace row clicked, hidden destinations absent from search, allowed and refused routes |
+| `e2e/navigation.spec.ts` | 13 | Rewritten for workspaces |
+
+### 36.6 Verification
+
+Commits: code `3a1ef96`, browser suite `29e71d5`, this documentation after them.
+
+**An earlier Desktop run is not counted.** Claude Code's process supervisor stopped it (along
+with the API, Vite and Mailpit) because the machine ran critically low on memory, after 6 of 448
+tests. The final gates below were run one after another, not side by side:
+- the compiled API (`node dist/main.js`) and Vite;
+- no Mailpit (see the skips);
+- no watch compiler.
+
+| Gate | Result |
+| --- | --- |
+| `npm run verify` | PASS. 0 lint errors, **37 warnings** (38 before a palette effect was removed; one moved from `Sidebar.tsx` to `AdminLayout.tsx` with the recent-history code, and is not new). Client **42 files / 983 tests**; server **63 files / 1725 tests** |
+| `p1b-navigation.spec.ts` + `navigation.spec.ts` | **26 / 26** |
+| e2e desktop, complete | **418 passed, 1 failed, 29 skipped**, 16.9 min. The failure was deterministic and caused by P1B (details below). Rerun of `system` + `screens` + `a11y`: **31 / 31** |
+| e2e tablet + mobile | **105 passed, 2 failed, 5 skipped**, 9.3 min. Both failures are one cause (details below). Rerun of `screens` at all three widths: **15 / 15** |
+| `npm run build`, `npm run server:build` | pass (the only stderr is Vite's existing chunk-size warning for `three.module`) |
+| Compiled boot | `node dist/main.js` on `127.0.0.1:3199`: 28 controllers and 237 routes mapped; empty stderr; `/content/published` 200; `/users` without a token 401; stopped cleanly |
+| Brand | `globals-B1c5Zfq1.css` byte-identical (SHA-256 `95C19C25…AD52FC66`, 39'061 bytes) |
+
+**The desktop failure.**
+- **What failed.** `system.spec.ts` — *renders the job table* — was a strict-mode violation.
+- **Why.** The section heading now names the page ("Hintergrundaufgaben"), and the job card below it carried the same title.
+- **Fix.** The card was renamed *Warteschlange und Verlauf*. That is an app fix, not a looser test.
+
+**The mobile failures.**
+- **What failed.** `screens.spec.ts` at 390 px, in both themes.
+- **Why.** The bar heading used to be the rail group's name, and it happened to be the first match for a screen's identifying text. It is now the workspace name, so the first match became the last breadcrumb, which the shell hides below `sm`.
+- **Fix.** The assertion now requires a *visible* match. That is its stated intent, and nothing it checks became weaker.
+- **A related crash.** The same rerun once lost the desktop browser during a full-page screenshot while memory was low. The next run passed at all three widths.
+
+**The skips.**
+- Desktop has 29 skips, against 12 in P1A's baseline:
+  - the 12 opt-in backup tests;
+  - all 17 tests of `mail.spec.ts`, which skips in `beforeEach` when no Mailpit is running.
+- That spec is API-only and opens no page, so the navigation cannot affect it. Mailpit was not started for a UI slice.
+- Tablet + mobile has 5 skips, the same as P1A.
 
 ## Appendix A — Validation
 

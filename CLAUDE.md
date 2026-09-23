@@ -91,6 +91,7 @@ permissions and the tests, not a folder with the same names in it.
 | P2·6 | **System Control Center und Job Operations** — no migration and no new permission. One health vocabulary where there were four, a capability model that decides what an operator may do with a job, eight active diagnostics, and a build identity stamped at build time. `job.read` and `job.cancel` finally enforced |
 | P0·SEC | **Sicherheits-Härtung nach dem Gesamtaudit** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 34. A privilege ceiling (nobody grants more than they hold), a restore that runs once, an installer that writes `TRUST_PROXY` and the two real keys and whose nginx headers reach the documents, scope that fails closed with reach checked on create, and settings authority split three ways. One new permission, `settings.security`; no migration |
 | P1A | **UX-Fehlerbereinigung** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 35. A write's result is a `MutationResult` that has to be narrowed before anything is said about it, one failure classifier (`toFailure`), writes that keep the record on screen (`settle`), Enter in every dialog, row links a keyboard can reach, an error that is never an empty list, a home page that asks `/content/pending`, a 409 that keeps the input, and a reorder that persists. No migration, no new permission, no navigation change |
+| P1B | **Arbeitsbereiche** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 36. Seven role-aware workspaces from one registry in place of 21 rail rows, the 35 content types behind *Inhalte* and a Ctrl/Cmd+K palette, one sub-navigation pattern instead of three, and `system.health` no longer opening System on its own. No URL, permission, endpoint or schema changed |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -215,6 +216,7 @@ npm run verify:all   # verify + e2e, for a release
 npm run e2e:security   # the role x verb x resource matrix, against the live API
 npm run e2e:p0         # the P0 matrix: privilege ceiling, restore, scope, settings authority
 npm run e2e:p1a        # the P1A defects in a browser: reorder, failed writes, Enter, row links, 409
+npm run e2e:p1b        # the workspace navigation: seven personas, the palette, deep links, the phone drawer
 npm run deploy:test    # the installer's nginx config, statically; + live with NGINX_BIN set
 npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
@@ -1382,36 +1384,64 @@ Do not hand-edit them.
 
 ## Dashboard navigation
 
-Navigation is data, not JSX. `src/admin/lib/navigation.ts` is the single source: the Website groups
-are built at runtime from the content types the server reports, sorted by each type's own `rank` and
-slotted by `GROUP_OF`. A type missing from that map still appears, under "Weitere Inhalte" — adding
-a content type needs no change here.
+Navigation is data, not JSX, and since P1B it is **seven workspaces** — Übersicht, Aufgaben,
+Projekte, Website, Personal, Unternehmen, System. `src/admin/lib/navigation.ts` is the only
+definition: `WORKSPACES`, and `DESTINATIONS` with a workspace, a path, `visibleWhen(can)`, and
+aliases for search. The rail, the strip, the bar heading, the active state and the palette are all
+*derived* from it, and `src/architecture.test.ts` fails a second definition under `src/admin` or a
+`can(`/`useAuth` inside `Sidebar`, `WorkspaceStrip` or `CommandPalette`. A component that decides
+visibility for itself is how the rail and the palette start disagreeing.
 
-The rail (`src/admin/ui/Sidebar.tsx`) lists **main groups only**, in three zones — what is waiting
-for you, what you edit, what you administer. `ZONES` fixes their order and every section names its
-own; `buildNavigation` sorts by it, so `flattenNavigation` feeds search in the order the eye meets
-the rows. A section in the `hidden` zone is searchable but never drawn, which is how "Mein Konto"
-stays reachable without a rail row duplicating the header's user panel.
+**A destination is offered when its own keys hold *and* its workspace's `AUDIENCES` rule does.**
+The audience is what keeps a workspace from appearing because of a side grant: System needs an
+*operator* key (`settings.read`, `audit.read`, `system.backup`, `job.read`,
+`notification.configure`/`readDeliveries`) because `system.health` is in 12 of 15 roles; Website
+needs content *work*, or `content.read` in a role with no project reads. Never name a role here —
+a role built in the role editor must get a correct rail with nobody editing this file.
+`buildNavigation` drops a workspace with nothing visible, so there is no empty heading.
 
-The shell's **sticky top bar** carries the group's name, the breadcrumb trail and whatever the
-current screen has published through `usePageActions`. `SectionTabs` is gone — the rail folds its
-groups open in place, so a copy of the entries up here would be the same navigation twice.
+**Route access, nav visibility and search visibility are three questions.** `routes.tsx` decides
+whether a route opens, `isOffered` whether it is shown, and `searchIndex` is a subset of
+`isOffered` (asserted). They are allowed to differ: `/freigaben` still *opens* on `content.read`
+while it is only *offered* on `content.approve`. The server's 403 is the control for all three.
+
+**Ownership is a longest match over the whole registry** (`ownerOf`), not a prefix test per row —
+`/inhalte/team/42` belongs to *Inhalte*, `/einstellungen/email` to System, `/einstellungen` itself
+to Unternehmen › Allgemein. `routes.test.ts` asserts every served route has an owner, and that
+every destination offered to a seeded role opens for that role. The seeded roles come from
+`src/admin/lib/seededRoles.testing.ts`, which **parses** `server/src/rbac/permissions.catalog.ts`
+so the persona matrix cannot drift from the real grants. `*.testing.ts` is excluded from the app
+tsconfig and included in the test one — it reads the file system.
+
+**The 35 content types are not rail rows.** They are reached from Website › Inhalte and from the
+palette, which lists them only when *Inhalte* is offered. Adding a content type needs no change here.
+
+The **rail** draws one row per workspace; the open one is a heading with its destinations nested in
+a `role="group"` (not a `<nav>` — it is inside the Hauptnavigation landmark), a closed one is a link
+to its first visible destination. Below `lg` the drawer shows only that level and `WorkspaceStrip`
+puts the open workspace's destinations above the page. The **palette** (Ctrl/Cmd+K) searches
+destinations and aliases, umlaut-insensitively (`plaene` finds *Pläne*) — **not records**. History
+and favourites live in `AdminLayout`, in `localStorage`, as ids resolved against what is offered
+*now*, so a revoked permission removes a remembered entry too.
+
+**Pages do not carry their own navigation.** The settings `SideNav` and the System tab strip were
+removed in P1B and the architecture test keeps them out; record tabs (a project's fourteen) are
+record navigation and are fine.
+
+The shell's **sticky top bar** carries the workspace's name as its `h2`, the breadcrumb trail and
+whatever the screen published through `usePageActions`. In e2e, select it as
+`header.glass-bar h2` — `Card` renders `<header>` with an `h2` too, and a bare `header h2` fails
+strict mode.
 
 The trail is *derived*: a route names its `parent` in `routes.tsx` and `core/router/breadcrumbs.ts`
 walks it. Do not write a `<Breadcrumb>` in a screen — `ContentEditor` did, and a hand-written trail
 keeps pointing at the old path the first time a route moves, with nothing to notice. The last
 crumb's label comes from the screen through `usePageTitle`, because only it has fetched the record;
 the *middle* crumb comes from a dictionary the shell passes, because no screen can name its own
-parent list.
+parent list. `/einstellungen/:section` deliberately names no parent: its sections live in four
+workspaces, and the bar already says which.
 
-Two flags exist because a destination that is the parent of other destinations breaks the default
-rules. `exact` on a `NavItem`/`NavSection` switches `isActive` from prefix to exact matching:
-"Website bearbeiten" is `/inhalte`, and without it every `/inhalte/<type>` would light its row and
-win `activeSection` ahead of the group the editor is actually in. `hideBarTitle` leaves the
-section's name out of the top bar, for a page that already says where it is.
-
-Only add a menu entry for a route the table in `src/admin/routes.tsx` actually serves —
-`routes.test.ts` checks both directions, plus that every `parent` resolves and nothing cycles.
+`redaktion@iem.test` (content editor) is the seed's ninth test account, for the P1B persona matrix.
 
 ## Permissions
 

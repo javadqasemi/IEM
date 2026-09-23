@@ -508,3 +508,20 @@ lists, a home page that counted approvals instead of pending changes, conflicts 
 full reload, and a content reorder that could never be saved. No schema change, no new
 permission. Evidence: `COMPLETE_APPLICATION_AUDIT.md` Part 35 and `ENTERPRISE_ROADMAP.md` → P1A.
 The client test count in §7 has moved to **902** (41 files) and the server's to **1725**.
+
+**P1B, same day.** The dashboard's navigation is now seven role-aware workspaces:
+- Übersicht, Aufgaben, Projekte, Website, Personal, Unternehmen, System.
+
+These replace 21 rail rows and 73 destinations.
+
+What changed:
+- The 35 content types left the rail. They are reached from Website › Inhalte and a Ctrl/Cmd+K command palette.
+- The settings page's and the System screen's own sub-navigations were removed in favour of one workspace pattern.
+- `system.health` alone no longer opens a System workspace. It had been doing so for 12 of the 15 roles.
+
+What did not change:
+- No URL, no permission, no endpoint and no schema.
+- One test account, `redaktion@iem.test`, was added to the seed.
+
+Evidence: `COMPLETE_APPLICATION_AUDIT.md` Part 36 and `ENTERPRISE_ROADMAP.md` → P1B. The client
+test count has moved to **983** (42 files).
