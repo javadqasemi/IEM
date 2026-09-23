@@ -74,6 +74,11 @@ export type SettingDef = {
    * does.
    */
   secret?: boolean;
+  /**
+   * What authority, beyond `settings.update`, a *change* to this setting needs
+   * (P0, SEC-5). Absent means ordinary configuration. See `SettingAuthority`.
+   */
+  authority?: "security" | "credential";
   /** Stored and editable, but read by no code yet. Rendered as such. */
   pending?: boolean;
   /** `number` only, inclusive. Both are required where they make sense. */
@@ -92,6 +97,87 @@ export type SettingDef = {
    */
   blankMeans?: string;
 };
+
+/* ================================================================== */
+/* Authority — who may change which setting (P0, SEC-5)                */
+/* ================================================================== */
+
+/**
+ * The four kinds of setting, by what changing one can do.
+ *
+ * | | | |
+ * | --- | --- | --- |
+ * | `ordinary`   | configuration — sender name, backup hour, file size | `settings.update` |
+ * | `security`   | weakens a control — session lifetime, lockout, password length, four-eyes, retention | + `settings.security` |
+ * | `credential` | where a credential is sent — SMTP host, port, user, TLS | + `settings.secrets` |
+ * | `secret`     | the credential itself — SMTP password | + `settings.secrets` |
+ *
+ * **Why the transport counts as a credential.** Pointing `mail.smtpHost` at a
+ * server one controls makes the application authenticate there with the
+ * stored password — and routes every password-reset link through it. Holding
+ * the key to *where* a secret goes is holding the secret.
+ *
+ * **Only a change is judged.** A settings form posts every field it rendered,
+ * so an Administrator saving the sender name also sends the unchanged SMTP
+ * host; refusing that would make the form unusable for exactly the people it
+ * is for. A value equal to the stored one, and a secret left blank (`keep`),
+ * need nothing beyond `settings.update`.
+ *
+ * Before this, `settings.secrets` guarded only *removal* and `settings.update`
+ * could replace the SMTP password, repoint the transport and switch off the
+ * four-eyes rule (`docs/COMPLETE_APPLICATION_AUDIT.md` SEC-R10, Part 8 R4/R13).
+ */
+export type SettingAuthority = "ordinary" | "security" | "credential" | "secret";
+
+export function authorityOf(def: SettingDef): SettingAuthority {
+  if (def.secret) return "secret";
+  return def.authority ?? "ordinary";
+}
+
+/** The permission a change needs on top of `settings.update`, or `null`. */
+export const AUTHORITY_PERMISSION: Record<SettingAuthority, string | null> = {
+  ordinary: null,
+  security: "settings.security",
+  credential: "settings.secrets",
+  secret: "settings.secrets",
+};
+
+/**
+ * Why this caller may not make these changes, or `null`.
+ *
+ * `changed` are the declarations of the settings whose value would actually
+ * change. `holds` answers for the caller — Super Admin short-circuits there,
+ * never here.
+ */
+export function refuseSettingAuthority(
+  changed: readonly SettingDef[],
+  holds: (permission: string) => boolean,
+): string | null {
+  const missing = new Map<string, string[]>();
+  for (const def of changed) {
+    const permission = AUTHORITY_PERMISSION[authorityOf(def)];
+    if (!permission || holds(permission)) continue;
+    const labels = missing.get(permission) ?? [];
+    labels.push(`„${def.description || def.key}“`);
+    missing.set(permission, labels);
+  }
+  if (!missing.size) return null;
+  const parts = [...missing.entries()].map(
+    ([permission, labels]) => `${labels.join(", ")} (verlangt ${permission})`,
+  );
+  return `Diese Einstellungen dürfen Sie nicht ändern: ${parts.join("; ")}.`;
+}
+
+/**
+ * Whether a submitted value differs from the stored one.
+ *
+ * Values here are JSON primitives and string arrays, so a stringify compare is
+ * exact — the key-order problem `snapshot.builder.ts` canonicalises for does
+ * not arise without objects.
+ */
+export function valueChanged(stored: unknown, next: unknown): boolean {
+  return JSON.stringify(stored ?? null) !== JSON.stringify(next ?? null);
+}
 
 /**
  * The mask a secret reads back as. Writing it unchanged is a no-op.

@@ -13,7 +13,11 @@ import { ConfigService } from "@nestjs/config";
 import { Throttle } from "@nestjs/throttler";
 import { Allow, IsArray, IsEmail, IsOptional, IsString, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
-import { SettingsService, canManageSecrets } from "../core/settings/settings.service";
+import {
+  SettingsService,
+  canChangeSecurity,
+  canManageSecrets,
+} from "../core/settings/settings.service";
 import { OrganisationService } from "../core/organisation/organisation.service";
 import { MailService } from "../mail/mail.service";
 import { MailStatusService } from "../mail/mail.status.service";
@@ -118,7 +122,7 @@ export class SettingsController {
       whether the form draws the "replace" and "remove" controls, so somebody
       without the permission is not offered a button that would 403.
     */
-    return this.settings.list(canManageSecrets(user));
+    return this.settings.list(canManageSecrets(user), canChangeSecurity(user));
   }
 
   /**

@@ -114,7 +114,9 @@ export function SettingsGroupSection({
                 key={setting.key}
                 setting={setting}
                 value={setting.key in edits ? edits[setting.key] : setting.value}
-                disabled={!canEdit || (setting.secret && !canSeeSecrets)}
+                disabled={
+                  !canEdit || (setting.secret && !canSeeSecrets) || setting.lockedBecause !== null
+                }
                 onChange={(next) => setEdits((current) => ({ ...current, [setting.key]: next }))}
               />
             ))}
@@ -209,6 +211,8 @@ function SettingControl({
 
   const hint = [
     setting.key,
+    // Visible text, not a tooltip: a disabled control's title never shows.
+    setting.lockedBecause,
     setting.pending ? "wird gespeichert, aber noch von nichts gelesen" : null,
     setting.secret ? (setting.hasValue ? "gesetzt" : "nicht gesetzt") : null,
     setting.blankMeans ? `leer lassen: ${setting.blankMeans}` : null,

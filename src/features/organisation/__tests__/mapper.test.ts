@@ -285,6 +285,29 @@ describe("toSettingGroups", () => {
     expect(setting.min).toBe(30);
     expect(setting.max).toBe(3650);
     expect(setting.dangerous).toContain("Löscht");
+    // No `canEdit` from the server means editable, not locked.
+    expect(setting.lockedBecause).toBeNull();
+  });
+
+  it("locks a setting the caller lacks the authority for, and says why (SEC-5)", () => {
+    const [group] = toSettingGroups([
+      {
+        group: "Sicherheit",
+        settings: [
+          row({
+            key: "workflow.requireApproval",
+            type: "boolean",
+            authority: "security",
+            canEdit: false,
+          }),
+          row({ key: "mail.smtpHost", authority: "credential", canEdit: false }),
+          row({ key: "mail.from", authority: "ordinary", canEdit: true }),
+        ],
+      },
+    ]);
+    expect(group.settings[0].lockedBecause).toMatch(/Sicherheitsrichtlinie/);
+    expect(group.settings[1].lockedBecause).toMatch(/Mailserver/);
+    expect(group.settings[2].lockedBecause).toBeNull();
   });
 });
 

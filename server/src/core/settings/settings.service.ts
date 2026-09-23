@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -9,7 +10,15 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import type { AuthUser } from "../../common/decorators";
-import { REDACTED, planSettingUpdates, type SettingDef } from "./settings.rules";
+import {
+  AUTHORITY_PERMISSION,
+  REDACTED,
+  authorityOf,
+  planSettingUpdates,
+  refuseSettingAuthority,
+  valueChanged,
+  type SettingDef,
+} from "./settings.rules";
 import { SecretSettingsService } from "./settings.secrets";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
@@ -83,6 +92,8 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     value: "",
     description: "SMTP-Server",
     blankMeans: "SMTP_HOST aus der Umgebung — ist beides leer, werden E-Mails nur protokolliert",
+    // Where the stored password is sent, and every reset link with it.
+    authority: "credential",
   },
   {
     key: "mail.smtpPort",
@@ -92,6 +103,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     description: "SMTP-Port",
     min: 1,
     max: 65535,
+    authority: "credential",
   },
   {
     key: "mail.smtpUser",
@@ -100,6 +112,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     value: "",
     description: "SMTP-Benutzer",
     blankMeans: "SMTP_USER aus der Umgebung",
+    authority: "credential",
   },
   {
     key: "mail.smtpPassword",
@@ -116,6 +129,8 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     type: "boolean",
     value: false,
     description: "TLS ab Verbindungsaufbau",
+    // Turning TLS off would send the password in the clear.
+    authority: "credential",
   },
   /* ---- Sicherung (P2-5) --------------------------------------------- */
   {
@@ -275,6 +290,8 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     unit: "Tage",
     min: 30,
     max: 3650,
+    // A deletion deadline for personal data is policy, not configuration.
+    authority: "security",
   },
   {
     key: "applications.maxFileBytes",
@@ -296,6 +313,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     unit: "Minuten",
     min: 1,
     max: 240,
+    authority: "security",
   },
   /*
     The lockout and password numbers, which used to be constants in
@@ -317,6 +335,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     unit: "Versuche",
     min: 3,
     max: 10,
+    authority: "security",
   },
   {
     key: "security.lockoutMinutes",
@@ -327,6 +346,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     unit: "Minuten",
     min: 5,
     max: 1440,
+    authority: "security",
   },
   {
     key: "security.passwordMinLength",
@@ -340,6 +360,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     // reaches the table by another route.
     min: 12,
     max: 128,
+    authority: "security",
   },
   {
     key: "security.requireMfaForAdmins",
@@ -372,6 +393,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
       So it stays inert and says so. `docs/ENTERPRISE_ROADMAP.md` → P3-2b.
     */
     pending: true,
+    authority: "security",
   },
   {
     key: "security.allowedOrigins",
@@ -384,6 +406,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     // dashboard out of its own API — a change worth making deliberately rather
     // than as part of a settings sweep.
     pending: true,
+    authority: "security",
   },
 
   {
@@ -393,6 +416,9 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     value: true,
     description:
       "Vier-Augen-Prinzip: Einreichende dürfen ihre eigenen Änderungen nicht selbst freigeben",
+    // The control an approver could otherwise switch off before approving
+    // their own submission (Part 8, R13).
+    authority: "security",
   },
   {
     key: "workflow.autoPublishApproved",
@@ -406,6 +432,7 @@ export const DEFAULT_SETTINGS: SettingDef[] = [
     // as an approver who may not hold `content.publish` at all. That needs a
     // per-entry publish path before it can mean what its label says.
     pending: true,
+    authority: "security",
   },
 ];
 
@@ -505,8 +532,10 @@ export class SettingsService implements OnModuleInit {
    * a retired key survives a deploy; rendering it would put a control on the
    * page that nothing reads and that `update` would refuse.
    */
-  async list(canManageSecrets: boolean) {
+  async list(canManageSecrets: boolean, canChangeSecurity = false) {
     const rows = await this.prisma.setting.findMany({ orderBy: [{ group: "asc" }, { key: "asc" }] });
+    const holds = (permission: string) =>
+      permission === "settings.secrets" ? canManageSecrets : permission === "settings.security" ? canChangeSecurity : false;
     const groups = new Map<string, unknown[]>();
 
     for (const row of rows) {
@@ -541,6 +570,16 @@ export class SettingsService implements OnModuleInit {
          * `removeSecret` and the `settings.secrets` guard are the control.
          */
         canManage: def.secret ? canManageSecrets : false,
+        /**
+         * The authority a change needs, and whether this caller has it (SEC-5).
+         *
+         * So the form can render a field it may not change as read-only with
+         * the reason, rather than letting somebody edit it and meet a 403 on
+         * save. `settings.update` itself is the route guard and is not
+         * repeated here. The server re-checks on write regardless.
+         */
+        authority: authorityOf(def),
+        canEdit: ((p) => p === null || holds(p))(AUTHORITY_PERMISSION[authorityOf(def)]),
         /** `true` once a value is stored, whether or not it can be decrypted. */
         configured: def.secret ? configured : undefined,
         // Everything below is a property of the *code*, not of the row: whether
@@ -679,6 +718,47 @@ export class SettingsService implements OnModuleInit {
     }
 
     /*
+      Authority, over what would actually change (SEC-5).
+
+      `settings.update` got the caller here; a security-policy change also
+      needs `settings.security`, and a credential or the transport it is sent
+      to needs `settings.secrets`. Unchanged values and blank secrets ("keep")
+      are not changes — a form posts every field it rendered, and refusing
+      the untouched SMTP host would make the whole form unusable for the
+      Administrator who only wanted to fix the sender name.
+    */
+    const stored = new Map(
+      (
+        await this.prisma.setting.findMany({
+          where: { key: { in: plan.apply.map((a) => a.key) } },
+          select: { key: true, value: true },
+        })
+      ).map((row) => [row.key, row.value]),
+    );
+    const changed = [
+      ...plan.apply.filter((a) => valueChanged(stored.get(a.key), a.value)).map((a) => a.key),
+      ...plan.secrets.map((s) => s.key),
+    ].map((key) => DEFS_BY_KEY.get(key)!);
+    const authorityRefusal = refuseSettingAuthority(
+      changed,
+      (permission) => actor.isSuperAdmin || actor.permissions.has(permission),
+    );
+    if (authorityRefusal) {
+      // A denial, audited like a validation refusal: somebody repeatedly
+      // trying to switch off four-eyes is a thing an operator should see.
+      this.audit.record({
+        actor,
+        action: "settings.rejected",
+        resource: "setting",
+        outcome: "FAILURE",
+        after: { keys: changed.map((d) => d.key) },
+        message: authorityRefusal,
+        ...ctx,
+      });
+      throw new ForbiddenException({ message: authorityRefusal, code: "settings_authority" });
+    }
+
+    /*
       Secrets are sealed *before* the transaction opens.
 
       `seal` throws a 503 when no key is configured, and doing that inside the
@@ -717,7 +797,7 @@ export class SettingsService implements OnModuleInit {
       ...ctx,
     });
 
-    return this.list(canManageSecrets(actor));
+    return this.list(canManageSecrets(actor), canChangeSecurity(actor));
   }
 
   /**
@@ -758,7 +838,7 @@ export class SettingsService implements OnModuleInit {
       ...ctx,
     });
 
-    return this.list(true);
+    return this.list(true, canChangeSecurity(actor));
   }
 }
 
@@ -772,4 +852,9 @@ export class SettingsService implements OnModuleInit {
  */
 export function canManageSecrets(user: AuthUser): boolean {
   return user.isSuperAdmin || user.permissions.has("settings.secrets");
+}
+
+/** Whether this caller may change security and workflow policy (SEC-5). */
+export function canChangeSecurity(user: AuthUser): boolean {
+  return user.isSuperAdmin || user.permissions.has("settings.security");
 }

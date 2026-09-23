@@ -155,7 +155,21 @@ export function toSetting(dto: SettingDto): Setting {
     unit: dto.unit,
     blankMeans: dto.blankMeans,
     dangerous: dto.dangerous,
+    lockedBecause: dto.canEdit === false ? lockReason(dto.authority) : null,
   };
+}
+
+/** The sentence a read-only setting shows, by the authority it needs. */
+function lockReason(authority: SettingDto["authority"]): string {
+  switch (authority) {
+    case "security":
+      return "Sicherheitsrichtlinie — ändern darf sie nur, wer Sicherheitsrichtlinien verwalten darf.";
+    case "credential":
+    case "secret":
+      return "Zugangsdaten des Mailservers — ändern darf sie nur, wer geheime Werte verwalten darf.";
+    default:
+      return "Für diese Einstellung fehlt Ihnen die Berechtigung.";
+  }
 }
 
 export function toSettingGroups(rows: SettingGroupDto[]): SettingGroup[] {

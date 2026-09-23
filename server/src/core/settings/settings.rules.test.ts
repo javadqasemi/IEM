@@ -1,11 +1,86 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTHORITY_PERMISSION,
   REDACTED,
+  authorityOf,
   planSettingUpdates,
+  refuseSettingAuthority,
   refuseSettingValue,
+  valueChanged,
   type SettingDef,
 } from "./settings.rules";
-import { DEFAULT_SETTINGS } from "./settings.service";
+import { DANGEROUS_SETTINGS, DEFAULT_SETTINGS } from "./settings.service";
+
+/**
+ * Who may change which setting (P0, SEC-5).
+ *
+ * Before this `settings.update` could replace the SMTP password, repoint the
+ * mail transport and switch off four-eyes; `settings.secrets` guarded only
+ * removal. The catalogue half is asserted by *name* here, because the failure
+ * this guards is a new security setting added without an authority — which
+ * would quietly be editable by everybody with `settings.update`.
+ */
+describe("setting authority", () => {
+  const byKey = new Map(DEFAULT_SETTINGS.map((d) => [d.key, d]));
+  const authority = (key: string) => authorityOf(byKey.get(key)!);
+
+  it("puts the SMTP password and its transport behind settings.secrets", () => {
+    expect(authority("mail.smtpPassword")).toBe("secret");
+    for (const key of ["mail.smtpHost", "mail.smtpPort", "mail.smtpUser", "mail.smtpSecure"]) {
+      expect(authority(key), key).toBe("credential");
+      expect(AUTHORITY_PERMISSION[authority(key)]).toBe("settings.secrets");
+    }
+  });
+
+  it("puts every security.* setting, four-eyes and retention behind settings.security", () => {
+    const expected = [
+      ...DEFAULT_SETTINGS.filter((d) => d.key.startsWith("security.")).map((d) => d.key),
+      "workflow.requireApproval",
+      "workflow.autoPublishApproved",
+      "applications.retentionDays",
+    ];
+    for (const key of expected) expect(authority(key), key).toBe("security");
+  });
+
+  it("never leaves a setting the dashboard calls dangerous as ordinary", () => {
+    // `DANGEROUS_SETTINGS` is the server's own list of "weakens a control";
+    // one of those under plain `settings.update` is the gap SEC-5 closed.
+    const ordinary = Object.keys(DANGEROUS_SETTINGS).filter((k) => authority(k) === "ordinary");
+    expect(ordinary).toEqual([]);
+  });
+
+  it("keeps plain configuration plain", () => {
+    for (const key of ["mail.from", "mail.fromName", "backup.hour", "applications.maxFileBytes"]) {
+      expect(authority(key), key).toBe("ordinary");
+    }
+  });
+
+  it("refuses a change the caller lacks the authority for, naming it", () => {
+    const refusal = refuseSettingAuthority(
+      [byKey.get("workflow.requireApproval")!, byKey.get("mail.smtpHost")!],
+      (p) => p === "settings.update",
+    );
+    expect(refusal).toMatch(/settings\.security/);
+    expect(refusal).toMatch(/settings\.secrets/);
+    expect(refusal).toMatch(/Vier-Augen/);
+  });
+
+  it("allows ordinary changes, and changes the caller holds the key for", () => {
+    expect(refuseSettingAuthority([byKey.get("mail.from")!], () => false)).toBeNull();
+    expect(
+      refuseSettingAuthority([byKey.get("security.lockoutMinutes")!], (p) => p === "settings.security"),
+    ).toBeNull();
+  });
+
+  it("judges only what changes", () => {
+    // The form posts every field; an untouched SMTP host is not a change.
+    expect(valueChanged("smtp.iem.ch", "smtp.iem.ch")).toBe(false);
+    expect(valueChanged(587, 587)).toBe(false);
+    expect(valueChanged(["a"], ["a"])).toBe(false);
+    expect(valueChanged("smtp.iem.ch", "evil.example")).toBe(true);
+    expect(valueChanged(undefined, "")).toBe(true);
+  });
+});
 
 /**
  * The guard for a P0.

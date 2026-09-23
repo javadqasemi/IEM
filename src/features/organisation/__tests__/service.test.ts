@@ -100,6 +100,7 @@ const setting = (over: Partial<Setting> = {}): Setting => ({
   secret: false,
   hasValue: true,
   pending: false,
+  lockedBecause: null,
   ...over,
 });
 

@@ -136,6 +136,16 @@ export type Setting = {
   blankMeans?: string;
   /** Set when changing this weakens a control — the screen confirms first. */
   dangerous?: string;
+  /**
+   * Why the reader may not change this one, when they may not (SEC-5).
+   *
+   * The server declares each setting's authority — security policy needs
+   * `settings.security`, a credential and its transport need
+   * `settings.secrets` — and says per row whether this reader holds it. The
+   * field renders read-only with this sentence rather than letting somebody
+   * edit it and meet a 403 on save. `null` when it is editable.
+   */
+  lockedBecause: string | null;
 };
 
 export type SettingGroup = { group: string; settings: Setting[] };

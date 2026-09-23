@@ -139,6 +139,10 @@ export type SettingDto = {
   blankMeans?: string;
   /** Present when changing this weakens a control. The screen confirms first. */
   dangerous?: string;
+  /** Which authority a change needs, beyond `settings.update` (P0, SEC-5). */
+  authority?: "ordinary" | "security" | "credential" | "secret";
+  /** Whether **this caller** holds it. Absent from an older server: editable. */
+  canEdit?: boolean;
 };
 
 export type SettingGroupDto = { group: string; settings: SettingDto[] };

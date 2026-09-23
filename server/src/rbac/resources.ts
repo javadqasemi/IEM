@@ -178,8 +178,37 @@ export const RESOURCES: ResourceDef[] = [
      * is granted and what a seeded role names, so renaming it is a migration
      * and a re-grant in exchange for a better word.
      * `docs/permissions.md` §3.15 is the record.
+     *
+     * **P0 made the description true.** It said "setzen, ersetzen und
+     * entfernen", and the code enforced only *entfernen*: `PATCH /settings`
+     * sealed any secret it was given under plain `settings.update`, so the
+     * Administrator could replace the SMTP password it was never meant to
+     * manage (SEC-R10). It now also covers the **transport the credential is
+     * sent to** — SMTP host, port, user and TLS — because pointing the host at
+     * a server one controls makes the application hand the stored password
+     * over, and redirects every reset link with it. Which settings need it is
+     * declared on the setting (`authority` in `settings.rules.ts`), not listed
+     * here.
      */
-    secrets: "Geheime Werte wie SMTP-Passwörter setzen, ersetzen und entfernen",
+    secrets:
+      "Geheime Werte wie SMTP-Passwörter und den Mailserver, an den sie gehen, setzen, ersetzen und entfernen",
+    /**
+     * Security and workflow **policy** — the settings that weaken a control
+     * rather than configure one (P0, SEC-5).
+     *
+     * Session lifetime, lockout, password length, the four-eyes switch on
+     * content approval, and the deletion deadline for applicant dossiers. Under
+     * plain `settings.update` the Administrator — who holds `content.approve` —
+     * could switch four-eyes off and approve its own submissions, and could
+     * shorten a retention period that deletes personal data at 03:00.
+     *
+     * Its own key rather than a role check, so it is grantable and visible in
+     * the role editor; and not folded into `settings.secrets`, because "may
+     * change the SMTP server" and "may lift the four-eyes principle" are not
+     * the same authority either. The security numbers stay clamped on read
+     * (`security.policy.ts`) whoever writes them.
+     */
+    security: "Sicherheits- und Freigaberichtlinien ändern — Sitzungsdauer, Sperrung, Passwortlänge, Vier-Augen-Prinzip, Aufbewahrungsfrist",
   }),
 
   /**
