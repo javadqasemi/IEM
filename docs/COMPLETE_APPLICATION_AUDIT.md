@@ -11,6 +11,12 @@ where the two disagree the source wins and the disagreement is listed in Appendi
 > **P0 update, 23 September 2026.** The P0 band of Part 32 — SEC-1 to SEC-5 — has since been
 > implemented. The findings below are left exactly as the audit found them; **Part 34** records
 > what was resolved, in which commit, and what proves it.
+>
+> **P1A update, 23 September 2026.** The UX defect sweep — the `UX-0` band of Part 27 — has been
+> implemented. Resolved rows in the Part 24 register carry **✅ P1A** (or **◐ P1A** where part of
+> the finding remains); the text of each finding is unchanged. **Part 35** records the
+> reconciliation against HEAD, the commits, the tests and what is still open. Navigation (P1B)
+> has not been started.
 
 **Relationship to the other audits.** `docs/CURRENT_APPLICATION_AUDIT.md` (19 September) is the
 platform-maturity audit that drove P0–P2; it is still correct about what it covers and is not
@@ -41,7 +47,7 @@ from the code but was not reproduced in a running system. Everything else is cou
 
 | | | | |
 | --- | --- | --- | --- |
-| 1 [Executive summary](#part-1--executive-summary) | 10 [Form UX](#part-10--form-ux-audit) | 19 [API inventory](#part-19--api-inventory) | 28 [Security migration](#part-28--security-migration-plan) · 34 [P0 record](#part-34--p0-resolution-record) |
+| 1 [Executive summary](#part-1--executive-summary) | 10 [Form UX](#part-10--form-ux-audit) | 19 [API inventory](#part-19--api-inventory) | 28 [Security migration](#part-28--security-migration-plan) · 34 [P0 record](#part-34--p0-resolution-record) · 35 [P1A record](#part-35--p1a-resolution-record) |
 | 2 [Application map](#part-2--complete-application-map) | 11 [Buttons & actions](#part-11--button--action-audit) | 20 [Components](#part-20--global-component--design-system-audit) | 29 [Role migration](#part-29--role--permission-migration-plan) |
 | 3 [Public website](#part-3--public-website-audit) | 12 [Tabs](#part-12--tabs--sub-navigation-audit) | 21 [Layers](#part-21--architectural-layers) | 30 [Website Editor blueprint](#part-30--edit-website-target-architecture) |
 | 4 [Route map](#part-4--dashboard-route-map) | 13 [Tables](#part-13--table-ux-audit) | 22 [Performance](#part-22--performance) | 31 [User journeys](#part-31--user-journeys) |
@@ -1619,51 +1625,54 @@ No performance claim beyond these measurements is made.
 Severity: **S1** blocks or corrupts work · **S2** major friction or misleading · **S3** friction
 · **S4** polish. Frequency: D daily, W weekly, M monthly, R rare.
 
+**Resolution markers** (added after the audit; the finding text is unchanged): **✅ P0** /
+**✅ P1A** resolved in that phase, **◐ P1A** partly resolved — Part 35 says which part remains.
+
 | ID | Area | Problem | User impact | Affected roles | Freq | Sev | Root cause | Recommended solution |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| UX-01 | Website editing | Content reorder cannot be saved ✔ | Order of team, references, jobs cannot be changed at all | editors | W | **S1** | `ReorderControls` renders no arrow buttons (`Content.tsx:506-556`) | Fix now; long-term `OrderControl` in Repeater |
-| UX-02 | Forms | Success toast after a failed save/delete | User believes a change was made that was not | all | D | **S1** | `useMutation` returns `null`; callers ignore it / read stale error | Result-typed mutation helper; audit the 14 call sites |
-| UX-03 | Forms | Detail screens flash to skeleton on every write; unsaved attendance lost | Lost input, disorientation | PL | D | **S1** | `invalidate()` on the detail key | `prime` detail from the response; invalidate lists only |
+| UX-01 ✅ P1A | Website editing | Content reorder cannot be saved ✔ | Order of team, references, jobs cannot be changed at all | editors | W | **S1** | `ReorderControls` renders no arrow buttons (`Content.tsx:506-556`) | Fix now; long-term `OrderControl` in Repeater |
+| UX-02 ✅ P1A | Forms | Success toast after a failed save/delete | User believes a change was made that was not | all | D | **S1** | `useMutation` returns `null`; callers ignore it / read stale error | Result-typed mutation helper; audit the 14 call sites |
+| UX-03 ✅ P1A | Forms | Detail screens flash to skeleton on every write; unsaved attendance lost | Lost input, disorientation | PL | D | **S1** | `invalidate()` on the detail key | `prime` detail from the response; invalidate lists only |
 | UX-04 | Website editing | No preview of a draft | Editors publish blind or ask someone to check live | editors, approvers | D | **S1** | `/content/preview` never wired; iframe shows published site | Draft `PreviewFrame` (Part 30) |
 | UX-05 | Website editing | 35 content types; one section spread over 3–6 types in two groups | Editors cannot find where text lives | editors | D | **S2** | Rail mirrors the data model | Page-based editor |
 | UX-06 | Workflow clarity | Change → live crosses 4 screens / 11 clicks / 3 modals | Slow; approval and publishing feel separate from editing | editors, approvers, publishers | W | **S2** | Actions split across editor, Freigaben, Veröffentlichen, list, iframe | `WorkflowBar` inside the editor |
-| UX-07 | Home | Dashboard counts APPROVED as "ready to publish" ✔ | "Nothing to publish" while the site is out of date | publishers | W | **S2** | `readyToPublish = entriesApproved` | Use `/content/pending` |
+| UX-07 ✅ P1A | Home | Dashboard counts APPROVED as "ready to publish" ✔ | "Nothing to publish" while the site is out of date | publishers | W | **S2** | `readyToPublish = entriesApproved` | Use `/content/pending` |
 | UX-08 | Navigation | 21 top-level rows / 73 destinations | Slow scanning; unclear where things are | SA, admin | D | **S2** | Destinations = content types + settings sections | Workspaces (Part 6) |
 | UX-09 | Navigation | "Unternehmen" twice with the same icon | Wrong place, wrong edit | admin, GL | W | S2 | Content group and settings group share a label | Rename/merge (Part 6.3) |
 | UX-10 | Role complexity | Business users see a System group and website KPIs | Noise; fear of breaking things | engineer, fin, hr, sales | D | S2 | `system.health` in 11 roles; home is website-only | Split the key; role homes |
 | UX-11 | Role complexity | Freigaben visible to viewers/guests who cannot decide | Dead end | viewer, guest | W | S3 | route opens on `content.read` | Gate on `content.approve` |
-| UX-12 | Forms | Enter does not submit modal forms | Keyboard users must tab to the button | all | D | S2 | `Modal` footer outside `<form>` | Fix `Modal` once |
+| UX-12 ✅ P1A | Forms | Enter does not submit modal forms | Keyboard users must tab to the button | all | D | S2 | `Modal` footer outside `<form>` | Fix `Modal` once |
 | UX-13 | Forms | Save placed in 7 different ways | Users hunt for Save | all | D | S2 | Three form generations | Form standard (Part 10.4) |
-| UX-14 | Forms | Silently disabled submit | "Why can't I save?" | all | D | S2 | no inline validation | Visible reasons |
-| UX-15 | Forms | 409 handled by reloading the whole app; content has no lock | Lost work; silent overwrite in content | editors, PL | W | S2 | 5 copies of a reload dialog; `updateEntry` without version | `ConflictBanner`; lock content entries |
+| UX-14 ◐ P1A | Forms | Silently disabled submit | "Why can't I save?" | all | D | S2 | no inline validation | Visible reasons |
+| UX-15 ◐ P1A | Forms | 409 handled by reloading the whole app; content has no lock | Lost work; silent overwrite in content | editors, PL | W | S2 | 5 copies of a reload dialog; `updateEntry` without version | `ConflictBanner`; lock content entries |
 | UX-16 | Actions | Destructive triggers look like ordinary links; irreversible confirms are secondary | Mis-clicks on irreversible acts | PL, admin | W | S2 | ghost everywhere, danger 4× | Action hierarchy (Part 11.2) |
 | UX-17 | Actions | Same word, different act (Freigeben ×3, Wiederherstellen ×3, Aufheben ×2) | Misunderstanding consequences | all | W | S3 | no vocabulary | Glossary |
 | UX-18 | Actions | Screen actions scroll away | Scroll up to act | all | D | S3 | `usePageActions` has 1 caller | Sticky actions everywhere |
-| UX-19 | Tables | Lists cannot be opened by keyboard | Keyboard users blocked | all keyboard/AT users | D | **S1** (a11y) | `onClick` on `<tr>` | Row link in first cell |
+| UX-19 ✅ P1A | Tables | Lists cannot be opened by keyboard | Keyboard users blocked | all keyboard/AT users | D | **S1** (a11y) | `onClick` on `<tr>` | Row link in first cell |
 | UX-20 | Tables | Filters differ per list; `FilterBar` used once | Relearn per screen | all | D | S3 | copy-pasted chips | `FilterBar` everywhere |
-| UX-21 | Tables | Error shown as empty (Backups, Restores, Deliveries) | "No backups" when the request failed | SA | M | S2 | `DataTable` has no error prop | Distinct error state |
+| UX-21 ✅ P1A | Tables | Error shown as empty (Backups, Restores, Deliveries) | "No backups" when the request failed | SA | M | S2 | `DataTable` has no error prop | Distinct error state |
 | UX-22 | Tables | Silent truncation (board 200, plans tab 100) | Missing items not noticed | PL | W | S2 | fixed perPage | State the truncation; paginate |
 | UX-23 | Tabs | 14 project tabs, 4 placeholders | Clicks on empty promises; phone strip hides most | PL, GL | D | S3 | tabs per future module | Hide unbuilt; overflow menu |
 | UX-24 | Tabs | Three active-state styles; five copies of route tabs | Inconsistent orientation | all | D | S4 | no `RouteTabs` | Extract |
 | UX-25 | Mobile | Hover-only controls invisible on touch | Cannot reorder tasks, act on protocol lines, select media on tablet | PL, editors | W | S2 | `group-hover` reveals | Always-visible compact controls on touch |
-| UX-26 | Mobile | SaveBar and toasts overlap; dialogs not full-screen on phone | Obscured controls | all mobile | W | S3 | fixed positioning | Toasts above SaveBar; full-screen dialogs < sm |
+| UX-26 ◐ P1A | Mobile | SaveBar and toasts overlap; dialogs not full-screen on phone | Obscured controls | all mobile | W | S3 | fixed positioning | Toasts above SaveBar; full-screen dialogs < sm |
 | UX-27 | Users | MFA reset and sessions reachable only with `user.assign` | Support staff cannot help locked-out users | admin variants | M | S3 | panel inside role dialog | User detail page |
-| UX-28 | Users | Super Admin offered in the role picker to administrators | Enables escalation (SEC-R1) | admin | R | S1 (security) | no ceiling | Filter + server ceiling |
-| UX-29 | Settings | Settings text contradicts code (lockout "noch im Code", Bewerbungen "wohin gemeldet", no-backup notes) | Distrust of the screen | admin | M | S3 | stale copy | Correct text |
+| UX-28 ✅ P0 | Users | Super Admin offered in the role picker to administrators | Enables escalation (SEC-R1) | admin | R | S1 (security) | no ceiling | Filter + server ceiling |
+| UX-29 ✅ P1A | Settings | Settings text contradicts code (lockout "noch im Code", Bewerbungen "wohin gemeldet", no-backup notes) | Distrust of the screen | admin | M | S3 | stale copy | Correct text |
 | UX-30 | Settings | Health in four places, backups in three, mail in four | Which one is true? | SA | W | S3 | features added beside each other | One System workspace |
-| UX-31 | Profile | "Ihre letzten Aktionen" empty for most roles (silent 403) | Looks broken | non-audit roles | D | S3 | needs `audit.read` | `GET /auth/me/activity` scoped to self |
+| UX-31 ◐ P1A | Profile | "Ihre letzten Aktionen" empty for most roles (silent 403) | Looks broken | non-audit roles | D | S3 | needs `audit.read` | `GET /auth/me/activity` scoped to self |
 | UX-32 | Website | SEO type edits nothing; hero CTA tokens not resolved | Edits without effect | marketing | M | S2 | not wired | Wire or remove |
 | UX-33 | Website | `{telefonThun}` = first office by position | Reordering offices changes phone numbers | admin | R | S3 | token semantics | Rename to `{telefonHauptsitz}` bound to `isHeadquarters` |
 | UX-34 | Website | Contact, company facts and e-mail addresses in 2–3 stores | Drift between site and records | admin, marketing | M | S2 | CMS vs Organisation | Single source (Organisation), tokens in copy |
 | UX-35 | Errors | English/technical messages; env var and permission keys on screen | Users cannot act | all | W | S2 | raw messages passed through | Error model (Part 23) |
-| UX-36 | Errors | Page error replaces header and context | Lost orientation | all | R | S3 | `ErrorState` as page | Error inside layout |
+| UX-36 ◐ P1A | Errors | Page error replaces header and context | Lost orientation | all | R | S3 | `ErrorState` as page | Error inside layout |
 | UX-37 | Search | No record search; ⌘K documented but absent | Navigation by clicking only | all | D | S2 | widget not built | `CommandPalette` over records and destinations |
 | UX-38 | Tasks | Board has no search; view not in URL | Re-set view each visit | staff | D | S3 | local state | URL state |
-| UX-39 | Backup | Restore dialog unusable with MFA ✔ | SA cannot restore when it matters most | SA | R | **S1** | no `requiresCode` | Pass `requiresCode` |
-| UX-40 | Offices | Office dialog seeded once (◇) | Edits start from another office's values | admin | M | S2 | `useForm` initial without reset/key | Key by office id |
-| UX-41 | Media | Comma swallowed in tags / stringList settings | Cannot enter lists | editors, admin | M | S2 | split on keystroke | Split on blur/submit |
+| UX-39 ✅ P0 | Backup | Restore dialog unusable with MFA ✔ | SA cannot restore when it matters most | SA | R | **S1** | no `requiresCode` | Pass `requiresCode` |
+| UX-40 ✅ P1A | Offices | Office dialog seeded once (◇) | Edits start from another office's values | admin | M | S2 | `useForm` initial without reset/key | Key by office id |
+| UX-41 ✅ P1A | Media | Comma swallowed in tags / stringList settings | Cannot enter lists | editors, admin | M | S2 | split on keystroke | Split on blur/submit |
 | UX-42 | Content list | Singleton redirect makes "back" bounce | Trapped in editor | editors | D | S3 | `replace` redirect | Page editor removes the list |
-| UX-43 | Applications | Form reports all picked files as received although the server skipped some | Applicant believes CV arrived | applicants | W | S2 | client ignores `skipped` | Show server result |
+| UX-43 ✅ P1A | Applications | Form reports all picked files as received although the server skipped some | Applicant believes CV arrived | applicants | W | S2 | client ignores `skipped` | Show server result |
 | UX-44 | Legal | No Impressum / Datenschutz | Legal exposure (provider identification and privacy-information duties; to be confirmed by counsel) | public | – | S2 | not built | Legal pages as content |
 | UX-45 | Navigation | Settings sections as rail rows under two groups | Configuration mistaken for work | admin | W | S3 | nav as data per section | One Einstellungen destination per workspace |
 
@@ -1740,7 +1749,7 @@ stated.
 
 | Phase | Scope | Deliverables | Test gate |
 | --- | --- | --- | --- |
-| **UX-0 Defect sweep** (days) | S1 bugs that need no design | UX-01 reorder, UX-02 silent success (14 sites), UX-03 prime-not-invalidate, UX-12 Modal footer in form, UX-19 row links, UX-21 error-vs-empty, UX-39 restore `requiresCode`, UX-40, UX-41, UX-43, UX-07 pending count | unit tests per fix; `screens.spec` + `a11y.spec` green; new e2e for reorder and restore-with-MFA |
+| **UX-0 Defect sweep** (days) ✅ P1A — Part 35 | S1 bugs that need no design | UX-01 reorder, UX-02 silent success (14 sites), UX-03 prime-not-invalidate, UX-12 Modal footer in form, UX-19 row links, UX-21 error-vs-empty, UX-39 restore `requiresCode`, UX-40, UX-41, UX-43, UX-07 pending count | unit tests per fix; `screens.spec` + `a11y.spec` green; new e2e for reorder and restore-with-MFA |
 | **UX-1 Navigation** | Workspaces (Part 6), capability-based audiences, ⌘K destinations, "Unternehmen" dedupe, System workspace consolidation, Freigaben/Veröffentlichen under Website | `navigation.ts` v2, `routes.tsx` parents updated, redirects from old URLs | `routes.test.ts` both directions; `navigation.spec` per role account (8 accounts exist); row-count assertions per role |
 | **UX-2 Global form & action standard** | `Modal` form wrapper, result-typed mutations, `ConflictBanner`, `StatusTransitionDialog`, `RecordActions`, `Callout`, button hierarchy + glossary, `usePageActions` everywhere, retire `useAsync` screen by screen | migrate the 9 legacy screens onto `features/*` (content, media, users, audit, profile, home) | architecture test: no `useAsync` outside allowlist (shrink-only); form a11y checks |
 | **UX-3 Edit Website workspace** | Part 30 — page selector, draft preview, section panels, workflow bar | built on existing content API + `/content/preview` | e2e: edit → submit → approve → publish asserted on the public document (extend `publishing.spec`) |
@@ -1998,7 +2007,7 @@ five done 23 September 2026, see Part 34**
 5. SEC-5 secret/settings authority (R10) ✅
 
 **P1 — UX foundations**
-6. UX-0 defect sweep (reorder, silent success, invalidate, Enter, row links, error-vs-empty)
+6. UX-0 defect sweep (reorder, silent success, invalidate, Enter, row links, error-vs-empty) — ✅ done as P1A, Part 35
 7. UX-1 navigation workspaces + capability audiences + ⌘K destinations
 8. UX-2 form/action standard; migrate the legacy pages (content, media, users, audit, profile, home) onto `features/`
 
@@ -2118,6 +2127,81 @@ co-located with the keys in the ops archive, no off-site copy (SEC-11); SEC-R14 
 `system.health` (SEC-8); SEC-R15 audit retention and denial logging (SEC-9); forced MFA (SEC-10);
 and **SEC-R16, customer isolation — no external account may be created before Part 29's model
 exists.**
+
+## Part 35 — P1A resolution record
+
+Added 23 September 2026. The `UX-0` band of Part 27, implemented as **P1A**: defects that need no
+design, fixed in the shared primitives rather than screen by screen. Navigation (P1B), the page
+editor, role homes, integrations and customer accounts were **not** started.
+
+**Entry gate.** The complete Desktop project was run on the final P0 commit (`f2d6176`) after a
+re-seed: **406 passed, 0 failed, 12 skipped** (the opt-in backup suite), 15.8 min. P1A began on
+that green baseline.
+
+**Reconciliation against HEAD before any change.** P0 had touched some of the same screens, so
+every finding was re-read in the source first:
+
+| Finding | Status at `f2d6176` | Note |
+| --- | --- | --- |
+| UX-01 reorder | still present | the control rendered no arrows; the server also applied partial sets |
+| UX-02 silent success | still present | 14 sites as audited, plus 3 that read `mutation.error` from the render before the call |
+| UX-03 invalidate | still present | also in `useAsync.reload()`, which flipped `loading` over visible data |
+| UX-07 pending count | still present | |
+| UX-12 Enter | still present | |
+| UX-14 silent disabled | still present | |
+| UX-15 reload on 409 | still present | 5 dialogs |
+| UX-19 row click | still present | 11 tables |
+| UX-21 error as empty | still present | backups, restores, deliveries — and found: the publish comparison ("auf dem aktuellen Stand" on failure), the media grid, the dossier dialog (skeleton for ever) |
+| UX-28 Super Admin in picker | **already fixed by P0** | `grantable`, `f573ed9` |
+| UX-29 settings copy | still present | plus the System section's "noch ohne Bedienoberfläche" |
+| UX-39 restore with MFA | **already fixed by P0** | `requiresCode`, `47f9165` |
+| UX-40, UX-41, UX-43 | still present | |
+| P0 security dialogs | unaffected | People's role/invite dialogs use local state and `ReauthService`; not rewritten |
+
+**What changed.** Code `22cb3d1`, browser suite `4daffc5`.
+
+| Finding | Replacement behaviour | Proof |
+| --- | --- | --- |
+| **UX-01** | arrows per row, one save, list reload; the list asks for the whole collection; `refuseReorder` refuses partial, foreign, deleted or duplicated sets | `content.rules.test.ts` (5); e2e reorder → reload for team, projects, openings; server refusal end to end |
+| **UX-02** | `useMutation().run` → `MutationResult`; `toFailure` classifies into six kinds and normalises 5xx/429/offline text; all dashboard `err.message` paths routed through it | `failure.test.ts` (18); AST guard in `src/architecture.test.ts`; e2e: 500 on reorder, dropped connection on delete |
+| **UX-03** | `settle` / `invalidateAround` / `revalidate` in `core/api/query.ts`; five feature hooks use them; `useAsync` stale-while-revalidate | `query.test.ts` (+6); e2e: ticked attendance survives adding a person |
+| **UX-07** | home page reads `/content/pending`; `readyToPublish` removed | e2e: a reorder shows on the home page with the endpoint's count |
+| **UX-12** | `pressPrimaryOnEnter` in `Modal` — last non-ghost footer button, never `danger`, not from textareas/selects/open listboxes | `Modal.test.ts` (9); e2e: Enter creates a task; Enter in a typed "LÖSCHEN" deletes nothing |
+| **UX-14** ◐ | `Button.disabledReason` (aria-disabled, focusable, described) + `Modal.hint`; applied to the create/edit dialogs, restore, publish, schedule, reorder, content editor, people | e2e: accessible description and focus on a blocked Enter. Not every disabled control in the app carries a reason yet |
+| **UX-15** ◐ | `ConflictNotice`: form stays, save blocked, "Neueste Fassung laden" revalidates in place | guard: `location.reload` only in `ErrorBoundary`; e2e (`p1a-ux`, `project-edit`). **Content entries still have no optimistic lock — P2** |
+| **UX-19** | `DataTable open={{ href \| onOpen }}` — a link or button in the identity cell | guard: no `onRowClick` / `<tr onClick>`; e2e: Tab → link → Enter; button row opens its dialog |
+| **UX-21** | `DataTable.error` is required; error state before empty; a failed refresh over rows says so above them | e2e: 500 → error, empty 200 → empty state |
+| **UX-26** ◐ | the dialog footer is sticky | e2e at 375 px (it was below the fold). SaveBar/toast overlap and full-screen phone dialogs remain |
+| **UX-29** | Sicherheit, Bewerbungen, Sicherung and the Warteschlange card say what the code does | by reading |
+| **UX-31** ◐ | the profile's activity shows the refusal instead of an empty feed | the self-scoped endpoint is still to build |
+| **UX-36** ◐ | error inside the layout on every screen touched here | untouched screens keep their early return |
+| **UX-40** | `OfficeDialog` keyed by office | by reading |
+| **UX-41** | `ListInput` keeps the text, derives the list | `ListInput.test.ts` (4) |
+| **UX-43** | the application form reports `received`/`skipped` from the server; new optional copy key with a fallback | by reading; brand stylesheet unchanged |
+
+**Mutation checks.** Twelve deliberate regressions, all killed: `settle` dropping the record,
+`revalidate` zeroing data, Enter pressing `danger`, Enter from any input, Enter clicking a blocked
+button, 409 not a conflict, 5xx text passed through (killed after a test was added for it),
+`parseList` keeping blanks, an unchecked reorder result, a discarded `.run()`, a row click
+reintroduced, `window.location.reload()` reintroduced.
+
+**Verification.**
+
+| Gate | Result |
+| --- | --- |
+| `npm run verify` | 0 lint errors (38 warnings, unchanged); client **41 files / 902 tests**; server **63 files / 1725 tests** |
+| `npm run e2e:p1a` | 18 / 18 |
+| e2e desktop, complete | **424 passed, 0 failed, 12 skipped** (backup, opt-in), 16.8 min |
+| e2e tablet + mobile | **109 passed, 0 failed, 5 skipped**. The first run reported 107 + 2 failures, both `a11y.spec.ts` at tablet, both at the first worker's sign-in over a "Der Server antwortet nicht" screen — the documented refresh-throttle start-up case (harness, not product); rerun after the window: 3 / 3 |
+| `npm run build`, `npm run server:build` | pass; `node dist/main.js` on `127.0.0.1:3199` boots with an empty stderr and answers 200 |
+| Brand | `globals-B1c5Zfq1.css` byte-identical (SHA-256 `95C19C25…FC66`); the admin stylesheet changed, as the new utilities require |
+
+**Still open after P1A:** UX-04 draft preview, UX-05/06/08/09/45 navigation and the page editor
+(P1B and later), UX-13 save placement, UX-14 on the remaining controls, UX-15 content-entry
+locking (P2), UX-16/17 action vocabulary, UX-18 sticky page actions, UX-20 FilterBar everywhere,
+UX-22 silent truncation, UX-23/24 tabs, UX-25 hover-only controls on touch, UX-26 SaveBar/toast
+overlap and full-screen phone dialogs, UX-27, UX-30, UX-31 endpoint, UX-32–35, UX-36 on untouched
+screens, UX-37/38, UX-42, UX-44.
 
 ## Appendix A — Validation
 

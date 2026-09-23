@@ -501,3 +501,10 @@ Two figures above have moved and are recorded here rather than edited in place: 
 now holds **121** permissions (`settings.security` was added), and `KNOWN_UNENFORCED` holds
 **8** entries.
 
+**P1A, same day.** The UX defect sweep of the wider audit (its Part 27, band `UX-0`) is also
+done — silent success toasts, detail screens that dropped to a skeleton on every write, Enter
+that did nothing in dialogs, list rows a keyboard could not open, failed requests shown as empty
+lists, a home page that counted approvals instead of pending changes, conflicts answered with a
+full reload, and a content reorder that could never be saved. No schema change, no new
+permission. Evidence: `COMPLETE_APPLICATION_AUDIT.md` Part 35 and `ENTERPRISE_ROADMAP.md` → P1A.
+The client test count in §7 has moved to **902** (41 files) and the server's to **1725**.

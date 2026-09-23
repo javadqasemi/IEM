@@ -90,6 +90,7 @@ permissions and the tests, not a folder with the same names in it.
 | P2·5 | **Sicherung und Wiederherstellung** — three tables, `pg_dump`/`tar`/manifest with SHA-256, verification that parses the artifacts, retention that can never leave zero recovery points, and a **recovery drill** that restores into an isolated database and reads the records back. One new permission; `system.backup` finally enforced |
 | P2·6 | **System Control Center und Job Operations** — no migration and no new permission. One health vocabulary where there were four, a capability model that decides what an operator may do with a job, eight active diagnostics, and a build identity stamped at build time. `job.read` and `job.cancel` finally enforced |
 | P0·SEC | **Sicherheits-Härtung nach dem Gesamtaudit** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 34. A privilege ceiling (nobody grants more than they hold), a restore that runs once, an installer that writes `TRUST_PROXY` and the two real keys and whose nginx headers reach the documents, scope that fails closed with reach checked on create, and settings authority split three ways. One new permission, `settings.security`; no migration |
+| P1A | **UX-Fehlerbereinigung** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 35. A write's result is a `MutationResult` that has to be narrowed before anything is said about it, one failure classifier (`toFailure`), writes that keep the record on screen (`settle`), Enter in every dialog, row links a keyboard can reach, an error that is never an empty list, a home page that asks `/content/pending`, a 409 that keeps the input, and a reorder that persists. No migration, no new permission, no navigation change |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -213,6 +214,7 @@ npm run verify:all   # verify + e2e, for a release
 # none says anything different at a phone width, and all are slow.
 npm run e2e:security   # the role x verb x resource matrix, against the live API
 npm run e2e:p0         # the P0 matrix: privilege ceiling, restore, scope, settings authority
+npm run e2e:p1a        # the P1A defects in a browser: reorder, failed writes, Enter, row links, 409
 npm run deploy:test    # the installer's nginx config, statically; + live with NGINX_BIN set
 npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
@@ -864,11 +866,83 @@ workspace was a dialog that closes on save, so all three were invisible:
   the opposite (*"a refetch over data already on screen is not a loading state"*) and that
   promise holds for every key except the one being invalidated. Where a mutation's response
   *is* the new state, `prime` it back in the same tick; otherwise invalidate narrowly.
+  **Since P1A there is a call for each case** in `core/api/query.ts`: `settle(prefix,
+  { key, data })` when the response is the record (projects, meetings, decisions, drawings,
+  tasks all use it), `invalidateAround(prefix, …keys)` when the write returned something
+  smaller (a checklist tick, a comment), and `revalidate(key)` to refetch *without* a
+  skeleton (the conflict reload). `invalidate(KEY)` beside a returned detail is the bug.
 - **`SaveBar` carries no `onClick`.** `type="submit"` plus a handler is two submissions
   from one click, and the second `PATCH` 409s against the first — a save that worked
   reporting a conflict with itself. It must sit inside a `<Form>`; that is also what keeps
   Enter working, since a form with no submit button does not submit implicitly once it has
   more than one field.
+
+**A write's result is a `MutationResult`, and nothing may be said before it is narrowed**
+(P1A, UX-02). `useMutation().run` used to resolve to `T | null`, and fourteen callers showed
+"Gelöscht" after an `await` that had failed — a `null` is easy not to look at, and `await
+x.run(); toast.success(…)` does not look at it at all. It now resolves to `{ ok: true, data }`
+or `{ ok: false, failure }`; `data` does not exist until `ok` is checked. The type cannot see a
+result that is thrown away or tested for truthiness (an object always passes), so
+`src/architecture.test.ts` walks the syntax tree and fails a `.run()` whose result is discarded
+or never read as `.ok`. Three callers had a subtler form of the same bug worth recognising:
+they read `mutation.error` *right after* the `await`, which is the value from the render
+before the call — always `null` — so a refusal fell through to success.
+
+**`toFailure` is the one place a failure becomes a sentence.** `core/api/failure.ts` sorts
+anything thrown into six kinds — `validation`, `permission`, `conflict`, `notFound`,
+`unavailable`, `rejected` — and a message. A 4xx keeps the server's German sentence; a 5xx, a
+429 and a `fetch` that never arrived get a fixed one that says **the input is still there**,
+because "Internal server error" and "Failed to fetch" were reaching people verbatim. Every
+`err instanceof Error ? err.message : …` in the dashboard went through it in P1A; a new one
+is a regression. The public site's form keeps its own copy, because it may not import
+`@/core`.
+
+**`DataTable` takes `open`, never a row handler, and `error` is required** (P1A, UX-19,
+UX-21). `open={{ href }}` renders a real link in the identity cell (the first `required`
+column, else the first); `open={{ onOpen }}` renders a button, for rows that open a drawer or
+a dialog. The row's own click goes *through* that element, so there is one way in for mouse
+and keyboard alike. `error` is a required prop — `null` is a valid value — because a table
+that cannot tell a failure from an empty result answers "Noch keine Sicherung" on the
+morning the request was refused. The architecture test fails an `onRowClick` or a
+`<tr onClick>` anywhere outside `DataTable.tsx`.
+
+**Enter in a dialog presses the last non-ghost footer button, and never a `danger` one**
+(P1A, UX-12). `pressPrimaryOnEnter` in `Modal.tsx`, because every footer sits outside its
+`<Form>` and moving them would nest forms. It clicks the real button — same handler, same
+`disabled` — so there is no second submit path. It leaves textareas, selects, open
+listboxes, IME composition and forms with their own submit button alone. A dialog whose
+last button is `danger` has **no** Enter action; the rule never falls back to an earlier
+button.
+
+**A blocked button says why: `disabledReason` on the button, `hint` on the `Modal`** (P1A,
+UX-14). With a reason, a `Button` is `aria-disabled` rather than `disabled`, so it stays
+focusable and the reason is its accessible description and tooltip; Enter on a blocked
+dialog moves focus to it. The visible copy of the sentence goes in the footer through
+`hint`, because a tooltip is not where an essential explanation should live alone. The
+footer is **sticky** — at phone width a long form pushed it below the fold.
+
+**A 409 keeps the form and reloads in place — `ConflictNotice`, never
+`window.location.reload()`** (P1A, UX-15). The five optimistic-lock dialogs used to swap
+the form for a second dialog whose only way forward was a full page reload. The form now
+stays under the notice (so the reader can see and copy what they typed), save is blocked
+with `CONFLICT_BLOCKS_SAVE`, and "Neueste Fassung laden" calls the feature's `reload(id)`
+(`revalidate`) and closes. Still no "save anyway". The architecture test allows
+`location.reload()` only in `ErrorBoundary.tsx`.
+
+**`useAsync`'s `loading` is true only while there is nothing to show** (P1A, UX-03).
+`reload()` used to flip it over data already on screen, so every legacy list and the content
+editor dropped to a skeleton after every save. A change of `deps` still clears the data —
+it is a different question — and `refreshing` reports a reload in flight.
+
+**A reorder is the whole collection, once each** (P1A, UX-01). `POST
+/content/entries/reorder` numbers the ids it is sent from zero, so `refuseReorder` in
+`content.rules.ts` refuses a partial, foreign, deleted or duplicated set. The list asks for
+the whole collection (`ORDERABLE_PAGE_SIZE`) before it offers the control, and says so when
+a collection has outgrown it. The control that shipped before rendered no arrows at all.
+
+**The home page asks `/content/pending`, like the publish screen** (P1A, UX-07).
+`readyToPublish` — the approved count under a name that meant "waiting to go out" — is
+removed from `/dashboard/overview`, so there is no second answer to drift.
 
 **A notification's channels are resolved in one order and clamped on read.**
 `security invariant → organisation policy → user preference`, the shape

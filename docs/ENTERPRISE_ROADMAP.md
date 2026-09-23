@@ -106,6 +106,31 @@ customer accounts** — the external-user model (Part 29) is still the prerequis
 
 ## P1 — Enterprise core
 
+### P1A ✅ UX defect sweep — the audit's `UX-0` band
+
+Opened by `docs/COMPLETE_APPLICATION_AUDIT.md` Part 27 and closed on 23 September 2026. Evidence
+(reconciliation against HEAD, commits, tests, mutation checks) is that document's Part 35.
+
+**Problem.** High-frequency defects in shared infrastructure: a success toast after a failed
+write (UX-02); detail screens that unmounted on every write and lost unsaved input (UX-03); Enter
+that did nothing in dialogs (UX-12); list rows opened only by mouse (UX-19); failed requests shown
+as empty lists (UX-21); a home page counting approvals instead of pending changes (UX-07); 409s
+answered by reloading the application (UX-15); a content reorder with no arrows (UX-01); and
+smaller ones (UX-14, 29, 40, 41, 43).
+
+**Solution.** Fixed in the primitives, not per screen: `MutationResult` + `toFailure`
+(`core/api/failure.ts`); `settle` / `invalidateAround` / `revalidate` in the query cache;
+`Modal` Enter handling, `hint`, sticky footer; `Button.disabledReason`; `DataTable` `open` and a
+required `error`; `ConflictNotice`; `ListInput`; `refuseReorder` on the server.
+
+**Acceptance.** Met: unit tests per rule, three shrink-to-zero guards in `src/architecture.test.ts`
+(unchecked mutation results, row click handlers, `location.reload`), `e2e/p1a-ux.spec.ts`
+(18 cases) and the complete browser suite green at all three widths.
+
+**Deliberately not in P1A:** navigation (P1B), the page editor, role homes, integrations,
+customer accounts, and content-entry optimistic locking (P2). Part 35 lists the UX findings still
+open.
+
 ### P1-1 ✅ The firm is not an entity — Company / Organisation settings
 
 **Problem.** Company data lives in three stores that do not know about each other: nine
