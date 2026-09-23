@@ -77,7 +77,7 @@ test.describe("Super Admin", () => {
     // Website opens on its first destination and unfolds its own list.
     await page.locator(`${RAIL} a[data-workspace="website"]`).click();
     await expect(page).toHaveURL(/#\/inhalte$/);
-    await expect(page.locator("header.glass-bar h2")).toHaveText("Website");
+    await expect(page.locator("h2[data-shell-title]")).toHaveText("Website");
     await expect(page.locator(`${RAIL} a[href="#/inhalte"]`)).toHaveAttribute("aria-current", "page");
 
     await page.locator(`${RAIL} a[href="#/freigaben"]`).click();
@@ -86,11 +86,11 @@ test.describe("Super Admin", () => {
 
     await page.locator(`${RAIL} a[href="#/veroeffentlichen"]`).click();
     await expect(page).toHaveURL(/#\/veroeffentlichen$/);
-    await expect(page.locator("header.glass-bar h2")).toHaveText("Website");
+    await expect(page.locator("h2[data-shell-title]")).toHaveText("Website");
 
     await page.locator(`${RAIL} a[data-workspace="system"]`).click();
     await expect(page).toHaveURL(/#\/system$/);
-    await expect(page.locator("header.glass-bar h2")).toHaveText("System");
+    await expect(page.locator("h2[data-shell-title]")).toHaveText("System");
     // Website closed again: one workspace open at a time.
     await expect(page.locator(`${RAIL} a[href="#/freigaben"]`)).toHaveCount(0);
   });
@@ -105,7 +105,7 @@ test.describe("Super Admin", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/#\/inhalte\/team$/);
     // Owned by Website, and "Inhalte" is lit for it.
-    await expect(page.locator("header.glass-bar h2")).toHaveText("Website");
+    await expect(page.locator("h2[data-shell-title]")).toHaveText("Website");
     await expect(page.locator(`${RAIL} a[href="#/inhalte"]`)).toHaveAttribute("aria-current", "page");
   });
 
@@ -147,7 +147,7 @@ test.describe("Super Admin", () => {
     await expect(page).toHaveURL(/#\/plaene$/);
     await page.locator("tbody [data-row-open]").first().click();
     await expect(page).toHaveURL(/#\/plaene\/[^/]+/);
-    await expect(page.locator("header.glass-bar h2")).toHaveText("Projekte");
+    await expect(page.locator("h2[data-shell-title]")).toHaveText("Projekte");
     await expect(page.locator(`${RAIL} a[href="#/plaene"]`)).toHaveAttribute("aria-current", "page");
 
     await page.goBack();
@@ -174,7 +174,7 @@ test.describe("Super Admin", () => {
       await page.goto(`/admin.html#${path}`);
       await settle(page);
       await expect(page).toHaveURL(new RegExp(`#${path}$`));
-      await expect(page.locator("header.glass-bar h2"), path).toHaveText(workspace);
+      await expect(page.locator("h2[data-shell-title]"), path).toHaveText(workspace);
       await expect(page.getByText("Diese Seite gibt es nicht.")).toHaveCount(0);
     }
   });

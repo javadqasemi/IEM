@@ -30,6 +30,7 @@
     "e2e:p0": "playwright test e2e/p0-security.spec.ts --project=desktop",
     "e2e:p1a": "playwright test e2e/p1a-ux.spec.ts --project=desktop",
     "e2e:p1b": "playwright test e2e/p1b-navigation.spec.ts --project=desktop",
+    "e2e:p1c": "playwright test e2e/p1c-forms-actions.spec.ts --project=desktop",
     "deploy:test": "node deploy/test/nginx-headers.mjs",
     "e2e:versioning": "playwright test e2e/versioning.spec.ts --project=desktop",
     "e2e:publishing": "playwright test e2e/publishing.spec.ts --project=desktop",

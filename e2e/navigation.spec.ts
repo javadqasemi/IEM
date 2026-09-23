@@ -175,7 +175,7 @@ test.describe("the trail and the bar", () => {
     await page.goto("/admin.html#/medien");
     await expect(page.getByRole("heading", { name: /Medien/i }).first()).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Brotkrumen" })).toHaveCount(0);
-    await expect(page.locator("header.glass-bar h2")).toHaveText("Website");
+    await expect(page.locator("h2[data-shell-title]")).toHaveText("Website");
   });
 
   test("a nested screen shows the chain, and the parent link works", async ({ page }, testInfo) => {

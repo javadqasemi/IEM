@@ -262,7 +262,9 @@ test.describe("the project edit dialog", () => {
       reports it as an element that is simply not visible. `[id="…"]` needs no
       escaping and says the same thing.
     */
-    const message = dialog.locator(`[id="${describedBy}"]`);
+    // An id *list*: since P1C a field's hint stays beside its error, and the
+    // error is listed first — the one a screen reader reads first.
+    const message = dialog.locator(`[id="${describedBy!.split(" ")[0]}"]`);
     await expect(message).toBeVisible();
     await expect(message).toHaveAttribute("role", "alert");
     await expect(message).toHaveText(/2 characters|mindestens/i);

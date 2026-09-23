@@ -88,10 +88,21 @@ test.describe("reordering content persists (UX-01)", () => {
       test.skip(before.length < 2, `„${typeKey}“ hat weniger als zwei Einträge.`);
       const original = before.map((e) => e.id);
 
+      /*
+        A row *of this collection*, not any row. The three cases run in one
+        page, so `/inhalte/projects` → `/inhalte/openings` is a hash change that
+        reuses the list component: the previous collection's rows are still on
+        screen for a moment, and reading the ids then produced `[]` — a flake
+        seen once in the P1C final run, never reproducible on a rerun. Each
+        row's link carries its collection, which makes the wait exact.
+      */
+      const ownRow = page.locator(`tbody [data-row-open][href*="/inhalte/${typeKey}/"]`).first();
+
       try {
         await page.goto(`/admin.html#/inhalte/${typeKey}`);
-        await expect(page.locator("tbody [data-row-open]").first()).toBeVisible();
+        await expect(ownRow).toBeVisible();
         const shown = await rowIds(page);
+        expect(shown.length, "the list rendered its rows").toBeGreaterThanOrEqual(2);
 
         await page.getByRole("button", { name: "Reihenfolge ändern" }).click();
         // Nothing moved yet: the save is blocked, focusable, and says why.
@@ -105,7 +116,7 @@ test.describe("reordering content persists (UX-01)", () => {
 
         // The claim is persistence, so the proof is a fresh page.
         await page.reload();
-        await expect(page.locator("tbody [data-row-open]").first()).toBeVisible();
+        await expect(ownRow).toBeVisible();
         const after = await rowIds(page);
         expect(after.slice(0, 2)).toEqual([shown[1], shown[0]]);
         expect(after.slice(2)).toEqual(shown.slice(2));

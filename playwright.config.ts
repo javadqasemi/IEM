@@ -82,6 +82,8 @@ const SIGNS_IN_TWICE = [
   /p1a-ux\.spec\.ts/,
   // Seven personas sign in through the form; at three widths, twenty-one.
   /p1b-navigation\.spec\.ts/,
+  // An API context for fixtures, and it sets the viewport itself where width matters.
+  /p1c-forms-actions\.spec\.ts/,
 ];
 
 /**

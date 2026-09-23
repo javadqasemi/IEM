@@ -399,7 +399,15 @@ test.describe("decisions", () => {
 
     await page.goto(`/admin.html#/entscheide/${old.id}`);
     await expect(page.getByRole("button", { name: "Korrigieren" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Aufheben" })).toHaveCount(0);
+    // Since P1C superseding lives in the record's "Mehr" menu. It may still
+    // be there (for deleting), so open it and look — asserting only that no
+    // button is visible would pass without checking anything.
+    const more = page.getByRole("button", { name: "Mehr" });
+    if (await more.count()) {
+      await more.click();
+      await expect(page.getByRole("menuitem", { name: /ersetzen/i })).toHaveCount(0);
+      await page.keyboard.press("Escape");
+    }
   });
 });
 
