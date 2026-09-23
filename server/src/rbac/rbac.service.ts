@@ -1,7 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
+import { ReauthService } from "../auth/reauth.service";
 import { PERMISSIONS } from "./permissions.catalog";
+import {
+  SUPER_ADMIN_ROLE,
+  privilegeChangeNeedsReauth,
+  refusePermissionGrant,
+  refuseRoleEdit,
+  refuseRoleGrant,
+} from "./privilege.rules";
+import { principalOf, privilegeCeiling } from "./privilege.errors";
 import type { AuthUser } from "../common/decorators";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
@@ -11,6 +20,7 @@ export class RbacService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly reauth: ReauthService,
   ) {}
 
   /**
@@ -31,14 +41,29 @@ export class RbacService {
     return [...groups.entries()].map(([category, permissions]) => ({ category, permissions }));
   }
 
-  listRoles() {
-    return this.prisma.role.findMany({
+  /**
+   * Every role, each marked with whether **this caller** may hand it out.
+   *
+   * `grantable` is a courtesy for the role picker, computed by the same rule
+   * the write path enforces — so the dashboard never offers a role the server
+   * will refuse, and never has to hold its own copy of the ceiling.
+   */
+  async listRoles(actor: AuthUser) {
+    const rows = await this.prisma.role.findMany({
       orderBy: { rank: "asc" },
       include: {
         permissions: { select: { permission: { select: { id: true, key: true } } } },
         _count: { select: { users: true } },
       },
     });
+    const me = principal(actor);
+    return rows.map((role) => ({
+      ...role,
+      grantable:
+        refuseRoleGrant(me, [
+          { key: role.key, name: role.name, permissions: role.permissions.map((p) => p.permission.key) },
+        ]) === null,
+    }));
   }
 
   async getRole(id: string) {
@@ -54,11 +79,25 @@ export class RbacService {
   }
 
   async createRole(
-    input: { key: string; name: string; description?: string; permissionIds: string[] },
+    input: {
+      key: string;
+      name: string;
+      description?: string;
+      permissionIds: string[];
+      reauthToken?: string;
+    },
     actor: AuthUser,
     ctx: Ctx,
   ) {
+    const keys = await this.permissionKeys(input.permissionIds);
+    const refusal = refusePermissionGrant(principal(actor), keys);
+    if (refusal) throw ceiling(refusal);
+    await this.requireReauthIf(privilegeChangeNeedsReauth(keys, false), actor, input.reauthToken);
+
     const key = input.key.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    if (key === SUPER_ADMIN_ROLE) {
+      throw new BadRequestException("Dieser Schlüssel ist für die Systemrolle reserviert.");
+    }
     const role = await this.prisma.role.create({
       data: {
         key,
@@ -90,15 +129,46 @@ export class RbacService {
    */
   async updateRole(
     id: string,
-    input: { name?: string; description?: string; permissionIds?: string[] },
+    input: { name?: string; description?: string; permissionIds?: string[]; reauthToken?: string },
     actor: AuthUser,
     ctx: Ctx,
   ) {
     const before = await this.getRole(id);
 
-    if (before.key === "super_admin" && input.permissionIds) {
+    if (before.key === SUPER_ADMIN_ROLE && input.permissionIds) {
       throw new BadRequestException(
         "Super Admin hat per Definition alle Berechtigungen — die Liste ist nicht einschränkbar.",
+      );
+    }
+
+    /*
+      The ceiling, twice. A role holding anything the actor lacks is above
+      them and not theirs to edit — renaming included, since a renamed
+      "Geschäftsleitung" is how somebody is talked into assigning it. And
+      what the edit *adds* must be the actor's to give, because adding a key
+      to a role grants it to everybody holding the role, the actor possibly
+      among them.
+    */
+    const me = principal(actor);
+    const beforeKeys = before.permissions.map((p) => p.permission.key);
+    const editRefusal = refuseRoleEdit(me, {
+      key: before.key,
+      name: before.name,
+      permissions: beforeKeys,
+    });
+    if (editRefusal) throw ceiling(editRefusal);
+    if (input.permissionIds) {
+      const nextKeys = await this.permissionKeys(input.permissionIds);
+      const grantRefusal = refusePermissionGrant(me, nextKeys);
+      if (grantRefusal) throw ceiling(grantRefusal);
+      const had = new Set(beforeKeys);
+      await this.requireReauthIf(
+        privilegeChangeNeedsReauth(
+          nextKeys.filter((k) => !had.has(k)),
+          false,
+        ),
+        actor,
+        input.reauthToken,
       );
     }
 
@@ -136,6 +206,12 @@ export class RbacService {
     if (role.isSystem) {
       throw new BadRequestException("Systemrollen können nicht gelöscht werden.");
     }
+    const refusal = refuseRoleEdit(principal(actor), {
+      key: role.key,
+      name: role.name,
+      permissions: role.permissions.map((p) => p.permission.key),
+    });
+    if (refusal) throw ceiling(refusal);
     if (role.users.length) {
       throw new BadRequestException(
         `Dieser Rolle sind noch ${role.users.length} Benutzer zugewiesen. Zuerst umhängen.`,
@@ -156,4 +232,30 @@ export class RbacService {
   catalogSize() {
     return PERMISSIONS.length;
   }
+
+  /**
+   * The keys behind a list of permission ids, every one of which must exist.
+   *
+   * The editor posts ids; the ceiling judges keys. An unknown id used to fail
+   * on the foreign key inside the transaction.
+   */
+  private async permissionKeys(ids: string[]): Promise<string[]> {
+    const unique = [...new Set(ids)];
+    if (!unique.length) return [];
+    const rows = await this.prisma.permission.findMany({
+      where: { id: { in: unique } },
+      select: { key: true },
+    });
+    if (rows.length !== unique.length) {
+      throw new BadRequestException("Mindestens eine der gewählten Berechtigungen gibt es nicht.");
+    }
+    return rows.map((r) => r.key);
+  }
+
+  private requireReauthIf(needed: boolean, actor: AuthUser, token?: string): Promise<void> {
+    return this.reauth.requireIf(needed, actor.id, token);
+  }
 }
+
+const principal = principalOf;
+const ceiling = privilegeCeiling;

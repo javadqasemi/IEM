@@ -38,6 +38,12 @@ export class InviteUserDto {
   @IsEmail() email!: string;
   @IsString() @MinLength(2) @MaxLength(120) name!: string;
   @IsArray() @IsString({ each: true }) roleIds!: string[];
+  /**
+   * The actor's recent-authentication window, required only when the roles
+   * confer privileged permissions — see `privilegeChangeNeedsReauth`. The
+   * server answers `reauth_required` when it is missing and needed.
+   */
+  @IsOptional() @IsString() @MaxLength(256) reauthToken?: string;
 }
 
 export class UpdateUserDto {
@@ -49,6 +55,8 @@ export class UpdateUserDto {
 
 export class SetRolesDto {
   @IsArray() @IsString({ each: true }) roleIds!: string[];
+  /** As on `InviteUserDto`: needed when the change grants privileged permissions. */
+  @IsOptional() @IsString() @MaxLength(256) reauthToken?: string;
 }
 
 /**
@@ -132,7 +140,7 @@ export class UsersController {
     @Req() req: AuthedRequest,
     @ClientIp() ip: string | null,
   ) {
-    return this.users.setRoles(id, dto.roleIds, user, this.ctx(req, ip));
+    return this.users.setRoles(id, dto.roleIds, user, this.ctx(req, ip), dto.reauthToken);
   }
 
   @Delete(":id")

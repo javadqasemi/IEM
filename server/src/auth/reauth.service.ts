@@ -33,6 +33,9 @@ import { REAUTH_TTL_MS, isRecentAuth } from "./mfa.rules";
  * decision rather than two prompts a minute apart. The argument is written on
  * `ReauthToken` in the schema; the ceiling is `REAUTH_TTL_MS`, five minutes.
  */
+/** The error `code` for "prove it again, then retry". */
+export const REAUTH_REQUIRED = "reauth_required";
+
 @Injectable()
 export class ReauthService {
   constructor(private readonly prisma: PrismaService) {}
@@ -82,9 +85,13 @@ export class ReauthService {
       : null;
 
     if (!isRecentAuth(row, new Date())) {
-      throw new ForbiddenException(
-        "Für diesen Schritt ist eine erneute Bestätigung nötig. Bitte das Passwort erneut eingeben.",
-      );
+      // `code` so a client can open the password dialog and retry rather than
+      // show the sentence as a failure. The message is unchanged.
+      throw new ForbiddenException({
+        message:
+          "Für diesen Schritt ist eine erneute Bestätigung nötig. Bitte das Passwort erneut eingeben.",
+        code: REAUTH_REQUIRED,
+      });
     }
 
     // Informational only — nothing reads it to decide anything. It is what an
@@ -94,6 +101,26 @@ export class ReauthService {
       where: { id: row!.id },
       data: { usedAt: new Date() },
     });
+  }
+
+  /**
+   * The gate, for operations that need it only sometimes.
+   *
+   * A privilege change needs the password again when it grants something
+   * weighty — see `privilegeChangeNeedsReauth` — and not when it hands out
+   * Viewer. Without a token the answer is `reauth_required` with a sentence
+   * saying why, which the dashboard turns into the dialog and a retry; with
+   * one, `require` checks it as always.
+   */
+  async requireIf(
+    needed: boolean,
+    userId: string,
+    token: string | undefined,
+    reason = "Diese Änderung vergibt weitreichende Rechte. Bitte bestätigen Sie sie mit Ihrem Passwort.",
+  ): Promise<void> {
+    if (!needed) return;
+    if (!token) throw new ForbiddenException({ message: reason, code: REAUTH_REQUIRED });
+    await this.require(userId, token);
   }
 
   /**

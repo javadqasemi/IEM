@@ -10,7 +10,19 @@ import { PrismaService } from "../common/prisma.service";
 import { AuditService } from "../core/audit/audit.service";
 import { AuthService } from "../auth/auth.service";
 import { MfaService } from "../auth/mfa.service";
+import { ReauthService } from "../auth/reauth.service";
 import type { AuthUser } from "../common/decorators";
+import {
+  SUPER_ADMIN_ROLE,
+  added,
+  permissionsOf,
+  privilegeChangeNeedsReauth,
+  refuseAdminister,
+  refuseRoleGrant,
+  type Principal,
+  type RoleGrant,
+} from "../rbac/privilege.rules";
+import { principalOf, privilegeCeiling } from "../rbac/privilege.errors";
 
 type Ctx = { ip?: string | null; userAgent?: string | null };
 
@@ -44,6 +56,12 @@ export class UsersService {
      * not.
      */
     private readonly mfa: MfaService,
+    /**
+     * The recent-authentication window for privilege changes. The same
+     * service the second factor and the restore use — there is one
+     * definition of "proved it a moment ago" in this application.
+     */
+    private readonly reauth: ReauthService,
   ) {}
 
   async list(params: { search?: string; status?: UserStatus; roleKey?: string; page?: number; perPage?: number }) {
@@ -126,6 +144,7 @@ export class UsersService {
    */
   async revokeSessionOf(id: string, sessionId: string, actor: AuthUser, ctx: Ctx) {
     await this.existing(id);
+    await this.assertMayAdminister(id, actor);
     return this.auth.revokeSession(id, sessionId, actor, ctx);
   }
 
@@ -142,6 +161,7 @@ export class UsersService {
    */
   async revokeAllSessionsOf(id: string, actor: AuthUser, ctx: Ctx) {
     await this.existing(id);
+    await this.assertMayAdminister(id, actor);
     return this.auth.logoutAll(id, actor, ctx);
   }
 
@@ -169,10 +189,32 @@ export class UsersService {
    * inbox is backed up to.
    */
   async invite(
-    input: { email: string; name: string; roleIds: string[] },
+    input: { email: string; name: string; roleIds: string[]; reauthToken?: string },
     actor: AuthUser,
     ctx: Ctx,
   ) {
+    /*
+      An invitation that carries roles *is* a role assignment, so it answers
+      to the same ceiling — otherwise `user.create` would be a way round
+      `user.assign`, and the invite a way round the ceiling. A holder of
+      `user.create` without `user.assign` may still invite; they may not
+      decide what the invitee can do.
+    */
+    if (input.roleIds.length && !actor.isSuperAdmin && !actor.permissions.has("user.assign")) {
+      throw ceiling("Rollen vergeben darf nur, wer Rollen zuweisen darf (user.assign).");
+    }
+    const roles = await this.rolesByIds(input.roleIds);
+    const refusal = refuseRoleGrant(principal(actor), roles);
+    if (refusal) throw ceiling(refusal);
+    await this.requireReauthIf(
+      privilegeChangeNeedsReauth(
+        permissionsOf(roles),
+        roles.some((r) => r.key === SUPER_ADMIN_ROLE),
+      ),
+      actor,
+      input.reauthToken,
+    );
+
     const email = input.email.toLowerCase().trim();
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing && !existing.deletedAt) {
@@ -219,6 +261,12 @@ export class UsersService {
   ) {
     const before = await this.get(id);
     this.assertNotSelfDemotion(id, actor, input.status);
+    await this.assertMayAdminister(id, actor);
+    // Suspending the last active Super Admin is the same lock-out as taking
+    // the role away from them — nobody left can undo it from the dashboard.
+    if (input.status !== undefined && input.status !== "ACTIVE") {
+      await this.assertKeepsOneSuperAdmin(id, []);
+    }
 
     const user = await this.prisma.user.update({
       where: { id },
@@ -265,8 +313,47 @@ export class UsersService {
    * session means the dashboard re-reads its navigation and the user is not
    * left looking at menu items that now 403.
    */
-  async setRoles(id: string, roleIds: string[], actor: AuthUser, ctx: Ctx) {
+  async setRoles(
+    id: string,
+    roleIds: string[],
+    actor: AuthUser,
+    ctx: Ctx,
+    reauthToken?: string,
+  ) {
     const before = await this.get(id);
+
+    /*
+      The ceiling, in the order the questions are cheapest to answer wrongly:
+
+      1. May the actor touch this account at all? Not if it holds anything
+         the actor does not — that is how an Administrator is kept from
+         stripping Geschäftsleitung or demoting a Super Admin.
+      2. May the actor hand out each role being *added*? Removals cannot
+         make anybody stronger; additions are judged by containment.
+      3. Does what is being given need the password again?
+    */
+    const current = await this.rolesOfUser(id);
+    const next = await this.rolesByIds(roleIds);
+    if (id !== actor.id) {
+      const refusal = refuseAdminister(principal(actor), principalFrom(current));
+      if (refusal) throw ceiling(refusal);
+    }
+    const currentKeys = new Set(current.map((r) => r.key));
+    const nextKeys = new Set(next.map((r) => r.key));
+    const grantRefusal = refuseRoleGrant(
+      principal(actor),
+      next.filter((r) => !currentKeys.has(r.key)),
+    );
+    if (grantRefusal) throw ceiling(grantRefusal);
+    await this.requireReauthIf(
+      privilegeChangeNeedsReauth(
+        added(permissionsOf(current), permissionsOf(next)),
+        currentKeys.has(SUPER_ADMIN_ROLE) !== nextKeys.has(SUPER_ADMIN_ROLE),
+      ),
+      actor,
+      reauthToken,
+    );
+
     await this.assertKeepsOneSuperAdmin(id, roleIds);
     if (id === actor.id && !(await this.rolesInclude(roleIds, "super_admin")) && actor.isSuperAdmin) {
       throw new ForbiddenException(
@@ -300,6 +387,8 @@ export class UsersService {
   /** Soft delete, so the audit log keeps pointing at a row that exists. */
   async remove(id: string, actor: AuthUser, ctx: Ctx) {
     if (id === actor.id) throw new ForbiddenException("Das eigene Konto kann nicht gelöscht werden.");
+    await this.existing(id);
+    await this.assertMayAdminister(id, actor);
     await this.assertKeepsOneSuperAdmin(id, []);
 
     const before = await this.get(id);
@@ -357,11 +446,13 @@ export class UsersService {
    */
   async resetMfaFor(id: string, actor: AuthUser, reauthToken: string, ctx: Ctx) {
     await this.existing(id);
+    await this.assertMayAdminister(id, actor);
     return this.mfa.resetFor(id, actor, reauthToken, ctx);
   }
 
   async resetPasswordFor(id: string, actor: AuthUser, ctx: Ctx) {
     const user = await this.get(id);
+    await this.assertMayAdminister(id, actor);
     const result = await this.auth.requestReset(user.email, ctx);
     this.audit.record({
       actor,
@@ -374,6 +465,61 @@ export class UsersService {
   }
 
   /* ---- Guard rails ------------------------------------------------ */
+
+  /**
+   * The ceiling for every administrative act on another account.
+   *
+   * Acting on one's own account is exempt here — the self-demotion and
+   * last-Super-Admin checks decide those — because containment is trivially
+   * true of oneself and the interesting question there is a different one.
+   */
+  private async assertMayAdminister(id: string, actor: AuthUser): Promise<void> {
+    if (id === actor.id || actor.isSuperAdmin) return;
+    const refusal = refuseAdminister(principal(actor), principalFrom(await this.rolesOfUser(id)));
+    if (refusal) throw ceiling(refusal);
+  }
+
+  /** A user's roles with their permission keys, as the rules read them. */
+  private async rolesOfUser(id: string): Promise<RoleGrant[]> {
+    const rows = await this.prisma.userRole.findMany({
+      where: { userId: id },
+      select: {
+        role: {
+          select: { key: true, name: true, permissions: { select: { permission: { select: { key: true } } } } },
+        },
+      },
+    });
+    return rows.map(({ role }) => toGrant(role));
+  }
+
+  /**
+   * The roles named by id, every one of which must exist.
+   *
+   * An unknown id used to reach `createMany` and fail on the foreign key — a
+   * 409 "in use" for what is a bad request. Resolving first also gives the
+   * ceiling the permission lists it judges.
+   */
+  private async rolesByIds(ids: string[]): Promise<RoleGrant[]> {
+    const unique = [...new Set(ids)];
+    if (!unique.length) return [];
+    const rows = await this.prisma.role.findMany({
+      where: { id: { in: unique } },
+      select: {
+        key: true,
+        name: true,
+        permissions: { select: { permission: { select: { key: true } } } },
+      },
+    });
+    if (rows.length !== unique.length) {
+      throw new BadRequestException("Mindestens eine der gewählten Rollen gibt es nicht.");
+    }
+    return rows.map(toGrant);
+  }
+
+  /** Re-authentication for a privilege change, when the rules say it needs one. */
+  private requireReauthIf(needed: boolean, actor: AuthUser, token?: string): Promise<void> {
+    return this.reauth.requireIf(needed, actor.id, token);
+  }
 
   private async rolesInclude(roleIds: string[], key: string): Promise<boolean> {
     if (!roleIds.length) return false;
@@ -418,4 +564,22 @@ export class UsersService {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+const principal = principalOf;
+const ceiling = privilegeCeiling;
+
+function principalFrom(roles: RoleGrant[]): Principal {
+  return {
+    isSuperAdmin: roles.some((r) => r.key === SUPER_ADMIN_ROLE),
+    permissions: permissionsOf(roles),
+  };
+}
+
+function toGrant(role: {
+  key: string;
+  name: string;
+  permissions: { permission: { key: string } }[];
+}): RoleGrant {
+  return { key: role.key, name: role.name, permissions: role.permissions.map((p) => p.permission.key) };
 }

@@ -2,15 +2,73 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
 import { Checkbox, Field, Input, SearchInput, Select, Textarea } from "@/shared/ui/forms";
-import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
+import { ConfirmDialog, Modal, ReauthenticationDialog } from "@/shared/ui/overlays";
 import { type Column, DataView } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
 import { UserMfaRoute } from "@/features/mfa";
 import { UserSessionsRoute } from "@/features/sessions";
+import { ApiError } from "@/core/api";
 import { api, type RoleRow, type UserRow } from "../lib/api";
 import { authRepository, useAuth } from "@/core/auth";
 import { useDebounced, useMutation } from "@/shared/hooks";
 import { useAsync } from "../lib/useAsync";
+
+/* ================================================================== */
+/* Privilege changes                                                   */
+/* ================================================================== */
+
+/**
+ * "Prove it again, then I'll do it" — for the privilege changes on this page.
+ *
+ * Granting privileged permissions (user administration, settings, restore,
+ * publishing …) needs the actor's password again; granting Viewer does not.
+ * The rule lives on the server (`privilege.rules.ts`), and this page does not
+ * copy it: it submits, and when the answer is `reauth_required` it opens the
+ * password dialog and repeats the same call with the window it produced.
+ *
+ * `intercept` returns true when it has taken the error over, so a caller's
+ * `catch` reads `if (reauth.intercept(err, retry)) return;` and handles
+ * everything else as before.
+ */
+function useReauthRetry() {
+  const { user: me } = useAuth();
+  const [pending, setPending] = useState<{
+    message: string;
+    retry: (token: string) => Promise<void>;
+  } | null>(null);
+
+  function intercept(err: unknown, retry: (token: string) => Promise<void>): boolean {
+    if (err instanceof ApiError && err.code === "reauth_required") {
+      setPending({ message: err.message, retry });
+      return true;
+    }
+    return false;
+  }
+
+  const dialog = (
+    <ReauthenticationDialog
+      open={Boolean(pending)}
+      onClose={() => setPending(null)}
+      authenticate={authRepository.reauthenticate}
+      // The *caller's* factor, as on the MFA reset — see `UserMfaPanel`.
+      requiresCode={Boolean(me?.mfaEnabled)}
+      title="Rechtevergabe bestätigen"
+      confirmLabel="Bestätigen und speichern"
+      description="Diese Änderung vergibt weitreichende Rechte."
+      message={pending?.message}
+      onConfirmed={async (token) => {
+        const job = pending;
+        if (job) await job.retry(token);
+      }}
+    />
+  );
+
+  return { intercept, dialog };
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : "Das hat nicht geklappt.";
+}
 
 /* ================================================================== */
 /* Users                                                               */
@@ -35,6 +93,14 @@ export function UsersPage() {
 
   const remove = useMutation(api.deleteUser);
   const sendReset = useMutation(api.sendUserReset);
+
+  /*
+    Whether a row's account holds more than the reader does — the server's
+    `refuseAdminister`, read off its `grantable` flags rather than copied.
+    Such an account gets no reset-link or delete button: both would 403.
+  */
+  const notGrantable = new Set((roles.data ?? []).filter((r) => r.grantable === false).map((r) => r.id));
+  const above = (r: UserRow) => r.id !== me?.id && r.roles.some((x) => notGrantable.has(x.role.id));
 
   const columns: Column<UserRow>[] = [
     {
@@ -124,7 +190,7 @@ export function UsersPage() {
       className: "w-px",
       render: (r) => (
         <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-          {can("user.update") ? (
+          {can("user.update") && !above(r) ? (
             <Button
               size="sm"
               variant="ghost"
@@ -137,7 +203,7 @@ export function UsersPage() {
               Passwortlink
             </Button>
           ) : null}
-          {can("user.delete") && r.id !== me?.id ? (
+          {can("user.delete") && r.id !== me?.id && !above(r) ? (
             <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(r)}>
               Löschen
             </Button>
@@ -284,16 +350,50 @@ function InviteDialog({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [roleIds, setRoleIds] = useState<string[]>([]);
-  const invite = useMutation(api.inviteUser);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fields, setFields] = useState<Record<string, string[]>>({});
+  const reauth = useReauthRetry();
 
   useEffect(() => {
     if (open) {
       setEmail("");
       setName("");
       setRoleIds([]);
-      invite.reset();
+      setError(null);
+      setFields({});
     }
   }, [open]);
+
+  /*
+    Direct rather than through `useMutation`: that hook turns an error into a
+    string, and the one error this needs to recognise — `reauth_required` —
+    is identified by its code. A retry with a window throws into the password
+    dialog, which shows the message itself.
+  */
+  async function submit(token?: string) {
+    if (token) {
+      await api.inviteUser(email, name, roleIds, token);
+      onDone();
+      onClose();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setFields({});
+    try {
+      await api.inviteUser(email, name, roleIds);
+      onDone();
+      onClose();
+    } catch (err) {
+      if (reauth.intercept(err, submit)) return;
+      setError(messageOf(err));
+      if (err instanceof ApiError) setFields(err.fields ?? {});
+    } finally {
+      setBusy(false);
+    }
+  }
+  const invite = { busy, error, fields };
 
   return (
     <Modal
@@ -311,13 +411,7 @@ function InviteDialog({
             variant="primary"
             busy={invite.busy}
             disabled={!email || !name || !roleIds.length}
-            onClick={async () => {
-              const created = await invite.run(email, name, roleIds);
-              if (created) {
-                onDone();
-                onClose();
-              }
-            }}
+            onClick={() => void submit()}
           >
             Einladen
           </Button>
@@ -353,6 +447,7 @@ function InviteDialog({
           </p>
         ) : null}
       </div>
+      {reauth.dialog}
     </Modal>
   );
 }
@@ -372,22 +467,66 @@ function EditUserDialog({
   // sessions panel below signs the administrator out of their *own* account
   // when they end the session they are using, and `reload()` on its own reads
   // like reloading the dialog.
-  const { can, reload: reloadSession } = useAuth();
+  const { can, user: me, reload: reloadSession } = useAuth();
   const [roleIds, setRoleIds] = useState<string[]>([]);
   const [status, setStatus] = useState<UserRow["status"]>("ACTIVE");
-  const setRolesM = useMutation(api.setUserRoles);
-  const updateM = useMutation(api.updateUser);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reauth = useReauthRetry();
 
   useEffect(() => {
     if (user) {
       setRoleIds(user.roles.map((r) => r.role.id));
       setStatus(user.status);
+      setError(null);
     }
   }, [user?.id]);
 
   if (!user) return null;
-  const busy = setRolesM.busy || updateM.busy;
-  const error = setRolesM.error ?? updateM.error;
+
+  /*
+    An account holding a role the reader may not hand out holds more than the
+    reader does, and the server refuses every administrative act on it —
+    status, roles, reset link, sessions (`refuseAdminister`). Saying so here
+    beats a form that fills in and then 403s. Derived from the server's own
+    `grantable` flag, so the page carries no copy of the rule. One's own
+    account is exempt, as it is on the server.
+  */
+  const grantable = new Map(roles.map((r) => [r.id, r.grantable !== false]));
+  const above =
+    user.id !== me?.id && user.roles.some((r) => grantable.get(r.role.id) === false);
+
+  const rolesChanged =
+    roleIds.slice().sort().join() !== user.roles.map((r) => r.role.id).sort().join();
+
+  async function saveRoles(token?: string) {
+    await api.setUserRoles(user!.id, roleIds, token);
+    onDone();
+    onClose();
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (status !== user!.status) await api.updateUser(user!.id, { status });
+      if (rolesChanged) {
+        try {
+          await saveRoles();
+        } catch (err) {
+          if (reauth.intercept(err, saveRoles)) return;
+          throw err;
+        }
+        return;
+      }
+      onDone();
+      onClose();
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <Modal
@@ -401,32 +540,21 @@ function EditUserDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button
-            variant="primary"
-            busy={busy}
-            onClick={async () => {
-              if (status !== user.status) {
-                const ok = await updateM.run(user.id, { status });
-                if (!ok) return;
-              }
-              const changed =
-                roleIds.slice().sort().join() !==
-                user.roles.map((r) => r.role.id).sort().join();
-              if (changed) {
-                const ok = await setRolesM.run(user.id, roleIds);
-                if (!ok) return;
-              }
-              onDone();
-              onClose();
-            }}
-          >
+          <Button variant="primary" busy={busy} disabled={above} onClick={() => void save()}>
             Speichern
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-5">
-        {can("user.update") ? (
+        {above ? (
+          <p className="rounded-md bg-surface-2 px-4 py-3 text-[13px] leading-relaxed text-muted">
+            Dieses Konto hat Rechte, die Sie selbst nicht besitzen. Status und Rollen kann nur
+            ändern, wer mindestens dieselben Rechte hat.
+          </p>
+        ) : null}
+
+        {can("user.update") && !above ? (
           <Field
             label="Status"
             htmlFor="user-status"
@@ -444,7 +572,7 @@ function EditUserDialog({
           </Field>
         ) : null}
 
-        {can("user.assign") ? (
+        {can("user.assign") && !above ? (
           <RolePicker roles={roles} selected={roleIds} onChange={setRoleIds} />
         ) : null}
 
@@ -470,7 +598,7 @@ function EditUserDialog({
               userId={user.id}
               userName={user.name}
               enabled={user.mfaEnabled}
-              canReset={can("user.resetMfa")}
+              canReset={can("user.resetMfa") && !above}
               onReset={onDone}
             />
           </Suspense>
@@ -495,7 +623,7 @@ function EditUserDialog({
               <UserSessionsRoute
                 userId={user.id}
                 userName={user.name}
-                canRevoke={can("user.revokeSessions")}
+                canRevoke={can("user.revokeSessions") && !above}
                 onSelfSignedOut={() => void authRepository.logout().then(reloadSession)}
               />
             </Suspense>
@@ -508,6 +636,7 @@ function EditUserDialog({
           </p>
         ) : null}
       </div>
+      {reauth.dialog}
     </Modal>
   );
 }
@@ -521,22 +650,35 @@ function RolePicker({
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
+  /*
+    Only roles the reader may hand out — the server's `grantable`, computed by
+    the rule it enforces. A role already held that the reader could not grant
+    stays visible but locked, so the list does not misreport what the account
+    has. Hiding is the courtesy; `PUT /users/:id/roles` refuses regardless.
+  */
+  const offered = roles.filter((r) => r.grantable !== false || selected.includes(r.id));
   return (
     <fieldset className="flex flex-col gap-2.5">
       <legend className="field-label">Rollen</legend>
       <div className="flex flex-col gap-2.5 rounded-md bg-surface-2/50 p-4 ring-1 ring-line">
-        {roles.map((role) => (
+        {offered.map((role) => (
           <Checkbox
             key={role.id}
             label={role.name}
             hint={role.description ?? undefined}
             checked={selected.includes(role.id)}
+            disabled={role.grantable === false}
             onChange={(on) =>
               onChange(on ? [...selected, role.id] : selected.filter((id) => id !== role.id))
             }
           />
         ))}
       </div>
+      {offered.length < roles.length ? (
+        <p className="text-[12px] leading-relaxed text-muted">
+          Rollen mit Rechten, die Sie selbst nicht besitzen, sind nicht aufgeführt.
+        </p>
+      ) : null}
     </fieldset>
   );
 }
@@ -605,12 +747,17 @@ export function RolesPage() {
                     {role._count?.users ?? 0} Person(en)
                   </span>
                   <div className="flex gap-1">
-                    {can("role.update") && role.key !== "super_admin" ? (
+                    {/*
+                      A role holding more than the reader is above them — the
+                      server's `refuseRoleEdit`, which is the same containment
+                      `grantable` reports.
+                    */}
+                    {can("role.update") && role.key !== "super_admin" && role.grantable !== false ? (
                       <Button size="sm" variant="ghost" onClick={() => setEditing(role)}>
                         Bearbeiten
                       </Button>
                     ) : null}
-                    {can("role.delete") && !role.isSystem ? (
+                    {can("role.delete") && !role.isSystem && role.grantable !== false ? (
                       <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(role)}>
                         Löschen
                       </Button>
@@ -677,9 +824,11 @@ function RoleDialog({
   const [key, setKey] = useState("");
   const [description, setDescription] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
-
-  const create = useMutation(api.createRole);
-  const update = useMutation(api.updateRole);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fields, setFields] = useState<Record<string, string[]>>({});
+  const reauth = useReauthRetry();
+  const { can } = useAuth();
 
   useEffect(() => {
     if (role) {
@@ -693,15 +842,46 @@ function RoleDialog({
       setDescription("");
       setSelected([]);
     }
+    setError(null);
+    setFields({});
   }, [role?.id, creating]);
 
   const open = Boolean(role) || creating;
-  const busy = create.busy || update.busy;
-  const error = create.error ?? update.error;
+  const create = { fields };
 
   const total = useMemo(() => groups.reduce((n, g) => n + g.permissions.length, 0), [groups]);
 
   if (!open) return null;
+
+  async function persist(token?: string) {
+    if (creating) {
+      await api.createRole({ key, name, description, permissionIds: selected, reauthToken: token });
+    } else {
+      await api.updateRole(role!.id, {
+        name,
+        description,
+        permissionIds: selected,
+        reauthToken: token,
+      });
+    }
+    onDone();
+    onClose();
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    setFields({});
+    try {
+      await persist();
+    } catch (err) {
+      if (reauth.intercept(err, persist)) return;
+      setError(messageOf(err));
+      if (err instanceof ApiError) setFields(err.fields ?? {});
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <Modal
@@ -720,15 +900,7 @@ function RoleDialog({
             variant="primary"
             busy={busy}
             disabled={!name || (creating && !key)}
-            onClick={async () => {
-              const ok = creating
-                ? await create.run({ key, name, description, permissionIds: selected })
-                : await update.run(role!.id, { name, description, permissionIds: selected });
-              if (ok) {
-                onDone();
-                onClose();
-              }
-            }}
+            onClick={() => void save()}
           >
             Speichern
           </Button>
@@ -769,8 +941,13 @@ function RoleDialog({
 
         <div className="flex flex-col gap-4">
           {groups.map((group) => {
-            const ids = group.permissions.map((p) => p.id);
-            const all = ids.every((id) => selected.includes(id));
+            /*
+              Only keys the reader holds are toggleable — a role cannot be
+              given what its editor lacks (`refusePermissionGrant`). The rest
+              stay visible, so the list still says what the role contains.
+            */
+            const ids = group.permissions.filter((p) => can(p.key)).map((p) => p.id);
+            const all = ids.length > 0 && ids.every((id) => selected.includes(id));
             return (
               <fieldset key={group.category} className="rounded-md bg-surface-2/50 p-4 ring-1 ring-line">
                 <legend className="field-label px-1">{group.category}</legend>
@@ -796,6 +973,7 @@ function RoleDialog({
                       label={p.description ?? p.key}
                       hint={p.key}
                       checked={selected.includes(p.id)}
+                      disabled={!can(p.key)}
                       onChange={(on) =>
                         setSelected(on ? [...selected, p.id] : selected.filter((id) => id !== p.id))
                       }
@@ -813,6 +991,7 @@ function RoleDialog({
           </p>
         ) : null}
       </div>
+      {reauth.dialog}
     </Modal>
   );
 }

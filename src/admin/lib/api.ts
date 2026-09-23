@@ -137,6 +137,12 @@ export type RoleRow = {
   rank: number;
   permissions: { permission: { id: string; key: string } }[];
   _count?: { users: number };
+  /**
+   * Whether **the signed-in user** may hand this role out, computed by the
+   * server with the same rule it enforces (`privilege.rules.ts`). A courtesy
+   * for the picker; the write path refuses regardless.
+   */
+  grantable?: boolean;
 };
 
 export type PermissionGroup = {
@@ -381,21 +387,33 @@ export const api = {
   users: (query: Record<string, string | number | undefined>) =>
     request<Paginated<UserRow>>("/users", { query }),
   user: (id: string) => request<UserRow>(`/users/${id}`),
-  inviteUser: (email: string, name: string, roleIds: string[]) =>
-    request<UserRow>("/users", { body: { email, name, roleIds } }),
+  /*
+    `reauthToken` is sent only when the server has asked for it: a grant of
+    privileged permissions answers `reauth_required`, the page opens the
+    password dialog, and the call is repeated with the window it produced.
+  */
+  inviteUser: (email: string, name: string, roleIds: string[], reauthToken?: string) =>
+    request<UserRow>("/users", { body: { email, name, roleIds, reauthToken } }),
   updateUser: (id: string, body: Partial<UserRow>) =>
     request<UserRow>(`/users/${id}`, { method: "PATCH", body }),
-  setUserRoles: (id: string, roleIds: string[]) =>
-    request<UserRow>(`/users/${id}/roles`, { method: "PUT", body: { roleIds } }),
+  setUserRoles: (id: string, roleIds: string[], reauthToken?: string) =>
+    request<UserRow>(`/users/${id}/roles`, { method: "PUT", body: { roleIds, reauthToken } }),
   deleteUser: (id: string) => request<void>(`/users/${id}`, { method: "DELETE" }),
   sendUserReset: (id: string) =>
     request<{ message: string }>(`/users/${id}/send-password-reset`, { method: "POST" }),
   roles: () => request<RoleRow[]>("/roles"),
   role: (id: string) => request<RoleRow>(`/roles/${id}`),
-  createRole: (body: { key: string; name: string; description?: string; permissionIds: string[] }) =>
-    request<RoleRow>("/roles", { body }),
-  updateRole: (id: string, body: { name?: string; description?: string; permissionIds?: string[] }) =>
-    request<RoleRow>(`/roles/${id}`, { method: "PATCH", body }),
+  createRole: (body: {
+    key: string;
+    name: string;
+    description?: string;
+    permissionIds: string[];
+    reauthToken?: string;
+  }) => request<RoleRow>("/roles", { body }),
+  updateRole: (
+    id: string,
+    body: { name?: string; description?: string; permissionIds?: string[]; reauthToken?: string },
+  ) => request<RoleRow>(`/roles/${id}`, { method: "PATCH", body }),
   deleteRole: (id: string) => request<void>(`/roles/${id}`, { method: "DELETE" }),
   permissions: () => request<PermissionGroup[]>("/permissions"),
 

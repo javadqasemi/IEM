@@ -31,12 +31,16 @@ export class CreateRoleDto {
   @IsString() @MinLength(2) @MaxLength(80) name!: string;
   @IsOptional() @IsString() @MaxLength(400) description?: string;
   @IsArray() @IsString({ each: true }) permissionIds!: string[];
+  /** Required when the role would carry privileged permissions — see `privilege.rules.ts`. */
+  @IsOptional() @IsString() @MaxLength(256) reauthToken?: string;
 }
 
 export class UpdateRoleDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(80) name?: string;
   @IsOptional() @IsString() @MaxLength(400) description?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) permissionIds?: string[];
+  /** Required when the edit *adds* privileged permissions. */
+  @IsOptional() @IsString() @MaxLength(256) reauthToken?: string;
 }
 
 @Controller()
@@ -55,8 +59,8 @@ export class RbacController {
 
   @Get("roles")
   @RequirePermissions("role.read")
-  roles() {
-    return this.rbac.listRoles();
+  roles(@CurrentUser() user: AuthUser) {
+    return this.rbac.listRoles(user);
   }
 
   @Get("roles/:id")

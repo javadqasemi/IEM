@@ -45,6 +45,7 @@ export function ReauthenticationDialog({
   message,
   confirmLabel = "Bestätigen",
   requiresCode = false,
+  description = "Dieser Schritt ändert eine Sicherheitseinstellung Ihres Kontos.",
 }: {
   open: boolean;
   onClose: () => void;
@@ -60,6 +61,12 @@ export function ReauthenticationDialog({
   message?: ReactNode;
   confirmLabel?: string;
   requiresCode?: boolean;
+  /**
+   * The line under the title. The default was the only text for a while and
+   * was wrong everywhere but the caller's own MFA card — a backup restore or
+   * a role grant does not change a setting of *your* account.
+   */
+  description?: string;
 }) {
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -122,7 +129,7 @@ export function ReauthenticationDialog({
       title={title}
       size="sm"
       busy={busy}
-      description="Dieser Schritt ändert eine Sicherheitseinstellung Ihres Kontos."
+      description={description}
     >
       {/*
         A real `<form>`, so Enter submits.
