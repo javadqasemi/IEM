@@ -27,7 +27,104 @@ nginx::install() {
 
   run systemctl enable nginx
   nginx::harden_defaults
+  nginx::write_header_snippets
   nginx::write_site
+}
+
+# Where the header snippets live. A variable so the verification harness in
+# deploy/test can render the configuration into a scratch directory.
+NGINX_SNIPPETS_DIR="${NGINX_SNIPPETS_DIR:-/etc/nginx/snippets}"
+
+# The security headers, written once and included everywhere.
+#
+# **Why snippets rather than `add_header` at server level.** nginx inherits
+# `add_header` from the enclosing block *only if the inner block declares none
+# of its own*. Every location below that sets `Cache-Control` therefore used to
+# drop the whole set — and those locations are exactly `/index.html`,
+# `/admin.html` and `/stelle.html`, so the documents themselves were served with
+# no CSP, no frame protection, no nosniff and no referrer policy, while the
+# server-level block read as though they had them. `docs/COMPLETE_APPLICATION_AUDIT.md`
+# SEC-R5. The rule now is: **every block that says `add_header` also says
+# `include`**, and `deploy/test/nginx-headers.test.mjs` fails if one does not.
+#
+# Three files, because two kinds of response need different policies:
+#
+#   iem-headers-base.conf   nosniff, frame, referrer, permissions, COOP, HSTS
+#   iem-headers-site.conf   base + the site's CSP          (documents, assets)
+#   iem-headers-media.conf  base + a sandboxing CSP        (uploaded files)
+nginx::write_header_snippets() {
+  mkdir -p "$NGINX_SNIPPETS_DIR"
+
+  cat >"$NGINX_SNIPPETS_DIR/iem-headers-base.conf" <<'EOF'
+# Managed by the IEM installer — see deploy/lib/nginx.sh. Do not edit here.
+#
+# `always` so the headers are present on error responses too: a 404 or a 502
+# without frame protection is still a framable page.
+add_header X-Content-Type-Options "nosniff" always;
+# Kept beside `frame-ancestors` for browsers that predate CSP level 2; the CSP
+# is the authoritative control. SAMEORIGIN, not DENY, because the dashboard's
+# "Website bearbeiten" embeds the public site from the same origin.
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+add_header Cross-Origin-Opener-Policy "same-origin" always;
+# HSTS, once a certificate exists — ssl.sh writes this file. A glob, so the
+# include is a no-op on an HTTP-only installation rather than an error.
+include /etc/nginx/snippets/iem-hsts.conf*;
+EOF
+
+  cat >"$NGINX_SNIPPETS_DIR/iem-headers-site.conf" <<'EOF'
+# Managed by the IEM installer — see deploy/lib/nginx.sh. Do not edit here.
+include /etc/nginx/snippets/iem-headers-base.conf;
+
+# Content-Security-Policy for the site and the dashboard.
+#
+# 'unsafe-inline' for styles is required: React sets inline styles, and the
+# site uses them for the social buttons' brand colours and the 3D canvas.
+# Scripts do NOT get it — every script is a bundled file.
+#
+# fonts.googleapis.com / fonts.gstatic.com are needed by index.html. Both can
+# be dropped once the fonts are self-hosted, which is worth doing for privacy
+# under the revDSG as well as for this header.
+#
+# blob: and data: in img-src are for the 3D scene's canvas readback and the
+# dashboard's image previews. `frame-ancestors 'self'` is what keeps the
+# dashboard out of an attacker's frame.
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'" always;
+EOF
+
+  cat >"$NGINX_SNIPPETS_DIR/iem-headers-media.conf" <<'EOF'
+# Managed by the IEM installer — see deploy/lib/nginx.sh. Do not edit here.
+include /etc/nginx/snippets/iem-headers-base.conf;
+
+# Uploaded files are rendered inline (the site shows them as images), so what
+# neutralises an SVG carrying <script> is this policy, not a download header:
+# `sandbox` puts the document in an opaque origin, away from the refresh
+# cookie, and `default-src 'none'` stops script running at all. The same
+# header `server/src/main.ts` sends when the API serves media itself.
+add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox" always;
+EOF
+
+  # The snippets name each other by absolute path; keep that true when the
+  # harness renders elsewhere.
+  if [[ "$NGINX_SNIPPETS_DIR" != "/etc/nginx/snippets" ]]; then
+    local f
+    for f in "$NGINX_SNIPPETS_DIR"/iem-headers-*.conf; do
+      nginx::rewrite_snippet_paths "$f"
+    done
+  fi
+
+  log::ok "Sicherheits-Header als Snippets geschrieben"
+}
+
+# Pure-bash replacement of the snippet directory inside a file, so the harness
+# does not depend on sed being present.
+nginx::rewrite_snippet_paths() {
+  local file="$1" content line out=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    out+="${line//\/etc\/nginx\/snippets/$NGINX_SNIPPETS_DIR}"$'\n'
+  done <"$file"
+  printf '%s' "$out" >"$file"
 }
 
 # Global settings that belong to the server rather than to this site.
@@ -96,11 +193,23 @@ EOF
 nginx::write_site() {
   local conf="/etc/nginx/sites-available/${NGINX_SITE}"
 
+  nginx::site_config >"$conf"
+
+  ln -sfn "$conf" "/etc/nginx/sites-enabled/${NGINX_SITE}"
+  mkdir -p /var/www/html
+
+  nginx::test_and_reload
+  log::ok "Site ${CFG_DOMAIN} konfiguriert (HTTP)"
+}
+
+# The site's server block, printed rather than written, so the verification
+# harness in deploy/test can render exactly what an installation gets.
+nginx::site_config() {
   # HTTP only at this stage. Certbot rewrites this file to add the TLS server
   # block once it has a certificate — asking for HTTPS config before the
   # certificate exists gives an Nginx that cannot start, which then prevents
   # the ACME challenge from being served at all.
-  cat >"$conf" <<EOF
+  cat <<EOF
 # ${CFG_COMPANY} — von install.sh erzeugt. Änderungen werden überschrieben.
 # Dauerhafte Anpassungen gehören nach ${CONFIG_DIR}/nginx-extra.conf.
 
@@ -127,12 +236,6 @@ server {
 $(nginx::common_body)
 }
 EOF
-
-  ln -sfn "$conf" "/etc/nginx/sites-enabled/${NGINX_SITE}"
-  mkdir -p /var/www/html
-
-  nginx::test_and_reload
-  log::ok "Site ${CFG_DOMAIN} konfiguriert (HTTP)"
 }
 
 # The parts shared by the HTTP and HTTPS server blocks.
@@ -141,27 +244,10 @@ nginx::common_body() {
     limit_conn iem_conn 50;
 
     # ---- Security headers ----
-    # `always` so they are present on error responses too — a 404 or a 500
-    # without a frame-ancestors policy is still a framable page.
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
-    add_header Cross-Origin-Opener-Policy "same-origin" always;
-
-    # Content-Security-Policy.
-    #
-    # 'unsafe-inline' for styles is required: React sets inline styles, and the
-    # site uses them for the social buttons' brand colours and the 3D canvas.
-    # Scripts do NOT get it — every script is a bundled file.
-    #
-    # fonts.googleapis.com / fonts.gstatic.com are needed by index.html. Both
-    # can be dropped once the fonts are self-hosted, which is worth doing for
-    # privacy under the revDSG as well as for this header.
-    #
-    # blob: and data: in img-src are for the 3D scene's canvas readback and the
-    # dashboard's image previews.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'" always;
+    # From the snippet, here AND in every location below that sets a header of
+    # its own — nginx drops inherited add_header lines in any block that
+    # declares one. See nginx::write_header_snippets.
+    include ${NGINX_SNIPPETS_DIR}/iem-headers-site.conf;
 
     # ---- API ----
     location /api/ {
@@ -208,33 +294,38 @@ nginx::common_body() {
     }
 
     # ---- Uploaded media ----
-    location /media/ {
-        alias ${DATA_DIR}/media/;
+    #
+    # **`^~`, and it is load-bearing.** A plain prefix location loses to any
+    # matching regex location, and the image regex further down matches every
+    # upload (`/media/2026/x.jpg` ends in `.jpg`) — so nginx served uploads from
+    # `dist/` instead of the data directory, and every uploaded image was a 404
+    # in production. `^~` makes this prefix final.
+    #
+    # **A positive allowlist, the same shape `server/src/main.ts` allows:**
+    # `/media/<year>/<name>.<ext>` and nothing else. Job-application dossiers
+    # live under the same root (`bewerbungen/<year>/…`) and must never be
+    # served; they do not match, so they are a 404 here as they are in Node —
+    # matching the one legitimate shape leaves no prefix to walk around. nginx
+    # matches against the decoded, normalised URI, so `%62ewerbungen` is
+    # `bewerbungen` by the time this is asked.
+    location ^~ /media/ {
+        root ${DATA_DIR};
 
-        # Job-application dossiers live under this root but must never be
-        # served. They are personal data and are only reachable through the
-        # API's permission-checked download route. Denying the prefix here is
-        # the belt to the directory mode's braces.
-        location ~ ^/media/bewerbungen/ { deny all; }
+        location ~ "^/media/[0-9]{4}/[A-Za-z0-9_-][A-Za-z0-9._-]*\$" {
+            include ${NGINX_SNIPPETS_DIR}/iem-headers-media.conf;
+            expires 30d;
+            add_header Cache-Control "public, max-age=2592000";
+            try_files \$uri =404;
+        }
 
-        expires 30d;
-        add_header Cache-Control "public, max-age=2592000";
-        add_header X-Content-Type-Options "nosniff" always;
-
-        # An uploaded SVG is an XML document that can carry script. Served
-        # from the same origin it would run with the site's privileges, so
-        # everything under /media is forced to download rather than render.
-        add_header Content-Disposition "inline" always;
-        types { } default_type application/octet-stream;
-        include /etc/nginx/mime.types;
-
-        try_files \$uri =404;
+        return 404;
     }
 
     # ---- Static assets ----
     # Content-hashed by Vite, so the filename changes whenever the bytes do.
     # That is what makes a one-year immutable cache correct rather than risky.
     location /assets/ {
+        include ${NGINX_SNIPPETS_DIR}/iem-headers-site.conf;
         expires 1y;
         add_header Cache-Control "public, max-age=31536000, immutable";
         access_log off;
@@ -242,6 +333,7 @@ nginx::common_body() {
     }
 
     location ~* \\.(?:jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?)\$ {
+        include ${NGINX_SNIPPETS_DIR}/iem-headers-site.conf;
         expires 30d;
         add_header Cache-Control "public, max-age=2592000";
         access_log off;
@@ -249,6 +341,7 @@ nginx::common_body() {
 
     # The 3D scene: 656 KB of JSON, content-hashed like the assets.
     location ~* \\.json\$ {
+        include ${NGINX_SNIPPETS_DIR}/iem-headers-site.conf;
         expires 7d;
         add_header Cache-Control "public, max-age=604800";
     }
@@ -257,9 +350,13 @@ nginx::common_body() {
     # Never cached. These are the three entry points, and each one carries the
     # hashed asset names — a cached index.html is how a deployment serves the
     # old bundle for an hour after an update.
-    location = /index.html  { add_header Cache-Control "no-cache, must-revalidate" always; }
-    location = /admin.html  { add_header Cache-Control "no-cache, must-revalidate" always; }
-    location = /stelle.html { add_header Cache-Control "no-cache, must-revalidate" always; }
+    #
+    # The include is the whole point of these three lines now: the documents
+    # are what a CSP and frame-ancestors protect, and without it this block's
+    # own add_header silently discarded every inherited one (SEC-R5).
+    location = /index.html  { include ${NGINX_SNIPPETS_DIR}/iem-headers-site.conf; add_header Cache-Control "no-cache, must-revalidate" always; }
+    location = /admin.html  { include ${NGINX_SNIPPETS_DIR}/iem-headers-site.conf; add_header Cache-Control "no-cache, must-revalidate" always; }
+    location = /stelle.html { include ${NGINX_SNIPPETS_DIR}/iem-headers-site.conf; add_header Cache-Control "no-cache, must-revalidate" always; }
 
     # ---- Routing ----
     # There is no client-side router on the public site — sections are anchors

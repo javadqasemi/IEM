@@ -136,13 +136,15 @@ export default tseslint.config(
       Never bundled and never shipped — `scripts/fetch-mailpit.mjs` fetches the
       development SMTP catcher `e2e/mail.spec.ts` asserts against.
     */
-    files: ["scripts/**/*.mjs", "scripts/**/*.js"],
+    files: ["scripts/**/*.mjs", "scripts/**/*.js", "deploy/test/**/*.mjs"],
     languageOptions: {
       globals: {
         process: "readonly",
         console: "readonly",
         Buffer: "readonly",
         fetch: "readonly",
+        // `deploy/test/nginx-headers.mjs` waits for nginx to start and stop.
+        setTimeout: "readonly",
       },
     },
   },

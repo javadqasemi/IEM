@@ -10,6 +10,7 @@ import type { NextFunction, Request, Response } from "express";
 import { resolve } from "node:path";
 import { AppModule } from "./app.module";
 import { PrismaService } from "./common/prisma.service";
+import { listenHost, proxyTrustSetting } from "./common/proxy-trust";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -241,10 +242,17 @@ async function bootstrap() {
    * answers. Testing with `127.0.0.1` hits the right server and hides it
    * completely. Binding both families turns that silent mix-up into an
    * ordinary `EADDRINUSE` at startup.
+   *
+   * **Unless `HOST` is set**, which production does: the installer writes
+   * `HOST=127.0.0.1` because nginx is the API's only client, and until now
+   * nothing read it, so the API listened on every interface with the
+   * firewall as its only barrier (SEC-R22).
    */
   const port = Number(config.get("PORT") ?? 3100);
-  await app.listen(port);
-  logger.log(`IEM CMS API läuft auf Port ${port}`);
+  const host = listenHost(config.get<string>("HOST"));
+  if (host) await app.listen(port, host);
+  else await app.listen(port);
+  logger.log(`IEM CMS API läuft auf ${host ?? "allen Schnittstellen"}, Port ${port}`);
   logger.log(`Erlaubte Herkünfte: ${origins.join(", ")}`);
 }
 
@@ -312,13 +320,28 @@ function configureProxyTrust(
   logger: Logger,
 ): void {
   const raw = (config.get<string>("TRUST_PROXY") ?? "").trim();
-  if (!raw) {
-    logger.log("Kein Proxy konfiguriert — X-Forwarded-For wird ignoriert (korrekt).");
+  const value = proxyTrustSetting(raw);
+  if (value === null) {
+    if (config.get("NODE_ENV") === "production") {
+      /*
+        Not fatal — a deployment without a reverse proxy is legitimate — but
+        loud, because behind one it is the failure SEC-R2 describes: every
+        request arrives from the proxy's address, every rate limit becomes a
+        single bucket for the whole internet, and every IP in the audit log is
+        the proxy's. The installer writes `TRUST_PROXY=loopback`.
+      */
+      logger.warn(
+        "TRUST_PROXY ist nicht gesetzt. Hinter einem Reverse Proxy (Nginx) sieht die API " +
+          "dann jede Anfrage von dessen Adresse: Ratenbegrenzungen gelten für alle zusammen " +
+          "und das Audit-Log enthält keine echten Client-Adressen. Hinter Nginx auf demselben " +
+          "Rechner: TRUST_PROXY=loopback.",
+      );
+    } else {
+      logger.log("Kein Proxy konfiguriert — X-Forwarded-For wird ignoriert (korrekt).");
+    }
     return;
   }
 
-  const hops = Number(raw);
-  const value: unknown = Number.isInteger(hops) && hops >= 0 ? hops : raw.split(",").map((s) => s.trim());
   app.getHttpAdapter().getInstance().set("trust proxy", value);
   logger.log(`TRUST_PROXY=${raw} — X-Forwarded-For wird ausgewertet.`);
 }

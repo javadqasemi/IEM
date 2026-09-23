@@ -30,7 +30,8 @@ env::create_user() {
 
   local dir
   for dir in "$APP_DIR" "$DATA_DIR" "$DATA_DIR/media" "$DATA_DIR/media/bewerbungen" \
-             "$DATA_DIR/tmp" "$DATA_DIR/cache" "$LOG_DIR" "$BACKUP_DIR" "$CONFIG_DIR"; do
+             "$DATA_DIR/tmp" "$DATA_DIR/cache" "$DATA_DIR/backups" \
+             "$LOG_DIR" "$BACKUP_DIR" "$CONFIG_DIR"; do
     mkdir -p "$dir"
   done
 
@@ -43,6 +44,10 @@ env::create_user() {
   # a URL. They live under the media root but Nginx is configured not to serve
   # this prefix, and the mode keeps everyone but the app user out regardless.
   chmod 700 "$DATA_DIR/media/bewerbungen"
+
+  # The application's own backups hold the whole database and every dossier,
+  # unencrypted. Same mode as the dossiers.
+  chmod 700 "$DATA_DIR/backups"
 
   chown root:root "$BACKUP_DIR"
   chmod 700 "$BACKUP_DIR"
@@ -61,6 +66,10 @@ env::load_existing() {
   [[ -f "$CRED_FILE" ]] || return 0
   # shellcheck disable=SC1090
   . "$CRED_FILE"
+  # Parked under a second name so `generate_secrets` can rank the overrides
+  # file above them — see there.
+  IEM_KEEP_MFA_ENCRYPTION_KEY="${MFA_ENCRYPTION_KEY:-}"
+  IEM_KEEP_APP_SECRETS_ENCRYPTION_KEY="${APP_SECRETS_ENCRYPTION_KEY:-}"
   log::info "Bestehende Zugangsdaten übernommen"
 }
 
@@ -70,11 +79,48 @@ env::generate_secrets() {
   DB_PASSWORD="${DB_PASSWORD:-}"        # postgres.sh fills this if empty
   REDIS_PASSWORD="${REDIS_PASSWORD:-}"  # redis.sh fills this if empty
   JWT_ACCESS_SECRET="${JWT_ACCESS_SECRET:-$(secret::generate 64)}"
-  ENCRYPTION_KEY="${ENCRYPTION_KEY:-$(secret::generate 64)}"
-  SESSION_SECRET="${SESSION_SECRET:-$(secret::generate 64)}"
   INTERNAL_API_KEY="${INTERNAL_API_KEY:-$(secret::generate 48)}"
 
-  log::ok "Schlüssel erzeugt (64 Zeichen, /dev/urandom)"
+  # The two encryption keys the application actually reads (SEC-R3).
+  #
+  # This used to generate `ENCRYPTION_KEY` and `SESSION_SECRET`, which nothing
+  # in server/ reads, and not these — so on a default install every MFA route
+  # answered 503 and the SMTP password could not be stored. Two keys, not one,
+  # for the reason CLAUDE.md gives: losing the MFA key de-enrols every
+  # employee, losing the other costs a password somebody retypes, and tying
+  # them together would make rotating one after a leak destroy the other.
+  #
+  # **Never rotated by a re-run.** Values come, in order, from the operator's
+  # overrides (a key added by hand before the installer knew about it must be
+  # adopted, not replaced), then from $CRED_FILE, and only then generated. A
+  # new MFA key over an old database makes every stored second factor
+  # unreadable.
+  MFA_ENCRYPTION_KEY="$(env::from_overrides MFA_ENCRYPTION_KEY)"
+  MFA_ENCRYPTION_KEY="${MFA_ENCRYPTION_KEY:-${IEM_KEEP_MFA_ENCRYPTION_KEY:-}}"
+  MFA_ENCRYPTION_KEY="${MFA_ENCRYPTION_KEY:-$(secret::key32)}"
+  APP_SECRETS_ENCRYPTION_KEY="$(env::from_overrides APP_SECRETS_ENCRYPTION_KEY)"
+  APP_SECRETS_ENCRYPTION_KEY="${APP_SECRETS_ENCRYPTION_KEY:-${IEM_KEEP_APP_SECRETS_ENCRYPTION_KEY:-}}"
+  APP_SECRETS_ENCRYPTION_KEY="${APP_SECRETS_ENCRYPTION_KEY:-$(secret::key32)}"
+
+  # Values are never printed — only that they exist.
+  log::ok "Schlüssel erzeugt bzw. übernommen (/dev/urandom; Werte werden nicht angezeigt)"
+}
+
+# A variable's value from $CONFIG_DIR/overrides.env, or nothing.
+#
+# Read with a loop rather than by sourcing, so an overrides file with
+# unrelated shell in it is not executed here, and quotes around the value are
+# stripped the way dotenv strips them.
+env::from_overrides() {
+  local key="$1" file="$CONFIG_DIR/overrides.env" line value
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == "$key="* ]] || continue
+    value="${line#"$key="}"
+    value="${value%\"}"; value="${value#\"}"
+    value="${value%\'}"; value="${value#\'}"
+  done <"$file"
+  printf '%s' "${value:-}"
 }
 
 env::write_credentials() {
@@ -95,9 +141,14 @@ DB_USER='${DB_USER}'
 DB_PASSWORD='${DB_PASSWORD}'
 REDIS_PASSWORD='${REDIS_PASSWORD}'
 JWT_ACCESS_SECRET='${JWT_ACCESS_SECRET}'
-ENCRYPTION_KEY='${ENCRYPTION_KEY}'
-SESSION_SECRET='${SESSION_SECRET}'
 INTERNAL_API_KEY='${INTERNAL_API_KEY}'
+
+# Die beiden Verschlüsselungsschlüssel der Anwendung. Getrennt von den
+# Datenbank-Sicherungen aufbewahren: wer beides hat, kann die gespeicherten
+# Zweitfaktoren und das SMTP-Passwort entschlüsseln. Geht MFA_ENCRYPTION_KEY
+# verloren, müssen sich alle Zweitfaktoren neu einrichten.
+MFA_ENCRYPTION_KEY='${MFA_ENCRYPTION_KEY}'
+APP_SECRETS_ENCRYPTION_KEY='${APP_SECRETS_ENCRYPTION_KEY}'
 EOF
   chmod 600 "$CRED_FILE"
   chown root:root "$CRED_FILE"
@@ -131,13 +182,30 @@ REDIS_URL="redis://:${REDIS_PASSWORD}@127.0.0.1:6379/0"
 JWT_ACCESS_SECRET="${JWT_ACCESS_SECRET}"
 JWT_ACCESS_TTL="15m"
 REFRESH_TTL_DAYS="30"
-ENCRYPTION_KEY="${ENCRYPTION_KEY}"
-SESSION_SECRET="${SESSION_SECRET}"
+# 32 Byte hex. Ohne sie antworten alle MFA-Routen mit 503 und das
+# SMTP-Passwort lässt sich nicht speichern.
+MFA_ENCRYPTION_KEY="${MFA_ENCRYPTION_KEY}"
+APP_SECRETS_ENCRYPTION_KEY="${APP_SECRETS_ENCRYPTION_KEY}"
 
 # ---- HTTP ----
 # Nur auf dem Loopback: Nginx ist das einzige, was die API erreichen darf.
+# main.ts bindet an HOST, wenn es gesetzt ist.
 PORT="${APP_PORT}"
 HOST="127.0.0.1"
+
+# Nginx läuft auf demselben Rechner und ist der einzige Hop davor. 'loopback'
+# vertraut genau ihm: req.ip wird die Adresse, die Nginx in X-Forwarded-For
+# anhängt, und eine vom Client mitgeschickte Kopfzeile bleibt wirkungslos.
+# Ohne diese Zeile ist req.ip für jede Anfrage 127.0.0.1 — jede
+# Ratenbegrenzung wird ein einziger Topf für das ganze Internet und jede
+# IP im Audit-Log ist die des Proxys (SEC-R2).
+TRUST_PROXY="loopback"
+
+# ---- Sicherungen der Anwendung ----
+# Ausserhalb des Programmverzeichnisses, damit ein Update sie nicht mitnimmt,
+# und nur für ${APP_USER} lesbar. Die Betriebssicherung (backup.sh) liegt
+# getrennt unter ${BACKUP_DIR}.
+BACKUP_ROOT="${DATA_DIR}/backups"
 
 # Die API liegt hinter derselben Domain unter /api, also gibt es keine
 # fremde Herkunft — und damit auch kein CORS-Thema im Betrieb.

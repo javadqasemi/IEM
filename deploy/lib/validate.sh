@@ -212,18 +212,27 @@ validate::nginx() {
     check::fail "Nginx-Konfiguration" "fehlerhaft"
   fi
 
-  local headers
-  headers="$(curl -fsSI --max-time 10 -H "Host: $CFG_DOMAIN" "http://127.0.0.1/" 2>/dev/null || echo "")"
-  if printf '%s' "$headers" | grep -qi "x-content-type-options"; then
-    check::pass "Sicherheits-Header" "gesetzt"
-  else
-    check::warn "Sicherheits-Header" "nicht gefunden"
-  fi
-  if printf '%s' "$headers" | grep -qi "content-security-policy"; then
-    check::pass "Content-Security-Policy" "gesetzt"
-  else
-    check::warn "Content-Security-Policy" "nicht gefunden"
-  fi
+  # Every entry document, not only `/`: the documents are served from
+  # locations with their own add_header, which is where the headers used to be
+  # silently dropped (SEC-R5). A failure, not a warning — without them the
+  # dashboard can be framed by any site.
+  local entry headers missing name
+  for entry in "" "index.html" "admin.html" "stelle.html"; do
+    headers="$(curl -fsS -D - -o /dev/null --max-time 10 -H "Host: $CFG_DOMAIN" \
+      "http://127.0.0.1/${entry}" 2>/dev/null || echo "")"
+    missing=""
+    for name in content-security-policy x-frame-options x-content-type-options \
+                referrer-policy permissions-policy; do
+      printf '%s' "$headers" | grep -qi "^${name}:" || missing+=" ${name}"
+    done
+    printf '%s' "$headers" | grep -i '^content-security-policy:' | grep -q "frame-ancestors 'self'" \
+      || missing+=" frame-ancestors"
+    if [[ -z "$missing" ]]; then
+      check::pass "Header /${entry}" "CSP, frame-ancestors, nosniff, Referrer, Permissions"
+    else
+      check::fail "Header /${entry}" "fehlt:${missing}"
+    fi
+  done
 
   # Dossiers must not be reachable by URL.
   local code
@@ -347,6 +356,24 @@ validate::security() {
     check::pass "Rechte auf .env" "0600"
   else
     check::fail "Rechte auf .env" "$mode statt 600"
+  fi
+
+  # The settings the application needs behind Nginx and cannot guess (SEC-R2,
+  # SEC-R3). Checked by name and non-emptiness; values are never printed.
+  local var
+  for var in TRUST_PROXY MFA_ENCRYPTION_KEY APP_SECRETS_ENCRYPTION_KEY; do
+    if grep -qE "^${var}=\"?[^\"]+" "$APP_DIR/server/.env" 2>/dev/null; then
+      check::pass "Umgebung ${var}" "gesetzt"
+    else
+      check::fail "Umgebung ${var}" "fehlt in server/.env"
+    fi
+  done
+
+  # The API itself must listen on the loopback only; Nginx is its one client.
+  if ss -ltn 2>/dev/null | grep -E ":${APP_PORT}\b" | grep -qvE '127\.0\.0\.1:|\[::1\]:'; then
+    check::fail "API-Bindung" "Port ${APP_PORT} lauscht nicht nur auf localhost"
+  else
+    check::pass "API-Bindung" "nur localhost"
   fi
 
   # PostgreSQL and Redis must not be listening on a public interface.

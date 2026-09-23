@@ -31,6 +31,8 @@ ssl::install() {
   if ssl::has_certificate; then
     log::skip "Zertifikat für $CFG_DOMAIN besteht bereits"
     SSL_ACTIVE=1
+    ssl::write_hsts
+    nginx::test_and_reload
     ssl::verify
     ssl::configure_renewal
     return 0
@@ -114,9 +116,12 @@ ssl::harden() {
   # the domain into the browsers themselves. Six months is long enough to be
   # meaningful and short enough to recover from. Add `preload` only once the
   # certificate has renewed unattended at least twice.
-  if ! grep -q "Strict-Transport-Security" "$conf" 2>/dev/null; then
-    run sed -i "/listen 443 ssl/a\\    add_header Strict-Transport-Security \"max-age=15552000; includeSubDomains\" always;" "$conf"
-  fi
+  #
+  # Written into the header snippet rather than inserted at server level: a
+  # server-level add_header is dropped by every location that sets its own —
+  # the HTML documents included — so the old `sed` put HSTS precisely where it
+  # did not reach the pages that needed it (SEC-R5).
+  ssl::write_hsts
 
   # HTTP/2. Certbot writes `listen 443 ssl` and leaves it at that.
   if ! grep -q "http2" "$conf" 2>/dev/null; then
@@ -135,6 +140,16 @@ ssl::harden() {
 
   nginx::test_and_reload
   log::ok "HTTP/2, HSTS (180 Tage) und OCSP-Stapling aktiviert"
+}
+
+# HSTS, as the snippet `iem-headers-base.conf` includes (a glob, so its absence
+# on an HTTP-only install is not an error). Idempotent: rewritten each run.
+ssl::write_hsts() {
+  mkdir -p "${NGINX_SNIPPETS_DIR:-/etc/nginx/snippets}"
+  cat >"${NGINX_SNIPPETS_DIR:-/etc/nginx/snippets}/iem-hsts.conf" <<'EOF'
+# Managed by the IEM installer (deploy/lib/ssl.sh). Six months, no preload.
+add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+EOF
 }
 
 # Renewal, and the reload that makes a renewed certificate actually take effect.

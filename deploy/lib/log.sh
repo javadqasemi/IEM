@@ -182,6 +182,20 @@ secret::generate() {
   }
 }
 
+# A 256-bit key as the application's `KeyedCipher` reads it: exactly 32 random
+# bytes, hex-encoded (64 characters). Hex rather than base64 because hex is
+# unambiguous to `parseKey` — a base64 string can also look like hex — and it
+# needs no characters a shell or a dotenv file would reinterpret.
+#
+# `od` is POSIX and in coreutils' base set, so this works before the package
+# step, like `secret::generate`.
+secret::key32() {
+  local hex
+  hex="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')" || true
+  [[ ${#hex} -eq 64 ]] || die "Konnte keinen 256-Bit-Schlüssel aus /dev/urandom erzeugen."
+  printf '%s' "$hex"
+}
+
 # A password safe to embed in a URL and in a psql string literal — no quotes,
 # no backslashes, and nothing the shell or a connection string would reinterpret.
 secret::password() {
