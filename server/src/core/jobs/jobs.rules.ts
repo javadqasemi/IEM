@@ -71,9 +71,27 @@ export function isTerminal(status: JobStatus): boolean {
 /* ================================================================== */
 
 /**
- * Job types that must never be re-run from an operator's button.
+ * Job types that run **at most once** — never retried by the queue, never
+ * re-queued when stale, never re-run from an operator's button.
  *
  * ---
+ *
+ * ## It governs the queue, not only the button
+ *
+ * This list used to be consulted by `refuseRetry` alone, so it hid the
+ * operator's Retry button while the queue itself went on doing exactly what
+ * the button was hidden to prevent: `backup.restore` was enqueued with the
+ * default three attempts, `RestoreService.run` rethrew on failure, and a
+ * failed in-place restore was therefore **run again automatically, twice**,
+ * each time snapshotting the half-restored database as its "pre-restore"
+ * backup and running `pg_restore --clean` over it. `reclaimStale` would also
+ * have re-queued one that ran longer than thirty minutes.
+ * `docs/COMPLETE_APPLICATION_AUDIT.md` SEC-R4.
+ *
+ * Now `JobService` reads it in four places — `enqueue` forces one attempt,
+ * `fail` goes straight to `DEAD`, `retry` refuses, and `reclaimStale` marks a
+ * stale one `DEAD` rather than queuing it — so the property holds for rows
+ * enqueued before the fix as well, and for any caller that forgets to ask.
  *
  * ## Why this is a list and not a status check
  *
@@ -89,7 +107,17 @@ export function isTerminal(status: JobStatus): boolean {
  * restore deliberately, with its confirmation and its re-authentication. A
  * retry button would be a way around both.
  */
-export const NEVER_RETRYABLE: readonly string[] = ["backup.restore"] as const;
+export const NEVER_RETRYABLE: readonly JobName[] = ["backup.restore"] as const;
+
+/** Whether a job may run only once. See `NEVER_RETRYABLE`. */
+export function isSingleAttempt(name: string): boolean {
+  return (NEVER_RETRYABLE as readonly string[]).includes(name);
+}
+
+/** The error a stale single-attempt job is left with, instead of being re-queued. */
+export const STALE_SINGLE_ATTEMPT_ERROR =
+  "Abgebrochen: Der Arbeitsprozess hat sich nicht mehr gemeldet. Die Aufgabe wird nicht " +
+  "automatisch wiederholt — bitte den Zustand prüfen und bewusst neu starten.";
 
 export type JobCapabilities = {
   retryable: boolean;
@@ -132,7 +160,7 @@ export function jobCapabilities(job: CapabilityInput): JobCapabilities {
  * with a second outcome.
  */
 export function refuseRetry(job: CapabilityInput): string | null {
-  if (NEVER_RETRYABLE.includes(job.name)) {
+  if (isSingleAttempt(job.name)) {
     return (
       `„${job.name}“ lässt sich nicht per Knopfdruck wiederholen: die Aufgabe verändert ` +
       "Produktivdaten, und ein abgebrochener Lauf bedeutet nicht, dass nichts geschehen ist. " +

@@ -11,7 +11,13 @@
  * No Prisma, no clock it does not receive, no filesystem.
  */
 
-import type { BackupStatus, BackupTrigger, BackupType, VerificationStatus } from "@prisma/client";
+import type {
+  BackupStatus,
+  BackupTrigger,
+  BackupType,
+  RestoreStatus,
+  VerificationStatus,
+} from "@prisma/client";
 
 /* ================================================================== */
 /* Scheduling                                                          */
@@ -292,6 +298,19 @@ export function assessCompatibility(
     result: "INCOMPATIBLE",
     reason: "Die Sicherung ist neuer als die laufende Anwendung. Das ist eine manuelle Wiederherstellung.",
   };
+}
+
+/**
+ * Whether a restore run may be *executed* in its current status.
+ *
+ * `REQUESTED` only. A run in any other status has already been picked up —
+ * `RUNNING`/`VALIDATING` by a worker that may still be at it, `FAILED`/
+ * `ABORTED` after touching its target — and executing it again would replace
+ * a database whose state nobody has examined. `SUCCESS` is answered earlier
+ * as a no-op. The second lock behind `NEVER_RETRYABLE` (SEC-R4).
+ */
+export function mayRun(status: RestoreStatus): boolean {
+  return status === "REQUESTED";
 }
 
 /**

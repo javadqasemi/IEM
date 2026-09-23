@@ -257,11 +257,42 @@ test.describe("the guards refuse what they should", () => {
     test.skip(!run, "no successful backup to test against");
 
     for (const kind of ["../../../../etc/passwd", "..%2f..%2fetc%2fpasswd", "NOT_A_KIND"]) {
-      const res = await api.get(
+      const res = await api.post(
         `${API}/backups/${run.id}/artifacts/${encodeURIComponent(kind)}/download`,
+        { data: {} },
       );
       expect([400, 404], `kind=${kind}`).toContain(res.status());
     }
+  });
+
+  /**
+   * The download hands over the whole database and every CV, so it asks for
+   * the password again exactly as the restore does (SEC-2). Refused without a
+   * window and served with one — the second half is what proves the route
+   * still works as a download rather than only as a refusal.
+   */
+  test("an artifact download needs a re-authentication window", async () => {
+    const list = await (await api.get(`${API}/backups?status=SUCCESS&perPage=1`)).json();
+    const run = list.data.items[0];
+    test.skip(!run, "no successful backup to test against");
+
+    const refused = await api.post(`${API}/backups/${run.id}/artifacts/MANIFEST/download`, {
+      data: {},
+    });
+    expect(refused.status()).toBe(403);
+    expect((await refused.json()).code).toBe("reauth_required");
+
+    await spendMfa();
+    const reauth = await api.post(`${API}/auth/reauthenticate`, {
+      data: { password: ADMIN_PASSWORD },
+    });
+    const token = (await reauth.json()).data.token as string;
+
+    const served = await api.post(`${API}/backups/${run.id}/artifacts/MANIFEST/download`, {
+      data: { reauthToken: token },
+    });
+    expect(served.status(), await served.text()).toBe(200);
+    expect(served.headers()["content-type"]).toContain("application/octet-stream");
   });
 });
 

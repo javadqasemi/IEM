@@ -3,6 +3,7 @@ import type { BackupType } from "@prisma/client";
 import {
   RESTORE_CONFIRMATION,
   assessCompatibility,
+  mayRun,
   occurrenceKeyFor,
   planRetention,
   refuseConcurrent,
@@ -313,6 +314,18 @@ describe("what may be restored", () => {
 
   it("refuses an incompatible schema", () => {
     expect(refuseRestore({ ...ok, compatibility: "INCOMPATIBLE" })).not.toBeNull();
+  });
+});
+
+describe("a restore run executes once (SEC-R4)", () => {
+  it("runs only from REQUESTED", () => {
+    expect(mayRun("REQUESTED")).toBe(true);
+  });
+
+  it("never re-runs one that has already touched its target", () => {
+    for (const status of ["RUNNING", "VALIDATING", "FAILED", "ABORTED", "SUCCESS"] as const) {
+      expect(mayRun(status), status).toBe(false);
+    }
   });
 });
 

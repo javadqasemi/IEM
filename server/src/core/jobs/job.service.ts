@@ -3,6 +3,7 @@ import { JobStatus } from "@prisma/client";
 import { PrismaService } from "../../common/prisma.service";
 import { currentActor, correlationId } from "../context/request-context";
 import { backoffMs, type JobName, type JobPayloads } from "./catalogue";
+import { NEVER_RETRYABLE, STALE_SINGLE_ATTEMPT_ERROR, isSingleAttempt } from "./jobs.rules";
 
 export type JobHandler<N extends JobName = JobName> = (
   payload: JobPayloads[N],
@@ -92,7 +93,9 @@ export class JobService {
         name,
         payload: payload as object,
         runAfter: options.runAfter ?? new Date(),
-        maxAttempts: options.maxAttempts ?? 3,
+        // A single-attempt job cannot be given more, whatever the caller
+        // asks for — see `NEVER_RETRYABLE`.
+        maxAttempts: isSingleAttempt(name) ? 1 : (options.maxAttempts ?? 3),
         correlationId: correlationId(),
         actorId: actor?.id ?? null,
         actorEmail: actor?.email ?? null,
@@ -205,7 +208,10 @@ export class JobService {
     options: { permanent?: boolean } = {},
   ): Promise<JobStatus> {
     const message = error instanceof Error ? error.message : String(error);
-    const exhausted = options.permanent || job.attempts >= job.maxAttempts;
+    // The name as well as the count: a restore enqueued before single-attempt
+    // jobs existed still carries `maxAttempts: 3` in its row.
+    const exhausted =
+      options.permanent || isSingleAttempt(job.name) || job.attempts >= job.maxAttempts;
 
     await this.prisma.job.update({
       where: { id: job.id },
@@ -233,8 +239,13 @@ export class JobService {
    * "temporarily" becomes permanent.
    */
   async retry(id: string): Promise<void> {
-    await this.prisma.job.update({
-      where: { id },
+    /*
+      The single-attempt rule in the `where`, not only in the route's
+      `refuseRetry`: this is the method that re-queues, and a second caller
+      that forgot to ask first must still be unable to re-run a restore.
+    */
+    const { count } = await this.prisma.job.updateMany({
+      where: { id, name: { notIn: [...NEVER_RETRYABLE] } },
       data: {
         status: JobStatus.QUEUED,
         attempts: 0,
@@ -244,6 +255,9 @@ export class JobService {
         lockedBy: null,
       },
     });
+    if (count !== 1) {
+      throw new Error(`Aufgabe ${id} lässt sich nicht wiederholen.`);
+    }
   }
 
   async cancel(id: string): Promise<void> {
@@ -266,8 +280,38 @@ export class JobService {
    */
   async reclaimStale(olderThanMs = 30 * 60_000): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanMs);
+    /*
+      A stale single-attempt job is ended, not re-queued. "The worker stopped
+      reporting" does not mean "nothing happened" for a restore any more than
+      a failure does, and a restore that simply takes longer than thirty
+      minutes would otherwise be started a second time over itself.
+    */
+    const ended = await this.prisma.job.updateMany({
+      where: {
+        status: JobStatus.RUNNING,
+        lockedAt: { lt: cutoff },
+        name: { in: [...NEVER_RETRYABLE] },
+      },
+      data: {
+        status: JobStatus.DEAD,
+        finishedAt: new Date(),
+        error: STALE_SINGLE_ATTEMPT_ERROR,
+        lockedBy: null,
+        lockedAt: null,
+      },
+    });
+    if (ended.count) {
+      this.logger.error(
+        `${ended.count} hängengebliebene, nicht wiederholbare Aufgabe(n) beendet — manuelle Prüfung nötig.`,
+      );
+    }
+
     const { count } = await this.prisma.job.updateMany({
-      where: { status: JobStatus.RUNNING, lockedAt: { lt: cutoff } },
+      where: {
+        status: JobStatus.RUNNING,
+        lockedAt: { lt: cutoff },
+        name: { notIn: [...NEVER_RETRYABLE] },
+      },
       data: { status: JobStatus.QUEUED, lockedBy: null, lockedAt: null, startedAt: null },
     });
     if (count) this.logger.warn(`${count} hängengebliebene Aufgabe(n) zurück in die Warteschlange.`);

@@ -460,9 +460,12 @@ test.describe("the permission matrix, by verb", () => {
         expect: 403,
       },
       {
+        // A POST since SEC-2, so the re-authentication window can travel in
+        // the body. The administrator is refused at the guard before that.
         who: "administrator",
-        method: "GET",
+        method: "POST",
         path: "/backups/does-not-exist/artifacts/DATABASE_DUMP/download",
+        body: {},
         expect: 403,
       },
       { who: "guest", method: "POST", path: "/backups", body: { type: "DATABASE" }, expect: 403 },

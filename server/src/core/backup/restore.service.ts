@@ -27,6 +27,7 @@ import { MaintenanceService } from "./maintenance.service";
 import { classifyBackupError } from "./backup.failure";
 import {
   assessCompatibility,
+  mayRun,
   refuseConcurrent,
   refuseConfirmation,
   refuseRestore,
@@ -162,7 +163,9 @@ export class RestoreService {
       ...input.ctx,
     });
 
-    await this.jobs.enqueue("backup.restore", { restoreRunId: restore.id });
+    // One attempt, stated here as well as enforced by `JobService`: a restore
+    // that fails is examined by a person, never re-run by the queue (SEC-R4).
+    await this.jobs.enqueue("backup.restore", { restoreRunId: restore.id }, { maxAttempts: 1 });
     return { id: restore.id };
   }
 
@@ -178,6 +181,21 @@ export class RestoreService {
     });
     if (!restore) throw new NotFoundException(`Unbekannte Wiederherstellung ${restoreRunId}.`);
     if (restore.status === RestoreStatus.SUCCESS) return { status: restore.status };
+    /*
+      A restore runs from `REQUESTED` and from nothing else.
+
+      The queue already runs `backup.restore` at most once (`NEVER_RETRYABLE`
+      in `jobs.rules.ts`), and this is the second lock on the same door: a
+      run that is `FAILED`, `ABORTED` or still `RUNNING` has already touched
+      its target, and executing it again would replace a database whose state
+      nobody has looked at. The recovery path is a *new* restore, requested
+      deliberately with its confirmation and re-authentication.
+    */
+    if (!mayRun(restore.status)) {
+      throw new Error(
+        `Wiederherstellung ${restoreRunId} steht auf ${restore.status} und wird nicht erneut ausgeführt.`,
+      );
+    }
 
     const startedAt = new Date();
     await this.prisma.restoreRun.update({

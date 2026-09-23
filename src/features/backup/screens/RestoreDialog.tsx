@@ -3,7 +3,7 @@ import { Badge, Button, Card, Skeleton } from "@/shared/ui/primitives";
 import { Field, Input, Select } from "@/shared/ui/forms";
 import { Modal, ReauthenticationDialog } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
-import { authRepository } from "@/core/auth";
+import { authRepository, useAuth } from "@/core/auth";
 import { useBackupMutations, useRestorability } from "../hooks/useBackups";
 import {
   RESTORE_CONFIRMATION,
@@ -47,6 +47,7 @@ export function RestoreDialog({
   onStarted: () => void;
 }) {
   const toast = useToast();
+  const { user: me } = useAuth();
   const { restore, busy } = useBackupMutations();
   const restorability = useRestorability(run?.id ?? null);
   const [mode, setMode] = useState<RestoreMode>("DRILL");
@@ -214,6 +215,15 @@ export function RestoreDialog({
         open={authOpen}
         onClose={() => setAuthOpen(false)}
         authenticate={authRepository.reauthenticate}
+        /*
+          The operator's own factor. Without it an administrator with MFA was
+          shown a password field, sent no code, and was refused by the server
+          with nothing on screen to supply — the restore was unusable for
+          exactly the accounts most likely to hold `system.restore`. The same
+          trap `UserMfaPanel` documents and avoids.
+        */
+        requiresCode={Boolean(me?.mfaEnabled)}
+        description="Vor einer Wiederherstellung bestätigen Sie Ihre Identität erneut."
         title="Wiederherstellung bestätigen"
         confirmLabel="Wiederherstellen"
         message={

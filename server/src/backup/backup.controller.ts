@@ -74,6 +74,23 @@ export class RestoreDto {
   @IsString() @MaxLength(256) reauthToken!: string;
 }
 
+/**
+ * The body of an artifact download: nothing but the re-authentication window.
+ *
+ * A download became a `POST` so it could carry one (SEC-2). The archive is the
+ * whole database and every applicant's CV — the same disclosure as a restore —
+ * and a permission alone says who *may*, not that the person holding the
+ * session is the one asking.
+ */
+export class DownloadArtifactDto {
+  /**
+   * Optional *here* so that a missing window is refused by `ReauthService`
+   * with `reauth_required` — which the dashboard answers with the password
+   * dialog — rather than by the pipe as a generic validation error.
+   */
+  @IsOptional() @IsString() @MaxLength(256) reauthToken?: string;
+}
+
 export class ListBackupsQuery {
   @IsOptional() @IsIn(Object.values(BackupStatus)) status?: BackupStatus;
   @IsOptional() @IsIn(Object.values(BackupType)) type?: BackupType;
@@ -281,6 +298,14 @@ export class BackupController {
    * database and every applicant dossier, so downloading it and restoring it
    * disclose the same thing.
    *
+   * **And the re-authentication window, like the restore.** It was a `GET`
+   * behind the permission alone, which made the one route that hands over
+   * everything the one sensitive route without a password prompt
+   * (SEC-R13). A `POST` so the window travels in the body, for the reason
+   * `ReauthService` gives against a custom header; no screen called the `GET`,
+   * so nothing else moved. The kind is still checked first, so a traversal
+   * probe is a 400 whatever it carries.
+   *
    * `@Res()` without `passthrough`, which bypasses `EnvelopeInterceptor`
    * entirely — the convention `/audit/export` and the dossier download already
    * follow. `Content-Disposition` is **omitted** and the type is
@@ -288,11 +313,12 @@ export class BackupController {
    * the Chromium 153 fetch bug: the header plus a binary body reports
    * `MissingAllowOriginHeader` and, same-origin, a 204 with no body.
    */
-  @Get(":id/artifacts/:kind/download")
+  @Post(":id/artifacts/:kind/download")
   @RequirePermissions("system.restore")
   async download(
     @Param("id") id: string,
     @Param("kind") kind: string,
+    @Body() dto: DownloadArtifactDto,
     @CurrentUser() user: AuthUser,
     @Req() req: AuthedRequest,
     @ClientIp() ip: string | null,
@@ -315,6 +341,10 @@ export class BackupController {
       throw new BadRequestException(`Unbekannte Artefaktart „${kind}“.`);
     }
 
+    // Before the lookup, so whether a backup id exists is not answered to
+    // somebody who has not proved who they are.
+    await this.reauth.require(user.id, dto.reauthToken);
+
     const artifact = await this.backups.artifactFor(id, kind as BackupArtifactKind);
     if (!artifact) throw new NotFoundException("Diese Datei gibt es nicht.");
 
@@ -330,6 +360,8 @@ export class BackupController {
     });
 
     const stream = await this.status.readArtifact(artifact.storageKey);
+    // 200, not the 201 a `POST` would default to: nothing was created.
+    res.status(200);
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Length", String(artifact.sizeBytes));

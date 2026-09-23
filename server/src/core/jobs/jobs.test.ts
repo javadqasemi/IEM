@@ -263,7 +263,7 @@ describe("the operator's half", () => {
     const { prisma, calls } = stubPrisma();
     const jobs = new JobService(prisma);
     await jobs.retry("job_1");
-    const data = calls.find((c) => c.method === "update")!.args.data as Row;
+    const data = calls.find((c) => c.method === "updateMany")!.args.data as Row;
     expect(data.attempts).toBe(0);
     expect(data.status).toBe(JobStatus.QUEUED);
   });
@@ -281,8 +281,82 @@ describe("the operator's half", () => {
     const { prisma, calls } = stubPrisma();
     const jobs = new JobService(prisma);
     await jobs.reclaimStale(60_000);
+    const updates = calls.filter((c) => c.method === "updateMany");
+    for (const u of updates) {
+      const where = u.args.where as Row;
+      expect(where.status).toBe(JobStatus.RUNNING);
+      expect((where.lockedAt as Row).lt).toBeInstanceOf(Date);
+    }
+  });
+});
+
+/**
+ * A restore runs at most once — SEC-R4 in `docs/COMPLETE_APPLICATION_AUDIT.md`.
+ *
+ * The operator's Retry button was already hidden for it; the queue was not,
+ * and a failed in-place restore was re-run twice by `fail()` on its own. Each
+ * of the four ways a job can run again is closed here, and each test would
+ * pass for `export.csv` — which is the point of naming the restore.
+ */
+describe("single-attempt jobs (backup.restore)", () => {
+  const restore = (over: Partial<ClaimedJob> = {}) =>
+    claimed({ name: "backup.restore", payload: { restoreRunId: "r1" }, ...over });
+
+  it("is enqueued with one attempt, whatever the caller asks for", async () => {
+    const { prisma, calls } = stubPrisma();
+    const jobs = new JobService(prisma);
+    await jobs.enqueue("backup.restore", { restoreRunId: "r1" }, { maxAttempts: 5 });
+    const data = calls.find((c) => c.method === "create")!.args.data as Row;
+    expect(data.maxAttempts).toBe(1);
+  });
+
+  it("goes DEAD on its first failure — no automatic second restore", async () => {
+    const { prisma, calls } = stubPrisma();
+    const jobs = new JobService(prisma);
+    const status = await jobs.fail(restore({ attempts: 1, maxAttempts: 1 }), new Error("pg_restore"), 10);
+    expect(status).toBe(JobStatus.DEAD);
+    expect((calls.find((c) => c.method === "update")!.args.data as Row).status).toBe(JobStatus.DEAD);
+  });
+
+  it("goes DEAD even for a row enqueued with three attempts before the fix", async () => {
+    const { prisma } = stubPrisma();
+    const jobs = new JobService(prisma);
+    const status = await jobs.fail(restore({ attempts: 1, maxAttempts: 3 }), new Error("x"), 10);
+    expect(status).toBe(JobStatus.DEAD);
+  });
+
+  it("cannot be re-queued by retry(), even by a caller that forgot to ask", async () => {
+    // The stub answers count 0, which is what the `notIn` condition produces
+    // against a restore row in the database.
+    const { prisma, calls } = stubPrisma({ updateManyCount: 0 });
+    const jobs = new JobService(prisma);
+    await expect(jobs.retry("job_1")).rejects.toThrow(/nicht wiederholen/);
     const where = calls.find((c) => c.method === "updateMany")!.args.where as Row;
-    expect(where.status).toBe(JobStatus.RUNNING);
-    expect((where.lockedAt as Row).lt).toBeInstanceOf(Date);
+    expect((where.name as { notIn: string[] }).notIn).toContain("backup.restore");
+  });
+
+  it("is ended, not re-queued, when its worker goes quiet", async () => {
+    const { prisma, calls } = stubPrisma();
+    const jobs = new JobService(prisma);
+    await jobs.reclaimStale(60_000);
+    const updates = calls.filter((c) => c.method === "updateMany");
+
+    const ending = updates.find(
+      (u) => ((u.args.where as Row).name as { in?: string[] }).in?.includes("backup.restore"),
+    );
+    expect(ending, "no update ends a stale restore").toBeTruthy();
+    expect((ending!.args.data as Row).status).toBe(JobStatus.DEAD);
+
+    const requeue = updates.find((u) => (u.args.data as Row).status === JobStatus.QUEUED);
+    expect(requeue, "no update re-queues ordinary stale jobs").toBeTruthy();
+    expect(((requeue!.args.where as Row).name as { notIn: string[] }).notIn).toContain("backup.restore");
+  });
+
+  it("an ordinary job still retries", async () => {
+    const { prisma } = stubPrisma();
+    const jobs = new JobService(prisma);
+    expect(await jobs.fail(claimed({ attempts: 1, maxAttempts: 3 }), new Error("x"), 10)).toBe(
+      JobStatus.QUEUED,
+    );
   });
 });
