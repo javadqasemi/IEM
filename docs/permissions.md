@@ -606,6 +606,23 @@ It is a `◐` rule in the sense §4 uses: `canManageSecrets` is read inside
 `SettingsController.list` to decide whether the form draws the replace and
 remove controls, and `permissions.agreement.test.ts` counts that as enforcement.
 
+**P0 (23 September 2026) made the description true, and added one key.** Until
+then the code enforced only the *remove* half: `PATCH /settings` sealed any
+secret it was given under plain `settings.update`. Each setting now declares the
+authority a **change** needs (`authority` in `settings.rules.ts`):
+
+| Kind | Settings | Needs, on top of `settings.update` |
+| --- | --- | --- |
+| ordinary | sender, backup schedule, file size, … | — |
+| credential | SMTP host, port, user, TLS — *where* the password is sent | `settings.secrets` |
+| secret | the SMTP password | `settings.secrets` |
+| security | session lifetime, lockout, password length, four-eyes, auto-publish, applicant retention | **`settings.security`** (new) |
+
+`settings.security` is held by Super Admin only. The Administrator keeps ordinary
+configuration and loses the controls that constrain it — four-eyes in particular,
+which it could previously switch off before approving its own submission.
+`docs/COMPLETE_APPLICATION_AUDIT.md` Part 34.
+
 ### The invariant that no permission can override
 
 Four notification types are **mandatory** — the second factor being enabled,

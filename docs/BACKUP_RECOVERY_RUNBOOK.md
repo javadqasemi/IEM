@@ -53,8 +53,11 @@ var/backups/2026/09/<backup-id>/
 the static handler in `main.ts` behind an allowlist, and CLAUDE.md records two
 ways that allowlist has been walked past. A database dump under a served root
 is one regex away from being public. The only route to an artifact is
-`GET /backups/:id/artifacts/:kind/download`, behind `system.restore` and
-audited.
+`POST /backups/:id/artifacts/:kind/download`, behind `system.restore`, **the
+re-authentication window** (`{ reauthToken }` in the body, from
+`POST /auth/reauthenticate`) and audited. It was a `GET` behind the permission
+alone until P0 (SEC-2): the archive is the whole database and every CV, the same
+disclosure as a restore, and now asks for the same proof.
 
 **Check your reverse proxy does not serve `var/`.**
 

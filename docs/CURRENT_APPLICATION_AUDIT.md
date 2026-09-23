@@ -483,3 +483,21 @@ piece of work. One defect in that same area is a P0 data-loss path and is fixed 
 
 The prioritised plan is `docs/ENTERPRISE_ROADMAP.md`.
 
+---
+
+## Addendum — 23 September 2026
+
+`docs/COMPLETE_APPLICATION_AUDIT.md` is the wider audit written four days later, and it found
+things this one did not look for. §8 above called the security posture *good* and listed six open
+items, none of them a hole; that stands as what this audit saw. The later one read the role
+assignment path, the repository scopes, the job queue's retry and the deployment scripts, and
+found five P0 gaps there — a privilege escalation from Administrator to Super Admin, a restore
+that retried itself, an installer that left rate limiting and MFA non-functional behind nginx,
+repository scopes that defaulted to every row, and `settings.update` reaching secrets and the
+four-eyes switch. All five were closed the same day; the evidence is that document's Part 34 and
+`docs/ENTERPRISE_ROADMAP.md` → P0-2.
+
+Two figures above have moved and are recorded here rather than edited in place: the catalogue
+now holds **121** permissions (`settings.security` was added), and `KNOWN_UNENFORCED` holds
+**8** entries.
+

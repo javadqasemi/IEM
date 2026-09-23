@@ -7,6 +7,10 @@ where the two disagree the source wins and the disagreement is listed in Appendi
 > **This is an audit, not a change.** Nothing in `src/`, `server/`, `e2e/` or `deploy/` was
 > modified to write it. Every proposal in Parts 6, 7, 9, 14, 26–32 is a proposal for review, and
 > the UX redesign does not begin until this document has been reviewed.
+>
+> **P0 update, 23 September 2026.** The P0 band of Part 32 — SEC-1 to SEC-5 — has since been
+> implemented. The findings below are left exactly as the audit found them; **Part 34** records
+> what was resolved, in which commit, and what proves it.
 
 **Relationship to the other audits.** `docs/CURRENT_APPLICATION_AUDIT.md` (19 September) is the
 platform-maturity audit that drove P0–P2; it is still correct about what it covers and is not
@@ -37,7 +41,7 @@ from the code but was not reproduced in a running system. Everything else is cou
 
 | | | | |
 | --- | --- | --- | --- |
-| 1 [Executive summary](#part-1--executive-summary) | 10 [Form UX](#part-10--form-ux-audit) | 19 [API inventory](#part-19--api-inventory) | 28 [Security migration](#part-28--security-migration-plan) |
+| 1 [Executive summary](#part-1--executive-summary) | 10 [Form UX](#part-10--form-ux-audit) | 19 [API inventory](#part-19--api-inventory) | 28 [Security migration](#part-28--security-migration-plan) · 34 [P0 record](#part-34--p0-resolution-record) |
 | 2 [Application map](#part-2--complete-application-map) | 11 [Buttons & actions](#part-11--button--action-audit) | 20 [Components](#part-20--global-component--design-system-audit) | 29 [Role migration](#part-29--role--permission-migration-plan) |
 | 3 [Public website](#part-3--public-website-audit) | 12 [Tabs](#part-12--tabs--sub-navigation-audit) | 21 [Layers](#part-21--architectural-layers) | 30 [Website Editor blueprint](#part-30--edit-website-target-architecture) |
 | 4 [Route map](#part-4--dashboard-route-map) | 13 [Tables](#part-13--table-ux-audit) | 22 [Performance](#part-22--performance) | 31 [User journeys](#part-31--user-journeys) |
@@ -1985,12 +1989,13 @@ click away.
 
 Strict order. Each band finishes before the next starts, except that P5 items may ride along.
 
-**P0 — Security / data protection** (before any UX work; all small, no schema change)
-1. SEC-1 privilege ceiling (R1, R12)
-2. SEC-2 restore safety (R4, restore with MFA)
-3. SEC-3 deployment hardening (R2, R3, R5)
-4. SEC-4 fail-closed scope + reach on create + drawing history (R6, R7)
-5. SEC-5 secret/settings authority (R10)
+**P0 — Security / data protection** (before any UX work; all small, no schema change) — **✅ all
+five done 23 September 2026, see Part 34**
+1. SEC-1 privilege ceiling (R1, R12) ✅
+2. SEC-2 restore safety (R4, restore with MFA) ✅
+3. SEC-3 deployment hardening (R2, R3, R5) ✅
+4. SEC-4 fail-closed scope + reach on create + drawing history (R6, R7) ✅
+5. SEC-5 secret/settings authority (R10) ✅
 
 **P1 — UX foundations**
 6. UX-0 defect sweep (reorder, silent success, invalidate, Enter, row links, error-vs-empty)
@@ -2038,6 +2043,81 @@ Strict order. Each band finishes before the next starts, except that P5 items ma
 - **German, Swiss-convention copy stays**, and derived figures stay derived.
 
 ---
+
+## Part 34 — P0 resolution record
+
+*Added 23 September 2026, after the P0 band of Part 32 was implemented. The findings above are
+left as written — they are the evidence for what follows — and this Part records what changed,
+where, and what proves it. Anything not listed here is still open.*
+
+| Finding | Status | Commit | What changed | Proof |
+| --- | --- | --- | --- | --- |
+| **SEC-R1** privilege escalation via role assignment; Part 8 R1, R2; UX-28 | ✅ resolved | `f573ed9` | `rbac/privilege.rules.ts`: grants by containment, `super_admin` only by a Super Admin, role edits and additions judged the same way, re-auth for privileged grants; `GET /roles` carries `grantable`; the role picker offers only those | `privilege.rules.test.ts` (26 tests, 9/9 mutants killed); `e2e/p0-security.spec.ts` SEC-1 (8 tests) |
+| **SEC-R12** Super Admins suspendable by `user.update`; Part 8 R3 | ✅ resolved | `f573ed9` | `refuseAdminister` on status, roles, delete, MFA reset, sessions and reset link; keep-one-active-Super-Admin on suspension | as above |
+| **SEC-R4** failed restore retried by the queue | ✅ resolved | `47f9165` | `NEVER_RETRYABLE` read by `enqueue`, `fail`, `retry`, `reclaimStale`; `RestoreService.run` only from `REQUESTED` | `jobs.test.ts` (6 new), `backup.rules.test.ts` (`mayRun`); e2e: every `backup.restore` job not retryable |
+| **SEC-R13** (part) backup download without re-auth | ✅ resolved | `47f9165` | `POST …/download` with the re-auth window; the `GET` is gone | e2e SEC-2; `backup.spec.ts` (opt-in) |
+| **UX-39** restore unusable with MFA | ✅ resolved | `47f9165` | `RestoreDialog` passes the operator's `requiresCode` | by reading; `UserMfaPanel` precedent |
+| **SEC-R2** `TRUST_PROXY` unset behind nginx | ✅ resolved | `f2ce087` | installer writes `TRUST_PROXY=loopback`; `main.ts` warns in production when unset | `proxy-trust.test.ts` against a real Express instance: a client-sent `X-Forwarded-For` is ignored, nginx's appended address is `req.ip` |
+| **SEC-R3** installer generates unused keys | ✅ resolved | `f2ce087` | `MFA_ENCRYPTION_KEY`, `APP_SECRETS_ENCRYPTION_KEY` generated (32 bytes, hex), never printed, never rotated by a re-run, adopted from `overrides.env` | `validate.sh` fails a missing key; by reading |
+| **SEC-R5** nginx drops headers on the documents | ✅ resolved | `f2ce087` | three header snippets included in every block that sets a header; HSTS as a snippet from `ssl.sh` | `npm run deploy:test`: static rule over every block, then nginx 1.26.2 serving the rendered config — headers observed below |
+| **SEC-R9** (part) nginx `/media/` shadowed and unsandboxed | ✅ resolved | `f2ce087` | `^~ /media/`, the `main.ts` allowlist, sandbox CSP | deploy:test: PNG and SVG served 200 with `sandbox`; four dossier spellings all 404 |
+| **SEC-R22** (part) API ignores `HOST` | ✅ resolved | `f2ce087` | `listenHost` in `main.ts` | compiled boot on `127.0.0.1:3199` |
+| **SEC-R6** scope fails open; drawing history unscoped; Part 8 R5, R6 | ✅ resolved | `9b08166` | `core/scope/scope.ts` `Scope<W>` required; 32 signatures converted; history through `require()` | `architecture.test.ts` (3/3 mutants killed); e2e SEC-4 |
+| **SEC-R7** creates without reach; Part 8 R7 | ✅ resolved | `9b08166` | reach before existence on tasks, meetings, decisions, drawings, transmittals and task moves — one 404 for hidden and missing | e2e SEC-4 (both spellings, three modules; the move) |
+| **Part 8 R8** protocol lines read across scope | ✅ resolved | `9b08166` | linked tasks and cited decisions, supersede targets, predecessors and parents through the caller's scope | e2e SEC-4 (protocol line) |
+| **Part 8 R9** ended memberships keep access | ✅ resolved | `9b08166` | `activeMembership`: `to` in the past grants nothing; `from` deliberately not enforced | `scope.test.ts` |
+| **SEC-R10** secret replacement and transport via `settings.update`; Part 8 R4 | ✅ resolved | `d556d3c` | `authority` on every setting; credential and secret need `settings.secrets` | `settings.rules.test.ts` (7 new); e2e SEC-5 |
+| **Part 8 R13** four-eyes switchable by the person it constrains | ✅ resolved | `d556d3c` | `workflow.requireApproval` and the security numbers need the new `settings.security` (Super Admin only) | as above |
+| **Part 8 R10** write reach for any member | ◐ documented, unchanged | `9b08166` | a business-model change, not a bug; pinned by `projects.scope.test.ts` | — |
+
+**New permission:** `settings.security` — **121** keys. `KNOWN_UNENFORCED` is unchanged at eight.
+
+**The regression matrix** is `e2e/p0-security.spec.ts` (`47d998f`, `npm run e2e:p0`): 18 cases
+across SEC-1, 2, 4 and 5 against the running API, each refusal checked for its absence of
+effect. SEC-3 is `npm run deploy:test`.
+
+**Verification run, 23 September 2026**, each project reported on its own:
+
+| Gate | Result |
+| --- | --- |
+| `npm run verify` | 0 lint errors (38 warnings); client 38 files / 862 tests; server 63 files / 1720 tests |
+| `npm run build`, `npm run server:build` | pass; `node dist/main.js` boots clean; brand stylesheet hash unchanged |
+| e2e desktop | 404 passed, 2 failed, 12 skipped. The two failures were the `findRecipient` bug below; after the fix `drawings.spec` + `drawings-ui.spec` rerun green (one rerun needed after a refresh-throttle 429, the documented back-to-back cause) |
+| e2e tablet + mobile | 109 passed, 5 skipped, 0 failed |
+| `E2E_BACKUP=1` `backup.spec.ts` (desktop) | 12 passed, including the recovery drill and the POST download with re-auth |
+| `npm run e2e:p0` | 18 cases; all pass after the fix |
+| `npm run deploy:test` | static rules pass; live against nginx 1.26.2, 12 responses as below |
+
+**Found while verifying, and fixed in `9b08166`:** the scope conversion passed a `Scope` object
+straight into one relation filter (`findRecipient`: `transmittal: scope`). Prisma's all-optional
+input types let it typecheck, and every unit test stayed green; the Planversand acknowledgement
+then failed at runtime in `drawings.spec.ts` and `drawings-ui.spec.ts`. `architecture.test.ts`
+now fails a repository that uses a scope other than through `whereOf()`.
+
+**Observed headers** — the installer's rendered configuration served by nginx 1.26.2
+(`npm run deploy:test` with `NGINX_BIN`), identical on `/`, `/index.html`, `/admin.html`,
+`/stelle.html`, `/assets/*` and a 404:
+
+| Header | Value |
+| --- | --- |
+| Content-Security-Policy | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'` |
+| X-Frame-Options | `SAMEORIGIN` |
+| X-Content-Type-Options | `nosniff` |
+| Referrer-Policy | `strict-origin-when-cross-origin` |
+| Permissions-Policy | `camera=(), microphone=(), geolocation=(), payment=()` |
+| Strict-Transport-Security | `max-age=15552000; includeSubDomains` (once `ssl.sh` has written its snippet) |
+
+Uploaded media (`/media/<year>/<name>`) carries `Content-Security-Policy: default-src 'none';
+style-src 'unsafe-inline'; sandbox` plus the base headers; `/media/bewerbungen/…`,
+`/media/%62ewerbungen/…`, `/media/bewerbungen%2f…` and a `..` walk all answer 404.
+
+**Still open after P0**, in the order Part 32 gives: SEC-R8 (`javascript:` hrefs) and the SVG
+sanitisation half of R9 (P2, SEC-7); SEC-R11 suspended-account reactivation and the token hygiene
+of R19 (SEC-6); re-authentication on secret replacement and the rest of R13 — backups unencrypted,
+co-located with the keys in the ops archive, no off-site copy (SEC-11); SEC-R14 the breadth of
+`system.health` (SEC-8); SEC-R15 audit retention and denial logging (SEC-9); forced MFA (SEC-10);
+and **SEC-R16, customer isolation — no external account may be created before Part 29's model
+exists.**
 
 ## Appendix A — Validation
 

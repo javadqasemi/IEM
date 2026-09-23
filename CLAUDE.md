@@ -89,6 +89,7 @@ permissions and the tests, not a folder with the same names in it.
 | P2·4 | **E-Mail-Betrieb** — a `MailProvider` seam with SMTP as its one implementation, nine sanitized failure categories, a connection test beside the test send, a template catalogue with previews, and secrets encrypted at rest under a key of their own. No migration, no new permission, and the first route to enforce `job.retry` |
 | P2·5 | **Sicherung und Wiederherstellung** — three tables, `pg_dump`/`tar`/manifest with SHA-256, verification that parses the artifacts, retention that can never leave zero recovery points, and a **recovery drill** that restores into an isolated database and reads the records back. One new permission; `system.backup` finally enforced |
 | P2·6 | **System Control Center und Job Operations** — no migration and no new permission. One health vocabulary where there were four, a capability model that decides what an operator may do with a job, eight active diagnostics, and a build identity stamped at build time. `job.read` and `job.cancel` finally enforced |
+| P0·SEC | **Sicherheits-Härtung nach dem Gesamtaudit** — `docs/COMPLETE_APPLICATION_AUDIT.md` Part 34. A privilege ceiling (nobody grants more than they hold), a restore that runs once, an installer that writes `TRUST_PROXY` and the two real keys and whose nginx headers reach the documents, scope that fails closed with reach checked on create, and settings authority split three ways. One new permission, `settings.security`; no migration |
 
 **Three cross-cutting pieces stand between Wave 1 and Wave 2**, set by the firm at review, and all
 three are done. They are here rather than after the next module because every module inherits them
@@ -211,6 +212,8 @@ npm run verify:all   # verify + e2e, for a release
 # The cross-cutting suites, runnable on their own. All `--project=desktop` only:
 # none says anything different at a phone width, and all are slow.
 npm run e2e:security   # the role x verb x resource matrix, against the live API
+npm run e2e:p0         # the P0 matrix: privilege ceiling, restore, scope, settings authority
+npm run deploy:test    # the installer's nginx config, statically; + live with NGINX_BIN set
 npm run e2e:budgets    # the performance budgets, with the measurements printed
 npm run e2e:versioning # the optimistic lock, including two writers racing
 npm run e2e:publishing # the workflow end to end, asserted against the public document
@@ -583,6 +586,15 @@ value that was just declared too dangerous to log. `scrubBounded` adds a **visib
 on top — a payload silently cut in half is worse than none, because the reader believes they have
 the whole thing.
 
+**`NEVER_RETRYABLE` governs the queue, not only the button** (P0, SEC-2). It used to hide the
+operator's Retry for `backup.restore` while the queue went on retrying it: the job was enqueued
+with the default three attempts and `RestoreService.run` rethrew, so a failed in-place restore ran
+twice more on its own, each time snapshotting the half-restored database as its pre-restore
+backup. Now `JobService` reads the list in four places — `enqueue` forces one attempt, `fail`
+goes straight to `DEAD`, `retry` refuses in its `where`, `reclaimStale` ends a stale one as `DEAD`
+— and `RestoreService.run` executes only from `REQUESTED`. A job that replaces data joins the list
+rather than getting a `maxAttempts` at its call site.
+
 **`JobStatus.FAILED` is written by nothing, and a filter for it would lie.** `JobService.fail`
 writes `DEAD` when the attempts are exhausted and `QUEUED` when they are not, so no row ever
 sits in `FAILED` — while `JobService`'s own docstring calls it "the transient state between a
@@ -661,6 +673,20 @@ unrelated field, and the operator's first clue is mail not arriving. Removal is
 `DELETE /settings/secrets/:key`, behind `settings.secrets` and a confirmation.
 `classifySecretWrite` is the one reader, and it treats `""`, whitespace and the mask alike.
 
+**Every setting declares the authority a *change* needs, and `settings.update` alone is only
+ordinary configuration** (P0, SEC-5). `authority` sits beside `type` on `SettingDef`:
+`security` (session lifetime, lockout, password length, four-eyes, auto-publish, applicant
+retention) needs `settings.security`; `credential` (SMTP host, port, user, TLS) and `secret` (the
+password) need `settings.secrets`. Until P0 `settings.secrets` guarded only *removal* —
+`PATCH /settings` sealed any secret under plain `settings.update`, and the same key could point
+the transport at a host that receives the stored password and every reset link, or switch off
+four-eyes for an Administrator that also holds `content.approve`. **Only a changed value is
+judged**, because a form posts every field it rendered and an untouched SMTP host must not stop
+somebody saving the sender name. The list says per row whether the reader may change it
+(`canEdit`), and the form renders the rest read-only with the reason as visible text. A new
+security-relevant setting without an `authority` fails `settings.rules.test.ts`, which asserts
+every `DANGEROUS_SETTINGS` key is non-ordinary.
+
 **`APP_SECRETS_ENCRYPTION_KEY` is a second key, not a second cipher.** One AES-256-GCM
 implementation (`KeyedCipher`), two purposes: `MFA_ENCRYPTION_KEY` for second factors, this
 for everything else the application stores and must read back. Separate because the recovery
@@ -701,11 +727,38 @@ mutating route inherits the protection without anybody remembering it. The cost 
 rather than discovered: **it governs one process**, so a multi-instance deployment must stop
 the others first.
 
+**A backup download is a `POST` with the re-authentication window in its body** (P0, SEC-2).
+`POST /backups/:id/artifacts/:kind/download` — it was a `GET` behind `system.restore` alone,
+which made the route that hands over the whole database and every CV the one sensitive route
+without a password prompt. The kind is validated first (a traversal probe stays a 400), the
+window before the lookup (so an unknown id is not answered to somebody who has not proved who
+they are), and the response is 200 rather than the 201 a `POST` defaults to.
+
 **`PGPASSWORD` in the child's environment, never in `argv`.** An argument is visible in
 `ps`, in a crash dump, and — the one that actually happens — in libpq's own error message,
 which it builds by echoing the connection it attempted. `spawn` with an argument array and
 `shell: false`; `redactToolOutput` is the second line of defence before anything reaches a
 log, and `classifyBackupError` is what makes sure the *API* never sees the raw text at all.
+
+**In the nginx configuration, every block that says `add_header` also says `include`** (P0,
+SEC-3). nginx inherits `add_header` from the enclosing block only when the inner block declares
+none of its own, and `/index.html`, `/admin.html` and `/stelle.html` each had a
+`Cache-Control` line — so the documents themselves went out with no CSP, no frame protection and
+no nosniff while the server block read as though they had all of them. The headers are three
+snippets written by `nginx::write_header_snippets` (`iem-headers-base`, `-site`, `-media`), HSTS
+is a fourth that `ssl.sh` writes, and `npm run deploy:test` renders the installer's own functions
+and fails a block that breaks the rule. With `NGINX_BIN` set it also serves the result and reads
+the real headers — nginx for Windows cannot open 8.3 short paths, so point `NGINX_WORK_DIR` at a
+path with no spaces, and `BASH` at Git's `usr/bin/sh.exe` if `bash` is WSL's stub.
+
+**The installer writes `TRUST_PROXY=loopback`, both encryption keys and `BACKUP_ROOT`, and
+`main.ts` binds `HOST`** (P0, SEC-3). Without the first, every request behind nginx came from
+127.0.0.1 — one throttle bucket for the internet, one IP in the audit log. The installer used to
+generate `ENCRYPTION_KEY` and `SESSION_SECRET`, which nothing reads, instead of the two keys that
+are read. **Neither key is ever rotated by a re-run**: an `overrides.env` value is adopted, then
+`/etc/iem/credentials`, and only then is one generated — a new MFA key over an old database
+de-enrols everybody. `/media/` is `^~` with the same positive allowlist `main.ts` applies; as a
+plain prefix it lost to the image regex and every upload was a 404.
 
 **`smtp.provider.ts` is the only file allowed to import nodemailer**, and
 `server/src/architecture.test.ts` asserts it. Before P2-4 the library was imported straight
@@ -1305,14 +1358,52 @@ hiding what a user cannot reach is a third courtesy on top.
 the module; `project.readAll` is the separate grant that widens it from "the projects I manage or
 sit on" to the firm's whole book. Expressing that as a second *permission* keeps the rule in the
 catalogue, where it is grantable and auditable, instead of inside a service where nobody can ask who
-has it. `projects.scope.ts` builds the predicate, the repository takes it as an argument and
-**defaults to the narrow case**, so a query that forgets it returns the caller's own projects rather
-than everyone's. Filtering after the fetch would give a page of eleven rows out of twenty-five, a
-total that counts rows nobody can open, and a leak in any query that forgot the post-filter.
+has it. `projects.scope.ts` builds the predicate and the repository **requires** it. Filtering
+after the fetch would give a page of eleven rows out of twenty-five, a total that counts rows nobody
+can open, and a leak in any query that forgot the post-filter.
+
+**A scope is a `Scope<W>` value with no default, and "every row" has to be asked for by name**
+(P0, SEC-4). This paragraph used to say the repository "defaults to the narrow case, so a query
+that forgets it returns the caller's own projects". It was false: thirty-two signatures defaulted
+`scope = {}`, and `{}` in a `where` is every row — `GET /drawings/:id/versions` had forgotten it
+and served any plan's history to anyone with `drawing.read`. `core/scope/scope.ts` now offers
+`restrictedTo(where)`, `nothing()` and `unrestricted(because)`, the last with a sentence at the
+call site (`"Super Admin"`, `"project.readAll"`, `"re-read of the row this transaction just
+wrote"`). `server/src/architecture.test.ts` fails a repository whose scope is optional, defaulted
+or a raw `WhereInput`, and a feature scope file that returns `{}` itself. Grep `unrestricted(` to
+list every place that sees the whole firm.
+
+**Reach is checked on create, and a hidden project answers like a missing one.** `POST /tasks`,
+`/meetings`, `/decisions`, `/drawings`, `/transmittals` and moving a task ask
+`core/scope/project.scope.ts` whether the target project is within reach *before* checking that
+it exists, so both are one 404, *"Projekt nicht gefunden."* The project rule lives in `core/`
+because the modules that hang off a project need it and may not import a sibling feature. A
+protocol line, a supersede target, a predecessor and a parent task are likewise read through the
+caller's scope.
+
+**Membership ends on its end date.** `activeMembership` in `core/scope/membership.scope.ts` is the
+one copy of "is on this project" — it was written out six times — and it excludes a
+`ProjectMember` whose `to` has passed (inclusive of the day). `from` is deliberately not enforced:
+somebody staffed ahead reads the project to prepare for it.
 
 One asymmetry, because assuming otherwise is reasonable and wrong: the scope narrows **reads**.
 Writes are guarded by `project.update` and friends, which are firm-wide — somebody with
-`project.update` may edit any project they can *reach*, and reach is what the scope narrows.
+`project.update` may edit any project they can *reach*, and reach is what the scope narrows. P0
+left this as it is and pinned it in `projects.scope.test.ts`: narrowing writes to *managed*
+projects is a business-model decision, not a bug fix.
+
+**Nobody grants more than they hold** (P0, SEC-1). `rbac/privilege.rules.ts` is the one rule for
+every change to somebody else's authority: a role or a permission may be handed out only by
+somebody who holds all of it, `super_admin` only by a Super Admin, and an account that holds
+anything the actor lacks may not be suspended, demoted, deleted, reset or signed out by them.
+**Containment, not `Role.rank`** — rank is display order, and Geschäftsleitung (5) and
+Administrator (10) each hold something the other does not, so a rank comparison would let one of
+them escalate whichever way it pointed. Before this, any `user.assign` holder — the seeded
+Administrator — could grant itself `super_admin`. Granting a privileged permission (the set is in
+the same file) or touching Super Admin needs the `ReauthService` window; the server answers
+`reauth_required` and the dashboard asks for the password and retries. `GET /roles` carries
+`grantable` per role for the caller, computed by the same rule, so the picker offers only what the
+write path accepts.
 
 `permissions.agreement.test.ts` compares the catalogue against every guard in the tree, in both
 directions, and counts a `permissions.has(...)` check inside a handler as enforcement — those are

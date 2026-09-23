@@ -50,24 +50,50 @@ ones stop), health-checks, and rolls back on any failure.
 ```
 /opt/iem                  application (dist/, server/dist/, node_modules/)
 /var/lib/iem/media        uploads;  media/bewerbungen is 0700 and never served
+/var/lib/iem/backups      the application's own backups (BACKUP_ROOT), 0700
 /var/log/iem              API and Nginx logs, rotated 14 days
 /var/backups/iem          daily/ weekly/ monthly/
 /etc/iem/credentials      every generated secret — 0600 root, BACK THIS UP
 /etc/iem/overrides.env    operator settings, appended after the generated env
 /etc/iem/nginx-extra.conf extra Nginx directives, included by the site
+/etc/nginx/snippets/iem-headers-*.conf  the security headers (and iem-hsts.conf)
 ```
 
 `server/.env` and the Nginx site are **regenerated on every run**. Persistent
 changes belong in the two override files, which are read after the generated
 content and therefore win.
 
+**What `server/.env` carries that the API cannot run safely without** (P0, see
+`docs/COMPLETE_APPLICATION_AUDIT.md` Part 34):
+
+| Variable | Value | Without it |
+| --- | --- | --- |
+| `TRUST_PROXY` | `loopback` — Nginx on this host is the one trusted hop | every request comes from 127.0.0.1: one rate-limit bucket for the whole internet, the proxy's address in every audit row |
+| `MFA_ENCRYPTION_KEY` | 32 random bytes, hex | every MFA route answers 503 |
+| `APP_SECRETS_ENCRYPTION_KEY` | 32 random bytes, hex | the SMTP password cannot be stored |
+| `HOST` | `127.0.0.1` | the API listens on every interface, the firewall its only barrier |
+
+The two keys are generated once and **never rotated by a re-run** — a value in
+`overrides.env` is adopted, then the one in `/etc/iem/credentials`. Losing
+`MFA_ENCRYPTION_KEY` de-enrols every second factor, so back up
+`/etc/iem/credentials` **separately** from the database backups: whoever holds
+both can decrypt the stored factors and the SMTP password.
+
+**Security headers.** Nginx drops inherited `add_header` lines in any block that
+declares its own, so every such block `include`s one of the snippets above — that
+is how the HTML documents keep their CSP and `frame-ancestors`. `npm run
+deploy:test` (from the repository) renders the installer's own configuration and
+fails a block that breaks the rule; with `NGINX_BIN` set it serves it and reads
+the headers of each document, and `validate.sh` checks them on the live server.
+
 ## Idempotence
 
 Re-running is the supported way to repair an installation. Packages are checked
 before install, the database role and schema are created only if absent, and
 secrets are read back from `/etc/iem/credentials` rather than regenerated —
-rotating the database password would lock out the running application, and
-rotating the JWT secret would sign every administrator out.
+rotating the database password would lock out the running application,
+rotating the JWT secret would sign every administrator out, and rotating
+`MFA_ENCRYPTION_KEY` would make every stored second factor unreadable.
 
 ## Deviations from the specification, and why
 

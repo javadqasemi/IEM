@@ -59,6 +59,49 @@ or an unknown select option is refused with a message naming the key; the retent
 is clamped to a sane range; the comment in the controller is true; tests cover every
 declared type including the mask-write no-op.
 
+### P0-2 ✅ Authorization and production security — the audit's SEC-1 to SEC-5
+
+Opened by `docs/COMPLETE_APPLICATION_AUDIT.md` (23 September 2026), Part 32's P0 band, and
+closed the same day. The evidence — commits, tests, observed headers — is that document's
+Part 34; this entry is the plan-shaped summary.
+
+**Problem.** Five gaps the audit verified in the source:
+
+| | |
+| --- | --- |
+| SEC-1 | Role assignment had no ceiling: any `user.assign` holder — the seeded Administrator — could grant itself `super_admin`, and `role.update` could add any key to a role |
+| SEC-2 | A failed in-place restore was **retried by the queue** twice more; the backup download needed no re-authentication |
+| SEC-3 | The installer wrote no `TRUST_PROXY` (one throttle bucket for the internet, loopback in every audit row), generated two keys nothing reads instead of the two that are read, and nginx dropped every security header on the three HTML documents |
+| SEC-4 | Thirty-two repository signatures defaulted `scope = {}` — every row; one history route had already forgotten the scope; creates did not check the target project; ended memberships kept access |
+| SEC-5 | `settings.update` could replace the SMTP password, repoint the transport and switch off four-eyes |
+
+**Business impact.** Every "the Administrator may not publish, restore or change the legal
+identity" decision was advisory; a production install had no working second factor and no
+per-client rate limit; one failed restore could replace the database three times.
+
+**Solution.** One pure rule per gap, each with its HTTP face kept thin: `rbac/privilege.rules.ts`
+(containment, not rank; re-auth for privileged grants); `NEVER_RETRYABLE` read by the queue in four
+places plus `RestoreService.run` from `REQUESTED` only; `TRUST_PROXY=loopback`, generated hex keys,
+header snippets included in every block, `^~ /media/` with an allowlist; `core/scope/scope.ts`
+(`Scope<W>` with no default, `unrestricted(because)`) plus `core/scope/project.scope.ts` for reach
+on create and `activeMembership` for end dates; `authority` on every `SettingDef` and the new
+`settings.security`.
+
+**Dependencies.** None. No migration.
+
+**Acceptance.** Met, and each line is a test that fails without the fix:
+`privilege.rules.test.ts` (9 of 9 mutants killed); `jobs.test.ts` and `backup.rules.test.ts` for
+the single attempt; `proxy-trust.test.ts` against a real Express app; `npm run deploy:test` live
+against nginx 1.26 with the headers of every document observed; `architecture.test.ts` fails an
+optional, defaulted or raw scope (3 of 3 mutants killed); `settings.rules.test.ts` for the
+authority catalogue; and `e2e/p0-security.spec.ts` for the wiring of all of it against the
+running API.
+
+**Deliberately left for later** (named in Part 34 of the audit): write reach for project members
+is unchanged and pinned; backups are still unencrypted and co-located; secret replacement is gated
+by `settings.secrets` but not by re-authentication; 403 denials are still not audited. **No
+customer accounts** — the external-user model (Part 29) is still the prerequisite.
+
 ---
 
 ## P1 — Enterprise core
