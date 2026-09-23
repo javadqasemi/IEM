@@ -25,6 +25,7 @@ longer true:
 | --- | --- |
 | `docs/CURRENT_APPLICATION_AUDIT.md` | 19 September 2026. What is actually here now, counted from the source: routes, models, permissions, CMS coverage, testing, security posture, and the three stores of company data that had already drifted |
 | `docs/ENTERPRISE_ROADMAP.md` | The remaining platform work as P0–P3, each with problem, impact, solution, dependencies and acceptance. Owns the *platform*; `docs/roadmap.md` still owns the business-module build order |
+| `docs/COMPLETE_APPLICATION_AUDIT.md` | 23 September 2026. The product and security map: every route, nav item, role, form and table; the threat model and risk register; the proposed workspace navigation, role model and Edit Website blueprint. Awaiting review before the UX redesign starts |
 
 | Document | |
 | --- | --- |
