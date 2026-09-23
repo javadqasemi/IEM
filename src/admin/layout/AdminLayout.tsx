@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/shared/utils/cn";
 import { Button } from "@/shared/ui/primitives";
 import { Breadcrumb } from "@/shared/ui/navigation";
@@ -7,8 +7,50 @@ import { NotificationBell } from "@/features/notifications";
 import { useAuth } from "@/core/auth";
 import { Link, useRoute, useRouteMeta, type Crumb } from "@/core/router";
 import { useTheme } from "../lib/theme";
-import { activeSection, type NavSection } from "../lib/navigation";
+import {
+  WORKSPACES,
+  activeWorkspace as workspaceOf,
+  ownerOf,
+  type NavWorkspace,
+  type SearchEntry,
+} from "../lib/navigation";
 import { Sidebar } from "../ui/Sidebar";
+import { CommandPalette } from "../ui/CommandPalette";
+import { WorkspaceStrip } from "../ui/WorkspaceStrip";
+
+/* ------------------------------------------------------------------ */
+/* Per-browser preferences: favourites and history                     */
+/* ------------------------------------------------------------------ */
+
+const PREF = { favorites: "iem.nav.favorites", recent: "iem.nav.recent" } as const;
+const RECENT_LIMIT = 6;
+
+function readPref(key: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const value = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    // Private windows, blocked site data, half-written JSON. A preference that
+    // cannot be read is the default, never a broken menu.
+    return [];
+  }
+}
+
+function writePref(key: string, value: string[]): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* A preference that cannot be remembered is not an error worth raising. */
+  }
+}
+
+/** The search entry a path is — a content type's own id when it is one, else its destination's. */
+function entryIdFor(path: string): string | null {
+  const type = /^\/inhalte\/([^/]+)/.exec(path)?.[1];
+  if (type) return `type:${type}`;
+  return ownerOf(path)?.id ?? null;
+}
 
 /**
  * The dashboard shell: rail, top bar, content.
@@ -17,11 +59,12 @@ import { Sidebar } from "../ui/Sidebar";
  * contains is `lib/navigation` — this file no longer knows that a menu entry
  * exists, which is why adding a section touches neither it nor `App.tsx`.
  *
- * Navigation is built from permissions, not from roles. An HR user and a
- * Marketing user both reach the content groups but only one of them sees
- * "Bewerbungen", and neither sees "Rollen" — none of it written as a role
- * check, so a custom role assembled in the role editor gets a correct menu
- * with nobody touching this code.
+ * Navigation is built from permissions, not from roles (P1B): seven workspaces,
+ * each shown when its audience holds and it has something to open — see
+ * `AUDIENCES` in `lib/navigation.ts`. None of it is written as a role check,
+ * so a custom role assembled in the role editor gets a correct menu with
+ * nobody touching this code. The command palette (Ctrl/Cmd + K) reads the
+ * same filtered registry and can offer nothing the rail would not.
  *
  * Hiding is a courtesy, not the control. Every route the rail omits is still
  * enforced by the server on each call, so a hidden item someone navigates to
@@ -30,11 +73,15 @@ import { Sidebar } from "../ui/Sidebar";
 
 export function AdminLayout({
   children,
-  sections,
+  workspaces,
+  searchEntries = [],
   trail = [],
 }: {
   children: ReactNode;
-  sections: NavSection[];
+  /** `buildNavigation` for this reader. */
+  workspaces: NavWorkspace[];
+  /** `searchIndex` for this reader — the palette offers nothing else. */
+  searchEntries?: SearchEntry[];
   /**
    * Derived in `App` from the route table (foundation stage F4). Empty for a
    * top-level screen, where a single crumb repeating the page's own heading
@@ -45,8 +92,66 @@ export function AdminLayout({
   const { path } = useRoute();
   const { can } = useAuth();
   const [open, setOpen] = useState(false);
-  const section = activeSection(sections, path);
+  const [searching, setSearching] = useState(false);
   const { title, actions } = useRouteMeta();
+
+  /*
+    Where the route belongs, over the whole registry — ownership is the
+    route's, not the reader's. The rail opens this workspace only if the reader
+    has it; a deep link into a workspace they are not offered (a Projektleiter
+    opening `/inhalte/team` from a colleague's mail) still gets its name in the
+    bar, and a rail with nothing open.
+  */
+  const workspaceId = workspaceOf(path);
+  const destinationId = ownerOf(path)?.id ?? null;
+  const workspaceLabel = WORKSPACES.find((w) => w.id === workspaceId)?.label ?? null;
+  const current = workspaces.find((w) => w.id === workspaceId) ?? null;
+
+  const [favorites, setFavorites] = useState<string[]>(() => readPref(PREF.favorites));
+  const [recent, setRecent] = useState<string[]>(() => readPref(PREF.recent));
+
+  const toggleStar = useCallback((id: string) => {
+    setFavorites((list) => {
+      const next = list.includes(id) ? list.filter((f) => f !== id) : [...list, id];
+      writePref(PREF.favorites, next);
+      return next;
+    });
+  }, []);
+
+  // History, recorded as the route settles. Only ids are stored; they are
+  // resolved against what the reader is offered *now* when shown.
+  useEffect(() => {
+    const id = entryIdFor(path);
+    if (!id) return;
+    setRecent((list) => {
+      if (list[0] === id) return list;
+      const next = [id, ...list.filter((r) => r !== id)].slice(0, RECENT_LIMIT);
+      writePref(PREF.recent, next);
+      return next;
+    });
+  }, [path]);
+
+  const byId = useMemo(() => new Map(searchEntries.map((e) => [e.id, e])), [searchEntries]);
+  const recentEntries = useMemo(
+    () => recent.map((id) => byId.get(id)).filter((e): e is SearchEntry => Boolean(e)),
+    [recent, byId],
+  );
+
+  /*
+    Ctrl + K and Cmd + K open the palette from anywhere. `preventDefault`
+    because browsers bind both to their own search bar. Not while a dialog is
+    already open: two modals stacked is a focus trap inside a focus trap.
+  */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "k") return;
+      if (document.querySelector("dialog[open]") && !searching) return;
+      e.preventDefault();
+      setSearching(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [searching]);
 
   /**
    * The trail, with the record's own name substituted into the last step.
@@ -150,7 +255,15 @@ export function AdminLayout({
           </Link>
         </div>
 
-        <Sidebar sections={sections} path={path} />
+        <Sidebar
+          workspaces={workspaces}
+          path={path}
+          activeWorkspace={current ? workspaceId : null}
+          activeDestination={destinationId}
+          favorites={favorites}
+          onToggleStar={toggleStar}
+          onOpenSearch={() => setSearching(true)}
+        />
 
         {/* Pinned to the foot of the rail: `shrink-0` after a `flex-1` nav, so
             the navigation scrolls and this does not move. With the rail itself
@@ -230,25 +343,21 @@ export function AdminLayout({
             </Button>
 
             {/*
-              The group's name, and nothing else.
+              The workspace's name, and the trail under it.
 
-              Its entries used to sit beside it as a segmented control, because
-              the rail listed groups only. The rail now folds them open in
-              place, so a copy here would be the same navigation twice — and the
-              copy was always the weaker one, able to show only the group you
-              were already in. `SectionTabs` was deleted with this change; it is
-              in the history if the trade is ever reconsidered.
-
-              "Website bearbeiten" opts out: it embeds the live site, which
-              carries its own header, and the rail already says which page is
-              open.
+              The name comes from route ownership (`ownerOf`), so it is right
+              for a detail page three segments deep and for a deep link into a
+              workspace the reader's rail does not show. The workspace's
+              destinations are in the rail (and, below `lg`, in the strip above
+              the page) — not here, which would be the same navigation twice.
             */}
-            {section && !section.hideBarTitle ? (
+            {workspaceLabel ? (
               <div className="order-2 flex min-w-0 flex-col justify-center gap-0.5">
                 {/* `h2`, not `h1`: the page below keeps its own `h1` in
-                    `PageHeader`, and the group is the heading above it. */}
+                    `PageHeader`, and the workspace is the heading above it —
+                    "Projekte" over "Pläne › 4723-HZG-EG-101". */}
                 <h2 className="truncate font-display text-[15px] font-semibold text-ink">
-                  {section.label}
+                  {workspaceLabel}
                 </h2>
                 {/* The trail sits under the group's name rather than beside it:
                     on a phone the bar already wraps, and a second horizontal
@@ -306,6 +415,19 @@ export function AdminLayout({
                 No permission check. Everybody has an inbox of their own, and
                 the count endpoint scopes to the verified token.
               */}
+              {/* The palette's second door, for widths where the rail — and
+                  its search button — is behind the drawer. */}
+              <button
+                type="button"
+                onClick={() => setSearching(true)}
+                aria-label="Suchen (Strg + K)"
+                title="Suchen (Strg + K)"
+                className="grid h-9 w-9 place-items-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-ink lg:hidden"
+              >
+                <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                  <path d="M8 12.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9ZM11.5 11.5 14.5 14.5" />
+                </svg>
+              </button>
               <NotificationBell />
               <UserMenu />
             </div>
@@ -313,9 +435,23 @@ export function AdminLayout({
         </header>
 
         <main id="main" className="min-w-0 flex-1 px-4 py-6 lg:px-8 lg:py-8">
-          <div className="mx-auto flex max-w-[84rem] flex-col gap-6">{children}</div>
+          <div className="mx-auto flex max-w-[84rem] flex-col gap-6">
+            {/* The open workspace's destinations, below `lg` only — where the
+                rail that carries them is a drawer. Same data, same links. */}
+            {current && current.destinations.length > 1 ? (
+              <WorkspaceStrip workspace={current} activeDestination={destinationId} />
+            ) : null}
+            {children}
+          </div>
         </main>
       </div>
+
+      <CommandPalette
+        open={searching}
+        onClose={() => setSearching(false)}
+        entries={searchEntries}
+        recent={recentEntries}
+      />
     </div>
   );
 }

@@ -1,28 +1,57 @@
 import type { ContentTypeRow } from "./api";
 
 /**
- * The dashboard's navigation, as data.
+ * The dashboard's navigation, as one declarative registry (P1B).
  *
- * Nothing in the shell spells out a menu any more: `AdminLayout` renders
- * whatever this returns. Two consequences worth knowing.
+ * ---
  *
- * **The Website section is built from the database.** Its entries are the
- * content types the server reports, sorted by the `rank` the type itself
- * carries, and slotted into a group by `GROUP_OF`. Adding a content type to
- * `content-types.ts` therefore adds a menu entry with no change here — and one
- * that is *not* listed in `GROUP_OF` still appears, under "Weitere Inhalte",
- * rather than silently going missing. That fallback is the difference between a
- * structure that scales and one that quietly drops things.
+ * ## Workspaces, not modules
  *
- * **Permissions filter, they do not decorate.** Every entry names the keys that
- * grant it; `buildNavigation` drops what the caller cannot hold, and a group
- * left empty by that filtering disappears with its heading. Hiding is still
- * only a courtesy — the server re-checks each call — but an editor should not
- * be shown a door they cannot open.
+ * The rail used to mirror the implementation: thirty-five content types in six
+ * groups, "Unternehmen" twice (a content group and a settings group), the two
+ * steps of the content workflow beside Projects in the "work" zone, and a
+ * System group that opened for anybody holding `system.health` — twelve of the
+ * fifteen seeded roles. `docs/COMPLETE_APPLICATION_AUDIT.md` Part 36 has the
+ * matrix it was replaced from.
  *
- * Only destinations that exist are listed. A menu entry pointing at a route the
- * application does not serve is a broken link, and a navigation full of them is
- * worse than a short one.
+ * It now answers *where would a person expect to do this*, in seven places:
+ *
+ * | Workspace | Owns |
+ * | --- | --- |
+ * | Übersicht | the home page |
+ * | Aufgaben | the work queue |
+ * | Projekte | projects and what hangs off them — Sitzungen, Entscheide, Pläne, Planversand |
+ * | Website | content, its review and publication, media, and the approval rules |
+ * | Personal | applications, accounts and roles |
+ * | Unternehmen | the firm's own record — identity, legal, offices, contact |
+ * | System | operation: health, jobs, diagnostics, audit, mail, backups, security, notification rules |
+ *
+ * **Ownership is information architecture, not a URL prefix.** Every route
+ * kept its path — `/sitzungen` belongs to Projekte without becoming
+ * `/projekte/sitzungen` — so no bookmark broke and there are no redirects.
+ *
+ * ## Three separate questions
+ *
+ * - **May this route render?** `routes.tsx`, unchanged — and the server's 403 is
+ *   the control either way.
+ * - **Is this destination shown in the rail?** `visibleWhen` here, *and* the
+ *   workspace's audience.
+ * - **Is it found by search?** The same answer as the rail, plus the content
+ *   types and the reader's own account pages. Never wider: the palette reads
+ *   `searchIndex`, which is built from the same filter, so a destination hidden
+ *   from the rail cannot leak through it.
+ *
+ * A deep link to a route that is not in the rail is still valid if the route
+ * allows it. `/freigaben` still renders for `content.read`; it is simply not
+ * *offered* to somebody who cannot approve anything.
+ *
+ * ## Audiences, not role names
+ *
+ * Nothing here compares a role key. A workspace is shown when the reader holds
+ * a capability that makes it *useful* (`AUDIENCES`), and a destination when the
+ * reader holds the keys that make it work. A custom role assembled in the role
+ * editor therefore gets a correct menu with nobody touching this file — the
+ * test personas in `navigation.test.ts` are evidence, not logic.
  */
 
 /* ------------------------------------------------------------------ */
@@ -32,9 +61,7 @@ import type { ContentTypeRow } from "./api";
 /**
  * 18×18 stroked glyphs, as path data.
  *
- * The first ten are the marks the rail already used, moved here unchanged so
- * the menu keeps the icons it had. The rest are new, drawn to the same
- * construction: 1.4 stroke, round joins, no fill.
+ * Drawn to one construction: 1.4 stroke, round joins, no fill.
  */
 export const ICONS = {
   overview: "M3 9.5 9 4l6 5.5M4.5 8.5V14h9V8.5",
@@ -48,811 +75,659 @@ export const ICONS = {
   settings:
     "M9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM9 2.5v2M9 13.5v2M2.5 9h2M13.5 9h2M4.4 4.4l1.4 1.4M12.2 12.2l1.4 1.4M13.6 4.4l-1.4 1.4M5.8 12.2l-1.4 1.4",
   audit: "M3.5 3.5h11v11h-11zM6 7h6M6 10h6",
-
   home: "M3.5 8.5 9 4l5.5 4.5M5 7.8V14h8V7.8M7.5 14v-3.5h3V14",
-  services: "M3.5 5h11M3.5 9h11M3.5 13h7",
   company: "M4 14V4.5h6V14M10 7.5h4V14M3 14h12M6 7h2M6 9.5h2M12 10h1",
-  structure: "M9 3.5v4M4.5 14.5v-3M13.5 14.5v-3M4.5 11.5h9v-4h-9zM7 3.5h4v2H7z",
   seo: "M8 12.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9ZM11.5 11.5 14.5 14.5",
-  career: "M3.5 6.5h11v7h-11zM6.5 6.5V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5",
-  labels: "M3.5 7.5v-3a1 1 0 0 1 1-1h3L14 9.8l-4.2 4.2L3.5 7.5ZM6 6h.01",
   account: "M9 9a2.75 2.75 0 1 0 0-5.5A2.75 2.75 0 0 0 9 9ZM4 14.5c0-2.2 2.2-3.8 5-3.8s5 1.6 5 3.8",
   edit: "M11.8 3.2l3 3L7.3 13.7l-3.6.6.6-3.6zM10.3 4.7l3 3",
   star: "M9 3.2l1.8 3.7 4 .6-2.9 2.8.7 4L9 12.4l-3.6 1.9.7-4L3.2 7.5l4-.6z",
   clock: "M9 14.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11ZM9 6v3.2l2.2 1.3",
-  /**
-   * Projects: a building on a base line.
-   *
-   * Drawn on the same 18×18 grid and the same 1.4 stroke as the rest, because
-   * one icon from a different set is the one that looks wrong at 16px — and
-   * the rail is where every set mismatch is visible side by side.
-   */
+  /** Projects: a building on a base line. */
   projects: "M4 14.5V4.5h6v10M10 8h4v6.5M2.5 14.5h13M6 7h2M6 9.5h2M12 10.5h.8",
-  /**
-   * Aufgaben: a checklist — three lines, the first ticked.
-   *
-   * Deliberately **not** a board of columns, which is what a Kanban module
-   * usually gets. The board is one of two views; the rail row points at the
-   * work, and a reader scanning icons at 16px reads "a list of things to do"
-   * far faster than three vertical rectangles. Same 18×18 grid and 1.4 stroke
-   * as the rest.
-   */
+  /** Aufgaben: a checklist — three lines, the first ticked. */
   tasks: "M3.5 5.2l1.4 1.4 2.4-2.6M3.5 9.5l1.4 1.4M3.5 13.8l1.4 1.4M9.5 5h5M9.5 9.8h5M9.5 14.6h5",
-  /**
-   * Sitzungen: a table seen from above, with people round it.
-   *
-   * Deliberately **not** a speech bubble and not a calendar. A bubble reads as
-   * messaging — this dashboard will have notifications, and two chat-shaped
-   * icons in one rail is the mismatch nobody can unsee. A calendar reads as
-   * scheduling, which is the one thing this module does not do: a meeting here
-   * is a protocol, and the date is metadata on it.
-   *
-   * Same 18×18 grid and 1.4 stroke as the rest.
-   */
+  /** Sitzungen: a table seen from above, with people round it. */
   meetings: "M5.4 7.2h7.2v3.6H5.4zM7.2 4.8v1.6M10.8 4.8v1.6M7.2 11.6v1.6M10.8 11.6v1.6M3 8.4h1.6M13.4 8.4h1.6",
-  /**
-   * Entscheide: a fork with a tick on the branch that was taken.
-   *
-   * A gavel would be wrong — this firm is not a court, and the decisions are
-   * engineering ones. A fork says the thing a decision record is *for*: there
-   * was more than one way, and this is the one that was chosen and why.
-   */
+  /** Entscheide: a fork with a tick on the branch that was taken. */
   decisions: "M9 15.4V9M9 9 5 5M9 9l3.4-3.4M11.2 6.6l1.3 1.3 2.5-2.7",
-  /**
-   * Pläne: a sheet with a folded corner and a title block.
-   *
-   * Deliberately **not** a generic document icon — Dokumente is the next module
-   * and will need one, and two identical page shapes in one rail is the
-   * mismatch nobody can unsee. The fold plus the ruled block in the corner is
-   * what distinguishes a drawing from a letter at 16px.
-   */
+  /** Pläne: a sheet with a folded corner and a title block. */
   drawings: "M4 2.6h6.5L14 6.1v9.3H4zM10.5 2.6v3.5H14M6.2 11.4h5.6M6.2 13.4h3.2",
-  /**
-   * Planversand: a sheet leaving, as an arrow out of a stack.
-   *
-   * Not an envelope — the module records that plans went out, it does not send
-   * e-mail, and an envelope would promise the thing that is explicitly not
-   * built.
-   */
+  /** Planversand: a sheet leaving, as an arrow out of a stack. */
   transmittals: "M3.2 5.4h6.4v7.2H3.2zM11 9h4.2M13.4 7l2 2-2 2",
-  /**
-   * Benachrichtigungen: a bell — a dome on a rim with a clapper under it.
-   *
-   * The one icon in this set that is **not** in the rail: the header's bell
-   * is the way in, and this entry is `hidden`. It is declared anyway so the
-   * palette and the favourites draw the row with a mark rather than a gap,
-   * and so the shape is defined once — the header draws the same path.
-   *
-   * Same 18×18 grid and 1.4 stroke as the rest. Deliberately not an envelope:
-   * `transmittals` already rejected one on the grounds that this system sends
-   * no mail for it, and a second mail-shaped glyph would be the mismatch
-   * nobody can unsee.
-   */
+  /** Benachrichtigungen: a bell. The header's bell draws the same path. */
   bell: "M4.5 12.5V8a4.5 4.5 0 0 1 9 0v4.5M3.2 12.5h11.6M7.4 14.5a1.7 1.7 0 0 0 3.2 0",
+  /** Website: a globe, the mark the rail's foot already uses for "Website ansehen". */
+  website:
+    "M9 15A6 6 0 1 0 9 3a6 6 0 0 0 0 12M3.3 7h11.4M3.3 11h11.4M9 3c-1.6 1.8-2.4 3.8-2.4 6S7.4 13.2 9 15c1.6-1.8 2.4-3.8 2.4-6S10.6 4.8 9 3",
 } as const;
 
+export type IconName = keyof typeof ICONS;
+
 /* ------------------------------------------------------------------ */
-/* Shape                                                               */
+/* Capabilities and audiences                                          */
 /* ------------------------------------------------------------------ */
 
-export type NavItem = {
-  /** Stable across renders — favourites and history are stored by this. */
+/** `can(key)` from the auth context. The only input navigation needs. */
+export type Can = (permission: string) => boolean;
+
+const any = (can: Can, ...keys: string[]) => keys.some((key) => can(key));
+
+/**
+ * Who a workspace is *for* — the one place this is decided.
+ *
+ * A workspace is drawn when its audience holds **and** at least one of its
+ * destinations is visible. The audience is what stops a workspace appearing
+ * because a role happens to hold one broad key that technically opens one page
+ * of it:
+ *
+ * - **System** is for operators. `system.health` alone does not count — twelve
+ *   of fifteen roles hold it, most of them so that the home page's overview
+ *   call answers. The keys that mean somebody *operates* the installation do.
+ * - **Website** is for people who work on the site — write, review, publish,
+ *   manage media — and for roles whose *only* access is reading it (Viewer,
+ *   Guest, Support), for whom it is the whole point of signing in. The
+ *   operational roles hold `content.read` incidentally, beside project work,
+ *   and are not sent into a workspace in which they can change nothing. Their
+ *   deep links still open: the route decides that, not the menu.
+ *
+ * The other five need no more than "holds any key a destination needs", which
+ * the per-destination filter already expresses — so they are `() => true`
+ * here, and the rule is still written down in one place.
+ */
+export const AUDIENCES: Record<WorkspaceId, (can: Can) => boolean> = {
+  overview: () => true,
+  tasks: () => true,
+  projects: () => true,
+  website: (can) =>
+    any(
+      can,
+      "content.create",
+      "content.update",
+      "content.delete",
+      "content.approve",
+      "content.publish",
+      "content.schedule",
+      "content.unpublish",
+      "media.upload",
+      "media.update",
+    ) ||
+    // Read-only content roles: reading the site is their job, not a side grant.
+    (can("content.read") && !any(can, "project.read", "task.read", "meeting.read", "drawing.read")),
+  people: () => true,
+  company: () => true,
+  system: (can) =>
+    any(
+      can,
+      "settings.read",
+      "audit.read",
+      "system.backup",
+      "job.read",
+      "notification.configure",
+      "notification.readDeliveries",
+    ),
+};
+
+/* ------------------------------------------------------------------ */
+/* The registry                                                        */
+/* ------------------------------------------------------------------ */
+
+export type WorkspaceId =
+  | "overview"
+  | "tasks"
+  | "projects"
+  | "website"
+  | "people"
+  | "company"
+  | "system";
+
+export type Workspace = {
+  id: WorkspaceId;
+  label: string;
+  icon: IconName;
+};
+
+/** In rail order: the day's work first, administration last. */
+export const WORKSPACES: Workspace[] = [
+  { id: "overview", label: "Übersicht", icon: "overview" },
+  { id: "tasks", label: "Aufgaben", icon: "tasks" },
+  { id: "projects", label: "Projekte", icon: "projects" },
+  { id: "website", label: "Website", icon: "website" },
+  { id: "people", label: "Personal", icon: "users" },
+  { id: "company", label: "Unternehmen", icon: "company" },
+  { id: "system", label: "System", icon: "settings" },
+];
+
+/** Keys the shell fills with counts. A destination names at most one. */
+export type BadgeKey = "reviews" | "applications" | "projects" | "tasks" | "meetings" | "drawings";
+export type Badges = Partial<Record<BadgeKey, number>>;
+
+export type Destination = {
+  /** Stable — favourites and history are stored by it. */
   id: string;
   to: string;
   label: string;
-  /** Holding any one of these grants the item. Empty means "any signed-in user". */
-  permissions: string[];
-  /** Shown as a count chip. */
-  badge?: number;
-  /**
-   * Match the path exactly instead of by prefix.
-   *
-   * Needed by a destination that is the parent of other destinations.
-   * "Website bearbeiten" is `/inhalte`, and every content list below it is
-   * `/inhalte/<type>` — under the default prefix rule it would stay lit on all
-   * of them and, worse, win `activeSection` ahead of the group the editor is
-   * actually in, putting the wrong name in the top bar.
-   */
+  /** `null` for the reader's own account pages, which belong to no workspace. */
+  workspace: WorkspaceId | null;
+  /** Shown to the reader when this is true. Always `can`-derived. */
+  visibleWhen: (can: Can) => boolean;
+  /** Other words people type for it. German first; technical and English aliases welcome. */
+  keywords?: string[];
+  /** A sub-heading inside the workspace's navigation. */
+  group?: string;
+  /** Match the path exactly rather than as a prefix. */
   exact?: boolean;
+  badge?: BadgeKey;
+  /**
+   * Whether the badge is something to act on, and so worth summing onto the
+   * workspace's own row. Live projects are a count, not a to-do.
+   */
+  actionable?: boolean;
+  /** In search, never in the rail — the reader's own account pages. */
+  searchOnly?: boolean;
 };
 
 /**
- * The rail's blocks, in the order they are drawn.
+ * Every fixed destination, in the order each workspace lists them.
  *
- * The order is the editor's working day, not the database's: what is waiting
- * for you, then what you edit, then what you administer. Before this the rail
- * was one flat list of fifteen peers in whatever order the two builders
- * happened to be concatenated in, which put seven content groups above
- * "Übersicht" — the home page sat eighth.
- *
- * `work` is deliberately unlabelled. A heading over the first three rows would
- * name what the reader can already see at the top of a menu, and the two
- * headings below do their work by being the only two.
- *
- * `hidden` is not drawn at all. It exists so a destination can leave the rail
- * without leaving the menu: "Mein Konto" duplicates the header's user panel as
- * a row, but `flattenNavigation` still finds it, so search and favourites keep
- * reaching it. Dropping the section outright would have made it unsearchable.
+ * The first visible destination of a workspace is where its rail row leads.
  */
-export type Zone = "work" | "website" | "admin" | "hidden";
+export const DESTINATIONS: Destination[] = [
+  {
+    id: "overview",
+    to: "/",
+    label: "Übersicht",
+    workspace: "overview",
+    exact: true,
+    keywords: ["dashboard", "start", "home", "kennzahlen"],
+    // The route's own keys: the home page is also the landing page.
+    visibleWhen: (can) => any(can, "system.health", "content.read"),
+  },
 
-export const ZONES: { id: Zone; label: string | null }[] = [
-  { id: "work", label: null },
-  { id: "website", label: "Website" },
-  { id: "admin", label: "Verwaltung" },
+  {
+    id: "tasks",
+    to: "/aufgaben",
+    label: "Aufgaben",
+    workspace: "tasks",
+    badge: "tasks",
+    actionable: true,
+    keywords: ["tasks", "todo", "pendenzen", "board"],
+    visibleWhen: (can) => can("task.read"),
+  },
+
+  /*
+    Projekte. "Alle Projekte" rather than a second "Projekte" under the
+    workspace of that name — the register is one of five things here, not the
+    workspace itself.
+  */
+  {
+    id: "projects",
+    to: "/projekte",
+    label: "Alle Projekte",
+    workspace: "projects",
+    badge: "projects",
+    keywords: ["projekte", "projects", "register", "bauherrschaft"],
+    visibleWhen: (can) => can("project.read"),
+  },
+  {
+    id: "meetings",
+    to: "/sitzungen",
+    label: "Sitzungen",
+    workspace: "projects",
+    badge: "meetings",
+    actionable: true,
+    keywords: ["meetings", "bausitzung", "protokoll", "traktanden"],
+    visibleWhen: (can) => can("meeting.read"),
+  },
+  {
+    id: "decisions",
+    to: "/entscheide",
+    label: "Entscheide",
+    workspace: "projects",
+    keywords: ["decisions", "beschluss", "entscheidungen"],
+    visibleWhen: (can) => can("decision.read"),
+  },
+  {
+    id: "drawings",
+    to: "/plaene",
+    label: "Pläne",
+    workspace: "projects",
+    badge: "drawings",
+    actionable: true,
+    keywords: ["plaene", "drawings", "plans", "zeichnungen", "revisionen"],
+    visibleWhen: (can) => can("drawing.read"),
+  },
+  {
+    id: "transmittals",
+    to: "/planversand",
+    label: "Planversand",
+    workspace: "projects",
+    keywords: ["transmittal", "versand", "ausgabe"],
+    visibleWhen: (can) => can("transmittal.read"),
+  },
+
+  /*
+    Website. Review and publication are stages of the content's life, so they
+    sit with it rather than in the day's-work block where the old rail had them
+    — and each is offered to the people who can *act* there: approving is
+    `content.approve`, not `content.read`; publishing is the three publishing
+    verbs, not `content.history`.
+  */
+  {
+    id: "content",
+    to: "/inhalte",
+    label: "Inhalte",
+    workspace: "website",
+    keywords: ["website bearbeiten", "content", "texte", "seiten", "cms"],
+    visibleWhen: (can) => can("content.read"),
+  },
+  {
+    id: "reviews",
+    to: "/freigaben",
+    label: "Freigaben",
+    workspace: "website",
+    badge: "reviews",
+    actionable: true,
+    keywords: ["review", "approve", "prüfen", "vier-augen"],
+    visibleWhen: (can) => can("content.approve"),
+  },
+  {
+    id: "publish",
+    to: "/veroeffentlichen",
+    label: "Veröffentlichen",
+    workspace: "website",
+    keywords: ["publish", "publizieren", "live", "snapshot", "terminieren"],
+    visibleWhen: (can) => any(can, "content.publish", "content.schedule", "content.unpublish"),
+  },
+  {
+    id: "media",
+    to: "/medien",
+    label: "Medien",
+    workspace: "website",
+    keywords: ["media", "bilder", "dateien", "images", "uploads"],
+    visibleWhen: (can) => can("media.read"),
+  },
+  {
+    id: "settings-workflow",
+    to: "/einstellungen/freigabe",
+    label: "Freigabe-Regeln",
+    workspace: "website",
+    group: "Einstellungen",
+    keywords: ["freigabe", "vier-augen-prinzip", "workflow", "auto-publish"],
+    visibleWhen: (can) => can("settings.read"),
+  },
+
+  /* Personal. Roles are access administration, grouped under it. */
+  {
+    id: "applications",
+    to: "/bewerbungen",
+    label: "Bewerbungen",
+    workspace: "people",
+    badge: "applications",
+    actionable: true,
+    keywords: ["applications", "kandidaten", "dossier", "rekrutierung"],
+    visibleWhen: (can) => can("application.read"),
+  },
+  {
+    id: "users",
+    to: "/benutzer",
+    label: "Benutzer",
+    workspace: "people",
+    group: "Zugang",
+    keywords: ["users", "konten", "accounts", "einladen", "zugänge"],
+    visibleWhen: (can) => can("user.read"),
+  },
+  {
+    id: "roles",
+    to: "/rollen",
+    label: "Rollen",
+    workspace: "people",
+    group: "Zugang",
+    keywords: ["roles", "rechte", "berechtigungen", "permissions"],
+    visibleWhen: (can) => can("role.read"),
+  },
+  {
+    id: "settings-applications",
+    to: "/einstellungen/bewerbungen",
+    label: "Bewerbungen einrichten",
+    workspace: "people",
+    group: "Einstellungen",
+    keywords: ["aufbewahrung", "retention", "dateigrösse"],
+    visibleWhen: (can) => can("settings.read"),
+  },
+
+  /*
+    Unternehmen — the firm's own record, and the only thing this label now
+    means. Leitbild, Sponsoring and the like are *website content about* the
+    company; they stay content, edited under Website › Inhalte.
+  */
+  {
+    id: "company-general",
+    to: "/einstellungen/unternehmen",
+    label: "Allgemein",
+    workspace: "company",
+    keywords: ["firma", "organisation", "firmenname"],
+    visibleWhen: (can) => can("organisation.read"),
+  },
+  {
+    id: "company-legal",
+    to: "/einstellungen/rechtliches",
+    label: "Recht und Identität",
+    workspace: "company",
+    keywords: ["impressum", "uid", "handelsregister", "rechtliches", "mwst"],
+    visibleWhen: (can) => can("organisation.read"),
+  },
+  {
+    id: "company-offices",
+    to: "/einstellungen/standorte",
+    label: "Standorte",
+    workspace: "company",
+    keywords: ["offices", "büro", "adresse", "hauptsitz"],
+    visibleWhen: (can) => can("office.read"),
+  },
+  {
+    id: "company-contact",
+    to: "/einstellungen/kontakt",
+    label: "Kontakt",
+    workspace: "company",
+    keywords: ["telefon", "e-mail-adressen", "contact"],
+    visibleWhen: (can) => can("organisation.read"),
+  },
+  {
+    id: "company-website",
+    to: "/einstellungen/website",
+    label: "Website-Vorgaben",
+    workspace: "company",
+    keywords: ["seo", "favicon", "vorschaubild", "og image"],
+    visibleWhen: (can) => can("organisation.read"),
+  },
+
+  /*
+    System. The operations half first — what somebody opens when something is
+    wrong — then the configuration half under its own heading.
+  */
+  {
+    id: "system-overview",
+    to: "/system",
+    label: "Systemzustand",
+    workspace: "system",
+    keywords: ["health", "status", "control center", "datenbank", "speicher"],
+    visibleWhen: (can) => can("system.health"),
+  },
+  {
+    id: "system-jobs",
+    to: "/system/aufgaben",
+    label: "Hintergrundaufgaben",
+    workspace: "system",
+    keywords: ["jobs", "queue", "warteschlange", "wiederholen"],
+    // The route opens on `system.health`; the section needs `job.read` too.
+    visibleWhen: (can) => can("system.health") && can("job.read"),
+  },
+  {
+    id: "system-diagnostics",
+    to: "/system/diagnose",
+    label: "Diagnose",
+    workspace: "system",
+    keywords: ["diagnostics", "check", "prüfen", "fehlersuche"],
+    visibleWhen: (can) => can("system.health"),
+  },
+  {
+    id: "backups",
+    to: "/sicherungen",
+    label: "Sicherungen",
+    workspace: "system",
+    keywords: ["backup", "backups", "restore", "wiederherstellen", "einspielen"],
+    visibleWhen: (can) => can("system.backup"),
+  },
+  {
+    id: "audit",
+    to: "/audit",
+    label: "Audit-Log",
+    workspace: "system",
+    keywords: ["log", "protokoll", "verlauf", "wer hat"],
+    visibleWhen: (can) => can("audit.read"),
+  },
+  {
+    id: "settings-email",
+    to: "/einstellungen/email",
+    label: "E-Mail",
+    workspace: "system",
+    group: "Einstellungen",
+    keywords: ["mail", "smtp", "email", "absender", "versand"],
+    visibleWhen: (can) => can("settings.read"),
+  },
+  {
+    id: "settings-backup",
+    to: "/einstellungen/sicherung",
+    label: "Sicherung einrichten",
+    workspace: "system",
+    group: "Einstellungen",
+    keywords: ["backup", "zeitplan", "aufbewahrung"],
+    visibleWhen: (can) => can("system.backup"),
+  },
+  {
+    id: "settings-security",
+    to: "/einstellungen/sicherheit",
+    label: "Sicherheit",
+    workspace: "system",
+    group: "Einstellungen",
+    keywords: ["security", "passwort", "sperre", "lockout", "sitzungsdauer"],
+    visibleWhen: (can) => can("settings.read"),
+  },
+  {
+    id: "settings-notifications",
+    to: "/einstellungen/benachrichtigungen",
+    label: "Benachrichtigungsregeln",
+    workspace: "system",
+    group: "Einstellungen",
+    keywords: ["notifications", "regeln", "zustellprotokoll", "deliveries"],
+    visibleWhen: (can) => any(can, "notification.configure", "notification.readDeliveries"),
+  },
+  {
+    id: "settings-system",
+    to: "/einstellungen/system",
+    label: "Installation",
+    workspace: "system",
+    group: "Einstellungen",
+    keywords: ["version", "laufzeit", "migrationen", "integrationen"],
+    visibleWhen: (can) => can("system.health"),
+  },
+
+  /* The reader's own — no workspace, in search only. */
+  {
+    id: "notifications",
+    to: "/benachrichtigungen",
+    label: "Benachrichtigungen",
+    workspace: null,
+    searchOnly: true,
+    keywords: ["notifications", "meldungen", "inbox", "glocke"],
+    visibleWhen: () => true,
+  },
+  {
+    id: "account",
+    to: "/profil",
+    label: "Mein Konto",
+    workspace: null,
+    searchOnly: true,
+    keywords: ["profil", "passwort ändern", "zwei-faktor", "2fa", "sitzungen", "design"],
+    visibleWhen: () => true,
+  },
 ];
 
-export type NavSection = {
-  id: string;
-  label: string;
-  /** A key of `ICONS`. */
-  icon: string;
-  /** Which block of the rail this sits in. `"hidden"` is searchable, not drawn. */
-  zone: Zone;
-  /** Set when the section is itself a destination and has no children. */
-  to?: string;
-  permissions: string[];
-  badge?: number;
-  /** As `NavItem.exact`. */
-  exact?: boolean;
-  /**
-   * Leave the section's name out of the top bar.
-   *
-   * For a page that already says where it is. "Website bearbeiten" embeds the
-   * live site, which carries its own header; the dashboard's label above that
-   * frame read as a breadcrumb into the site's navigation rather than as a
-   * heading, and the rail already shows which page is open.
-   */
-  hideBarTitle?: boolean;
-  /**
-   * The group's entries. Rendered by `SectionTabs` across the top of the
-   * group's page, not in the rail — the rail lists groups only.
-   */
-  items: NavItem[];
+/* ------------------------------------------------------------------ */
+/* Derivation                                                          */
+/* ------------------------------------------------------------------ */
+
+export type NavDestination = Destination & { count?: number };
+
+export type NavWorkspace = Workspace & {
+  /** Where the rail row leads: the first visible destination. */
+  to: string;
+  destinations: NavDestination[];
+  /** Sum of the actionable counts inside — shown while the workspace is closed. */
+  count?: number;
 };
 
-/* ------------------------------------------------------------------ */
-/* Where each content type belongs                                     */
-/* ------------------------------------------------------------------ */
-
-/**
- * The grouping of the Website section, in the order the groups appear.
- *
- * Ordered by how often an editor touches them, not alphabetically and not by
- * the order they happen to sit in `content-types.ts`: the areas that change
- * weekly come first, and the label blocks — edited about once a year — last.
- */
-const CONTENT_GROUPS: { id: string; label: string; icon: string }[] = [
-  { id: "web-main", label: "Hauptinhalte", icon: "star" },
-  { id: "web-services", label: "Leistungen", icon: "services" },
-  { id: "web-career", label: "Karriere", icon: "career" },
-  { id: "web-company", label: "Unternehmen", icon: "company" },
-  // SEO used to be its own group holding exactly one type, which spent a whole
-  // rail row on a single page. It sits with the other site-wide plumbing.
-  { id: "web-structure", label: "Struktur & SEO", icon: "structure" },
-  { id: "web-labels", label: "Beschriftungen", icon: "labels" },
-  // Anything `GROUP_OF` does not name lands here rather than vanishing.
-  { id: "web-other", label: "Weitere Inhalte", icon: "content" },
-];
-
-const FALLBACK_GROUP = "web-other";
-
-/** Content type key → group id. Types absent from this map go to the fallback. */
-const GROUP_OF: Record<string, string> = {
-  // Touched constantly: the front page, the references, the people.
-  hero: "web-main",
-  sections: "web-main",
-  projects: "web-main",
-  team: "web-main",
-  teamImage: "web-main",
-
-  // What the firm sells, and how the work runs.
-  services: "web-services",
-  disciplines: "web-services",
-  phases: "web-services",
-  bauakte: "web-services",
-
-  // Everything a vacancy needs, including the form it is applied to with.
-  openings: "web-career",
-  jobTexts: "web-career",
-  jobCategoryNotes: "web-career",
-  bewerbung: "web-career",
-  contactEmail: "web-career",
-
-  // Stable facts about IEM itself.
-  leitbild: "web-company",
-  facts: "web-company",
-  offices: "web-company",
-  sponsorships: "web-company",
-  contact: "web-company",
-  socials: "web-company",
-
-  navItems: "web-structure",
-  footer: "web-structure",
-  seo: "web-structure",
-
-  appLabels: "web-labels",
-  navLabels: "web-labels",
-  serviceLabels: "web-labels",
-  referenzLabels: "web-labels",
-  projectDialogLabels: "web-labels",
-  teamLabels: "web-labels",
-  jobLabels: "web-labels",
-  stelleLabels: "web-labels",
-  siteSearchLabels: "web-labels",
-  searchLabels: "web-labels",
-  ueberUnsLabels: "web-labels",
-  ablaufControls: "web-labels",
-  phaseTrack: "web-labels",
-};
-
-/* ------------------------------------------------------------------ */
-/* Everything that is not a content type                               */
-/* ------------------------------------------------------------------ */
-
-/**
- * The fixed part of the menu, in its two blocks.
- *
- * `reviews` and `applications` take their counts from the caller, which is why
- * these are a function rather than a constant.
- *
- * The split is by what the row is *for*, not by what it touches. "Freigaben"
- * and "Veröffentlichen" are steps in getting an edit onto the live site, so
- * they lead; "Medien" and "Bewerbungen" are stores you visit when you need
- * something from them, so they sit with the administrative rows.
- */
-function operationalSections(badges: {
-  reviews?: number;
-  applications?: number;
-  projects?: number;
-  tasks?: number;
-  meetings?: number;
-  drawings?: number;
-}): NavSection[] {
-  return [
-    {
-      id: "overview",
-      label: "Übersicht",
-      icon: "overview",
-      zone: "work",
-      to: "/",
-      permissions: ["system.health", "content.read"],
-      items: [],
-    },
-    {
-      /**
-       * The first row of the operational platform, and it leads the zone for a
-       * reason: at IEM the project *is* the work. Tasks, meetings, drawings,
-       * time and invoices are all reached through one, which is what makes the
-       * project view a container rather than one module among nineteen.
-       *
-       * `exact: false` — the default — because `/projekte/:id/gewerke` should
-       * light this row. That is the opposite of "Website bearbeiten", which
-       * needs `exact` precisely because it is the parent of other
-       * destinations that have rails of their own.
-       *
-       * The badge counts live projects (`ACTIVE` + `ON_HOLD`), not all of
-       * them: a number that only ever grows stops being read. It shares a
-       * cache entry with the list screen's filter chips, so it costs no extra
-       * request.
-       */
-      id: "projects",
-      label: "Projekte",
-      icon: "projects",
-      zone: "work",
-      to: "/projekte",
-      permissions: ["project.read"],
-      badge: badges.projects,
-      items: [],
-    },
-    {
-      /**
-       * Aufgaben, directly under Projekte and above Freigaben.
-       *
-       * It sits with the project rather than in the administrative zone because
-       * it is *work*, not a store you visit: "was liegt bei mir" is the first
-       * question somebody has on signing in, and the second is "was ist auf
-       * meinen Projekten los".
-       *
-       * The badge counts **overdue** tasks, not open ones. "Wie viele Aufgaben
-       * habe ich" is always some tens and is a number nobody acts on; a badge
-       * that is always lit is one people stop seeing. It shares a cache entry
-       * with the list screen's KPI tiles, so it costs no extra request.
-       */
-      id: "tasks",
-      label: "Aufgaben",
-      icon: "tasks",
-      zone: "work",
-      to: "/aufgaben",
-      permissions: ["task.read"],
-      badge: badges.tasks,
-      items: [],
-    },
-    {
-      /**
-       * Sitzungen, under Aufgaben.
-       *
-       * The badge counts **protocols that have not gone out** — held meetings
-       * with no `minutesSentAt` — and not meetings, not upcoming ones. "Wie
-       * viele Sitzungen gibt es" is a number nobody acts on; "welches Protokoll
-       * muss ich noch versenden" is the one thing this module asks of a person,
-       * and it is answerable on a Friday afternoon. Same argument as the overdue
-       * count above, and it shares a cache entry with the list's KPI tiles.
-       */
-      id: "meetings",
-      label: "Sitzungen",
-      icon: "meetings",
-      zone: "work",
-      to: "/sitzungen",
-      permissions: ["meeting.read"],
-      badge: badges.meetings,
-      items: [],
-    },
-    {
-      /**
-       * Entscheide, a rail row of its own rather than a tab under Sitzungen.
-       *
-       * A decision outlives the meeting it was taken in, and some are taken in
-       * no meeting at all — on the Bauplatz, on the phone. Filing the register
-       * under Sitzungen would make "was wurde hier entschieden" reachable only
-       * through the chronology it is independent of.
-       *
-       * **No badge.** There is no number here anybody acts on: open decisions
-       * are somebody's to carry, not something this rail can chase, and a count
-       * of everything the firm has ever decided is a figure that only grows.
-       */
-      id: "decisions",
-      label: "Entscheide",
-      icon: "decisions",
-      zone: "work",
-      to: "/entscheide",
-      permissions: ["decision.read"],
-      items: [],
-    },
-    {
-      /**
-       * Pläne, under Entscheide.
-       *
-       * The badge counts plans **in Prüfung** — not how many plans exist, and
-       * not how many are in progress. *"Was liegt bei mir zur Prüfung"* is the
-       * one thing this module asks of a person; a count of the whole register
-       * only grows and is a number nobody acts on. It shares a cache entry with
-       * the register's KPI tiles, so it costs no extra request.
-       */
-      id: "drawings",
-      label: "Pläne",
-      icon: "drawings",
-      zone: "work",
-      to: "/plaene",
-      permissions: ["drawing.read"],
-      badge: badges.drawings,
-      items: [],
-    },
-    {
-      /**
-       * Planversand, a row of its own rather than a tab under Pläne.
-       *
-       * It is found by its own number months later, and the question it answers
-       * is about the send rather than about any one plan.
-       *
-       * **No badge.** There is no number here anybody acts on: unacknowledged
-       * receipts are somebody's to chase by telephone, not something a rail can
-       * count usefully.
-       */
-      id: "transmittals",
-      label: "Planversand",
-      icon: "transmittals",
-      zone: "work",
-      to: "/planversand",
-      permissions: ["transmittal.read"],
-      items: [],
-    },
-    {
-      id: "reviews",
-      label: "Freigaben",
-      icon: "review",
-      zone: "work",
-      to: "/freigaben",
-      permissions: ["content.approve", "content.read"],
-      badge: badges.reviews,
-      items: [],
-    },
-    {
-      id: "publish",
-      label: "Veröffentlichen",
-      icon: "publish",
-      zone: "work",
-      to: "/veroeffentlichen",
-      permissions: ["content.publish", "content.history"],
-      items: [],
-    },
-    {
-      /**
-       * The index of every content type, which `ContentIndexPage` has always
-       * served at `/inhalte` with nothing linking to it. The rail's Website
-       * block goes straight to the individual groups, so the one screen that
-       * shows the whole site at once was reachable only by typing the URL.
-       *
-       * It leads its zone rather than joining the groups: it is the way in to
-       * all of them, not a seventh one beside them.
-       *
-       * No entries and no name in the bar. The page embeds the live site, and
-       * the site brings its own header with it — a second copy of that
-       * navigation above the frame said the same thing twice.
-       */
-      id: "content-index",
-      label: "Website bearbeiten",
-      icon: "edit",
-      zone: "website",
-      to: "/inhalte",
-      exact: true,
-      hideBarTitle: true,
-      permissions: ["content.read"],
-      items: [],
-    },
-    {
-      id: "media",
-      label: "Medien",
-      icon: "media",
-      zone: "admin",
-      to: "/medien",
-      permissions: ["media.read"],
-      items: [],
-    },
-    {
-      id: "applications",
-      label: "Bewerbungen",
-      icon: "applications",
-      zone: "admin",
-      to: "/bewerbungen",
-      permissions: ["application.read"],
-      badge: badges.applications,
-      items: [],
-    },
-    {
-      id: "people",
-      label: "Benutzer & Rollen",
-      icon: "users",
-      zone: "admin",
-      permissions: ["user.read", "role.read"],
-      items: [
-        { id: "users", to: "/benutzer", label: "Benutzer", permissions: ["user.read"] },
-        { id: "roles", to: "/rollen", label: "Rollen", permissions: ["role.read"] },
-      ],
-    },
-    /**
-     * Unternehmen — its own group, above System rather than inside it.
-     *
-     * "Wie heissen wir, wo sind wir, was steht im Handelsregister" and "wie
-     * kommt Post raus, wie lange gilt eine Sitzung" are two different
-     * questions asked by two different people, and they were one
-     * alphabetically-ordered list of cards before. The rail row leads to the
-     * company; the operational half stays under System, and both open the
-     * same workspace at a different section.
-     *
-     * Each entry stands on the permission the *server* checks for that
-     * section, not on `settings.read`: somebody who may read the organisation
-     * and not the settings store sees three rows here and none under System,
-     * which is the correct menu for them rather than a shorter version of
-     * somebody else's.
-     */
-    {
-      id: "company",
-      label: "Unternehmen",
-      icon: "company",
-      zone: "admin",
-      permissions: ["organisation.read", "office.read"],
-      items: [
-        {
-          id: "company-general",
-          to: "/einstellungen/unternehmen",
-          label: "Allgemein",
-          permissions: ["organisation.read"],
-        },
-        {
-          id: "company-legal",
-          to: "/einstellungen/rechtliches",
-          label: "Recht und Identität",
-          permissions: ["organisation.read"],
-        },
-        {
-          id: "company-offices",
-          to: "/einstellungen/standorte",
-          label: "Standorte",
-          permissions: ["office.read"],
-        },
-        {
-          id: "company-contact",
-          to: "/einstellungen/kontakt",
-          label: "Kontakt",
-          permissions: ["organisation.read"],
-        },
-        {
-          id: "company-website",
-          to: "/einstellungen/website",
-          label: "Website-Vorgaben",
-          permissions: ["organisation.read"],
-        },
-      ],
-    },
-    {
-      id: "system",
-      label: "System",
-      icon: "settings",
-      zone: "admin",
-      permissions: [
-        "settings.read",
-        "audit.read",
-        "system.health",
-        "notification.configure",
-        "notification.readDeliveries",
-        // P2-5: `system.backup` opens two rows here and nothing else, so a
-        // role holding only it would otherwise see an empty System group.
-        "system.backup",
-      ],
-      items: [
-        /**
-         * First, because it is the way in (P2-6).
-         *
-         * The System Control Center is where somebody goes when they do not
-         * yet know which subsystem is at fault — so it sits above the eight
-         * rows that each assume you already do. Every card on it links to the
-         * module below that owns the detail, which is why this group did not
-         * grow eight more entries.
-         *
-         * `job.read` is **not** listed: the workspace opens on `system.health`
-         * and hides the Aufgaben section from anybody without the second key.
-         * Requiring both here would shut a reader out of the overview their
-         * own row points at — the mistake `routes.test.ts` caught on the
-         * settings workspace.
-         */
-        {
-          id: "system-overview",
-          to: "/system",
-          label: "Systemzustand",
-          permissions: ["system.health"],
-        },
-        {
-          id: "settings",
-          to: "/einstellungen/email",
-          label: "E-Mail",
-          permissions: ["settings.read"],
-        },
-        /**
-         * Two rows, deliberately (P2-5).
-         *
-         * *Sicherungen* is the operations destination — history, run now,
-         * restore — and *Sicherung* is the configuration section in the
-         * settings workspace. They are separate because they are read by
-         * somebody in two different situations: one is "set this up once",
-         * the other is "something has gone wrong".
-         *
-         * The operations row stands on `system.backup` rather than
-         * `settings.read`: an operator may be trusted with recovery points
-         * and not with the settings store.
-         */
-        {
-          id: "backups",
-          to: "/sicherungen",
-          label: "Sicherungen",
-          permissions: ["system.backup"],
-        },
-        {
-          id: "settings-backup",
-          to: "/einstellungen/sicherung",
-          label: "Sicherung einrichten",
-          permissions: ["system.backup"],
-        },
-        {
-          id: "settings-applications",
-          to: "/einstellungen/bewerbungen",
-          label: "Bewerbungen",
-          permissions: ["settings.read"],
-        },
-        {
-          id: "settings-workflow",
-          to: "/einstellungen/freigabe",
-          label: "Freigabe",
-          permissions: ["settings.read"],
-        },
-        {
-          id: "settings-security",
-          to: "/einstellungen/sicherheit",
-          label: "Sicherheit",
-          permissions: ["settings.read"],
-        },
-        {
-          /*
-            Stands on its own two keys rather than on `settings.read`, the
-            same way every other row in this group stands on the permission
-            the *server* checks for its section. Somebody who may read the
-            settings store and not configure notifications sees the four
-            rows above and not this one, which is the correct menu for them
-            rather than a shorter version of somebody else's.
-          */
-          id: "settings-notifications",
-          to: "/einstellungen/benachrichtigungen",
-          label: "Benachrichtigungen",
-          permissions: ["notification.configure", "notification.readDeliveries"],
-        },
-        {
-          id: "settings-system",
-          to: "/einstellungen/system",
-          label: "System",
-          permissions: ["system.health"],
-        },
-        { id: "audit", to: "/audit", label: "Audit-Log", permissions: ["audit.read"] },
-      ],
-    },
-    {
-      /**
-       * Benachrichtigungen — searchable, and **not drawn in the rail**.
-       *
-       * The bell in the header is the way in, and it is on every screen; a
-       * rail row beside it would be a second door to the same room, which is
-       * the argument that put "Mein Konto" in this zone as well. What
-       * `hidden` buys is that the palette and the favourites still find it,
-       * so somebody who types "Benachricht…" reaches the page.
-       *
-       * It is also why the brief's warning — *do not overload the SideNav
-       * with a large notification submenu* — needed no resisting: there is
-       * no submenu, because the page carries its own two tabs.
-       */
-      id: "notifications",
-      label: "Benachrichtigungen",
-      icon: "bell",
-      zone: "hidden",
-      to: "/benachrichtigungen",
-      // No key: everyone has an inbox of their own.
-      permissions: [],
-      items: [],
-    },
-    {
-      id: "account",
-      label: "Mein Konto",
-      icon: "account",
-      // Off the rail: the header's user panel already carries Profil and
-      // Abmelden, and a second door to the same room is a row that teaches the
-      // reader nothing. `hidden` keeps it in search and favourites.
-      zone: "hidden",
-      to: "/profil",
-      // No key: everyone reaches their own profile.
-      permissions: [],
-      items: [],
-    },
-  ];
-}
-
-/* ------------------------------------------------------------------ */
-/* Assembly                                                            */
-/* ------------------------------------------------------------------ */
-
-/**
- * Builds the menu for one signed-in user.
- *
- * `canAny([])` is treated as granted — an item naming no permission is open to
- * anyone who is signed in, which is what "Mein Konto" wants.
- */
-export function buildNavigation({
-  types,
-  canAny,
-  badges = {},
-}: {
-  /** From `api.contentTypes()`. Pass an empty array before it resolves. */
-  types: ContentTypeRow[];
-  canAny: (permissions: string[]) => boolean;
-  badges?: {
-    reviews?: number;
-    applications?: number;
-    projects?: number;
-    tasks?: number;
-    meetings?: number;
-    drawings?: number;
-  };
-}): NavSection[] {
-  // Sorted into rail order here rather than in the rail, so that everything
-  // reading this list agrees: `flattenNavigation` feeds search in the same
-  // order the eye meets the rows, and a `find` for the active section walks
-  // them the same way. `hidden` sorts last and is dropped by the rail.
-  const rank = (z: Zone) => {
-    const at = ZONES.findIndex((zone) => zone.id === z);
-    return at === -1 ? ZONES.length : at;
-  };
-  const sections = [...operationalSections(badges), ...buildWebsiteGroups(types)].sort(
-    (a, b) => rank(a.zone) - rank(b.zone),
-  );
-
-  return sections
-    .map((section) => ({
-      ...section,
-      items: section.items.filter((item) => canAny(item.permissions)),
-    }))
-    // A link-shaped section stands on its own permissions. A group stands or
-    // falls with its children: filtering every child away leaves a heading over
-    // nothing, which is worse than an absent heading.
-    .filter((section) =>
-      section.to ? canAny(section.permissions) : section.items.length > 0,
-    );
-}
-
-function buildWebsiteGroups(types: ContentTypeRow[]): NavSection[] {
-  const byGroup = new Map<string, NavItem[]>();
-
-  for (const type of [...types].sort((a, b) => a.rank - b.rank)) {
-    const group = GROUP_OF[type.key] ?? FALLBACK_GROUP;
-    const item: NavItem = {
-      id: `type:${type.key}`,
-      to: `/inhalte/${type.key}`,
-      label: type.name,
-      permissions: ["content.read"],
-    };
-    byGroup.set(group, [...(byGroup.get(group) ?? []), item]);
-  }
-
-  return CONTENT_GROUPS.filter((g) => byGroup.has(g.id)).map((g) => ({
-    id: g.id,
-    label: g.label,
-    icon: g.icon,
-    zone: "website",
-    permissions: ["content.read"],
-    items: byGroup.get(g.id)!,
-  }));
+/** Whether a destination is offered to this reader: its own rule *and* its workspace's audience. */
+export function isOffered(destination: Destination, can: Can): boolean {
+  if (!destination.visibleWhen(can)) return false;
+  return destination.workspace === null || AUDIENCES[destination.workspace](can);
 }
 
 /**
- * Where a main group leads when it is clicked.
+ * The rail for one reader.
  *
- * A group is not itself a destination — "Hauptinhalte" has no page — so it
- * stands for its first entry. That keeps every rail row a real link, with no
- * landing routes invented to sit behind a heading, and it means the row is
- * middle-clickable and bookmarkable like any other.
+ * A workspace with no visible destination is not returned — never an empty
+ * heading, never a row that leads to a refusal. Pure, and cheap: it reads the
+ * permissions already in the auth context and makes no request.
  */
-export function sectionHref(section: NavSection): string | null {
-  return section.to ?? section.items[0]?.to ?? null;
-}
+export function buildNavigation({ can, badges = {} }: { can: Can; badges?: Badges }): NavWorkspace[] {
+  const out: NavWorkspace[] = [];
+  for (const workspace of WORKSPACES) {
+    const destinations: NavDestination[] = DESTINATIONS.filter(
+      (d) => d.workspace === workspace.id && !d.searchOnly && isOffered(d, can),
+    ).map((d) => (d.badge && badges[d.badge] ? { ...d, count: badges[d.badge] } : d));
+    if (!destinations.length) continue;
 
-/**
- * The group the current path belongs to.
- *
- * Matched on the group's own route first, then on any entry inside it, so an
- * editor three segments deep (`/inhalte/projects/abc`) still resolves to
- * "Hauptinhalte" and gets that group's tabs above the page.
- */
-export function activeSection(sections: NavSection[], path: string): NavSection | null {
-  return (
-    sections.find((s) => s.to && isActive(s.to, path, s.exact)) ??
-    sections.find((s) => s.items.some((i) => isActive(i.to, path, i.exact))) ??
-    null
-  );
-}
+    const count = destinations
+      .filter((d) => d.actionable && d.count)
+      .reduce((sum, d) => sum + (d.count ?? 0), 0);
 
-/** Every destination in the menu, flattened — what search and history read. */
-export function flattenNavigation(sections: NavSection[]): NavItem[] {
-  const out: NavItem[] = [];
-  for (const section of sections) {
-    if (section.to) {
-      out.push({
-        id: section.id,
-        to: section.to,
-        label: section.label,
-        permissions: section.permissions,
-        exact: section.exact,
-      });
-    }
-    out.push(...section.items);
+    out.push({ ...workspace, to: destinations[0].to, destinations, count: count || undefined });
   }
   return out;
 }
 
-/**
- * Whether a path belongs to a destination.
- *
- * Prefix-matched so `/inhalte/projects/abc` keeps "Referenzprojekte" lit while
- * the editor is open — but only on a segment boundary, or `/inhalte/team` would
- * also light `/inhalte/teamImage`.
- */
+/** Whether a path is a destination — prefix-matched on a segment boundary unless `exact`. */
 export function isActive(to: string, path: string, exact = false): boolean {
-  if (to === "/") return path === "/" || path === "";
-  if (exact) return path === to;
-  return path === to || path.startsWith(`${to}/`);
+  const p = path === "" ? "/" : path;
+  if (to === "/") return p === "/";
+  if (exact) return p === to;
+  return p === to || p.startsWith(`${to}/`);
+}
+
+/**
+ * Which destination a path belongs to, over the **whole registry** rather than
+ * the reader's filtered menu — ownership is a property of the route, not of the
+ * person looking at it. The longest match wins, so `/system/aufgaben` is
+ * Hintergrundaufgaben and not Systemzustand, and `/inhalte/team/abc` is Inhalte.
+ *
+ * `/einstellungen` with no section shows the first one, which is Unternehmen's.
+ */
+export function ownerOf(path: string): Destination | null {
+  const p = path === "" ? "/" : path;
+  if (p === "/einstellungen") return DESTINATIONS.find((d) => d.id === "company-general") ?? null;
+  let best: Destination | null = null;
+  for (const d of DESTINATIONS) {
+    if (!isActive(d.to, p, d.exact)) continue;
+    if (!best || d.to.length > best.to.length) best = d;
+  }
+  return best;
+}
+
+/** The workspace a path belongs to, or `null` for the reader's own pages and unknown paths. */
+export function activeWorkspace(path: string): WorkspaceId | null {
+  return ownerOf(path)?.workspace ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Search                                                              */
+/* ------------------------------------------------------------------ */
+
+export type SearchEntry = {
+  id: string;
+  to: string;
+  label: string;
+  /** Where it lives, for the result row: "Website › Inhalte". */
+  context: string;
+  keywords: string[];
+};
+
+/**
+ * Everything the command palette may offer this reader.
+ *
+ * Built from exactly the filter the rail uses (`isOffered`), so the palette
+ * cannot reveal a destination the rail hides. The content types are added
+ * **only when the reader's Website workspace is visible** — they are reachable
+ * contextually from Inhalte and here, and no longer from thirty-five rail rows.
+ */
+export function searchIndex({ can, types }: { can: Can; types: ContentTypeRow[] }): SearchEntry[] {
+  const label = new Map(WORKSPACES.map((w) => [w.id, w.label]));
+  const entries: SearchEntry[] = DESTINATIONS.filter((d) => isOffered(d, can)).map((d) => ({
+    id: d.id,
+    to: d.to,
+    label: d.label,
+    context: d.workspace
+      ? [label.get(d.workspace), d.group].filter(Boolean).join(" › ")
+      : "Mein Bereich",
+    keywords: d.keywords ?? [],
+  }));
+
+  const content = DESTINATIONS.find((d) => d.id === "content")!;
+  if (isOffered(content, can)) {
+    for (const type of [...types].sort((a, b) => a.rank - b.rank)) {
+      entries.push({
+        id: `type:${type.key}`,
+        to: `/inhalte/${type.key}`,
+        label: type.name,
+        context: "Website › Inhalte",
+        keywords: [type.key, type.description ?? ""],
+      });
+    }
+  }
+  return entries;
+}
+
+/**
+ * German-aware normalisation: lower case, no diacritics, `ß` → `ss`, so
+ * "planversand", "Plänè" and "PLAENE" meet "Pläne" somewhere reasonable.
+ * `ä` also matches `ae`, which is how Swiss keyboards without umlauts type.
+ */
+export function normalise(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+/** Every character of `needle`, in order, somewhere in `hay`. */
+function subsequence(needle: string, hay: string): boolean {
+  let i = 0;
+  for (const char of hay) if (char === needle[i]) i += 1;
+  return i === needle.length;
+}
+
+/**
+ * Ranks entries for a query. Higher is better; `0` means no match.
+ *
+ * Label prefix beats a word inside the label, which beats a keyword, which
+ * beats a loose subsequence — so "publ" finds Veröffentlichen through its alias
+ * without an unrelated fuzzy hit ranking above it.
+ */
+export function score(entry: SearchEntry, query: string): number {
+  const q = normalise(query.trim());
+  if (!q) return 0;
+  const label = normalise(entry.label);
+  if (label.startsWith(q)) return 100 - label.length / 100;
+  if (label.split(/[\s\-/›]+/).some((word) => word.startsWith(q))) return 80;
+  if (label.includes(q)) return 70;
+  const keywords = entry.keywords.map(normalise);
+  if (keywords.some((k) => k.startsWith(q))) return 60;
+  if (keywords.some((k) => k.includes(q))) return 50;
+  if (normalise(entry.context).includes(q)) return 30;
+  if (q.length >= 3 && subsequence(q, label)) return 20;
+  return 0;
+}
+
+/** The best matches first; ties keep the registry's order. */
+export function search(entries: SearchEntry[], query: string, limit = 12): SearchEntry[] {
+  return entries
+    .map((entry, index) => ({ entry, index, s: score(entry, query) }))
+    .filter((hit) => hit.s > 0)
+    .sort((a, b) => b.s - a.s || a.index - b.index)
+    .slice(0, limit)
+    .map((hit) => hit.entry);
 }

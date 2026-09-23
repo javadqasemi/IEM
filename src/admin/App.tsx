@@ -11,7 +11,7 @@ import { useAuth } from "@/core/auth";
 import { RouteMetaProvider, buildTrail, useRoute, useScrollReset, type Crumb } from "@/core/router";
 import { useAsync } from "./lib/useAsync";
 import { AdminLayout } from "./layout/AdminLayout";
-import { buildNavigation, flattenNavigation, type NavSection } from "./lib/navigation";
+import { buildNavigation, searchIndex, type NavWorkspace } from "./lib/navigation";
 import { ROUTES, matchRoute, SPENT_AUTH_ROUTES } from "./routes";
 import { LoginPage } from "./pages/Login";
 
@@ -27,13 +27,16 @@ import { LoginPage } from "./pages/Login";
  * screen in order to save bytes on a bundle that is otherwise not fetched yet.
  */
 export function App() {
-  const { user, loading, unreachable, retry, can, canAny } = useAuth();
+  const { user, loading, unreachable, retry, can } = useAuth();
   const route = useRoute();
 
   // Counts for the rail's badges. Only fetched once signed in, and failures
   // are silent — a missing badge is not worth an error screen.
+  // Gated on the key that shows the row it counts: a badge nobody can see
+  // should cost no request.
   const reviews = useAsync(
-    () => (user ? api.reviews().catch(() => []) : Promise.resolve([])),
+    () =>
+      user && can("content.approve") ? api.reviews().catch(() => []) : Promise.resolve([]),
     [user?.id],
   );
   // Applications is the one group that has moved to a feature folder, so its
@@ -57,25 +60,28 @@ export function App() {
   const awaitingCheck = useAwaitingCheckCount(can("drawing.read"));
 
   /**
-   * The content types the menu's Website groups are made of.
+   * The content types — for the breadcrumb's middle step and for the command
+   * palette, and no longer for the rail (P1B): thirty-five content types are
+   * reached from Website › Inhalte and by search, not as thirty-five rows.
    *
-   * Fetched here rather than inside the rail so the whole shell has one owner
-   * for it. Failing quietly is right: an empty list costs the Website groups,
-   * and the operational entries — where someone would go to find out *why* the
-   * server is unhappy — still render.
+   * Only asked for by somebody who can read content; failing quietly is right,
+   * because an empty list costs a few search entries and nothing else.
    */
   const types = useAsync(
-    () => (user ? api.contentTypes().catch(() => []) : Promise.resolve([])),
+    () =>
+      user && can("content.read") ? api.contentTypes().catch(() => []) : Promise.resolve([]),
     [user?.id],
   );
 
-  const sections = useMemo(
+  /*
+    Derived locally from the permissions already in the auth context: no
+    request, no waterfall, and memoised so a badge count arriving re-renders
+    the rail without rebuilding the search index.
+  */
+  const workspaces = useMemo(
     () =>
       buildNavigation({
-        types: types.data ?? [],
-        // The context's `canAny` takes varargs; the menu passes an array, and
-        // an item naming no permission is open to anyone signed in.
-        canAny: (permissions) => permissions.length === 0 || canAny(...permissions),
+        can,
         badges: {
           reviews: reviews.data?.length,
           applications: newApplications,
@@ -85,16 +91,11 @@ export function App() {
           drawings: awaitingCheck,
         },
       }),
-    [
-      types.data,
-      reviews.data,
-      newApplications,
-      liveProjects,
-      overdueTasks,
-      pendingMinutes,
-      awaitingCheck,
-      canAny,
-    ],
+    [can, reviews.data, newApplications, liveProjects, overdueTasks, pendingMinutes, awaitingCheck],
+  );
+  const searchEntries = useMemo(
+    () => searchIndex({ can, types: types.data ?? [] }),
+    [can, types.data],
   );
 
   /**
@@ -148,7 +149,7 @@ export function App() {
       One context, two directions, and neither side imports the other.
     */
     <RouteMetaProvider>
-      <AdminLayout sections={sections} trail={trail}>
+      <AdminLayout workspaces={workspaces} searchEntries={searchEntries} trail={trail}>
         {/* Keyed on the path so navigating away remounts the boundary and clears
             a caught error — the rail stays usable while one screen is broken. */}
         <ErrorBoundary key={route.path}>
@@ -156,7 +157,7 @@ export function App() {
               screens keeps the previous one mounted while the next chunk loads,
               so the fallback never shows and the page appears frozen. */}
           <Suspense key={route.path} fallback={<PageSkeleton />}>
-            <Screen path={route.path} sections={sections} />
+            <Screen path={route.path} workspaces={workspaces} />
           </Suspense>
         </ErrorBoundary>
       </AdminLayout>
@@ -172,7 +173,7 @@ export function App() {
  * "this does not exist" are different facts, and a reader who gets the wrong one
  * goes looking in the wrong place.
  */
-function Screen({ path, sections }: { path: string; sections: NavSection[] }) {
+function Screen({ path, workspaces }: { path: string; workspaces: NavWorkspace[] }) {
   const { canAny } = useAuth();
   const hit = matchRoute(path);
 
@@ -198,7 +199,7 @@ function Screen({ path, sections }: { path: string; sections: NavSection[] }) {
   const { route, params } = hit;
   const allowed = route.permissions.length === 0 || canAny(...route.permissions);
 
-  if (!allowed) return <NoAccess label={route.label} sections={sections} />;
+  if (!allowed) return <NoAccess label={route.label} workspaces={workspaces} />;
 
   const Page = route.component;
   return <Page {...(route.props ? route.props(params) : params)} />;
@@ -236,8 +237,8 @@ function PageSkeleton() {
  * worth having in front of the 403 rather than instead of it. The server still
  * refuses the data; this only decides what is drawn.
  */
-function NoAccess({ label, sections }: { label: string; sections: NavSection[] }) {
-  const first = flattenNavigation(sections)[0];
+function NoAccess({ label, workspaces }: { label: string; workspaces: NavWorkspace[] }) {
+  const first = workspaces[0]?.destinations[0];
   return (
     <EmptyState
       title="Dafür fehlt Ihnen die Berechtigung."

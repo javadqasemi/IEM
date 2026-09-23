@@ -1,8 +1,7 @@
 import { PageHeader } from "@/shared/ui/primitives";
-import { Link, useRoute } from "@/core/router";
+import { useRoute } from "@/core/router";
 import { usePageTitle } from "@/core/router";
 import { useAuth } from "@/core/auth";
-import { cn } from "@/shared/utils/cn";
 import { SystemOverviewScreen } from "./SystemOverview";
 import { JobsScreen } from "./JobsScreen";
 import { DiagnosticsScreen } from "./DiagnosticsScreen";
@@ -62,51 +61,35 @@ export function SystemWorkspace() {
   usePageTitle(SECTIONS.find((s) => s.slug === active)?.label ?? "System");
 
   /*
-    The Aufgaben section needs `job.read`. Hidden rather than rendered-empty:
-    the server answers 403 and a tab that always shows an error is a tab that
-    teaches people to ignore errors. `App.tsx` guards the route itself; this
-    is the third courtesy on top, the one the rail already provides elsewhere.
+    No tab strip of its own any more (P1B). The three sections are
+    destinations of the System workspace — Systemzustand, Hintergrundaufgaben,
+    Diagnose — and the shell's workspace navigation lists them beside the rest
+    of System, with the Aufgaben row shown only to somebody holding `job.read`.
+    A strip here as well was a second, differently-shaped menu for three of
+    the workspace's eleven destinations.
+
+    The page still refuses the jobs section without `job.read`: somebody can
+    type the URL, and the server answers 403 regardless.
   */
-  const visible = SECTIONS.filter((s) => (s.slug === "aufgaben" ? can("job.read") : true));
+  const titles: Record<Slug, string> = {
+    "": "Systemzustand",
+    aufgaben: "Hintergrundaufgaben",
+    diagnose: "Diagnose",
+  };
 
   return (
     <>
       <PageHeader
         eyebrow="System"
-        title="Systemzustand"
-        description="Was diese Installation über sich selbst weiss — und woran sie es gemessen hat. Nichts hier ist geschätzt."
+        title={titles[active]}
+        description={
+          active === ""
+            ? "Was diese Installation über sich selbst weiss — und woran sie es gemessen hat. Nichts hier ist geschätzt."
+            : undefined
+        }
       />
 
-      {/*
-        `<nav>` with links, not a `tablist`.
-
-        Each section is a real destination with its own URL, so the ARIA tab
-        pattern would be a lie about how it behaves — the same decision
-        `ProjectDetail`'s strip makes, and `projects.spec.ts` asserts it there.
-      */}
-      <nav aria-label="Systembereiche" className="flex flex-wrap gap-1 border-b border-line">
-        {visible.map((section) => {
-          const to = section.slug ? `/system/${section.slug}` : "/system";
-          const isActive = section.slug === active;
-          return (
-            <Link
-              key={section.slug || "overview"}
-              to={to}
-              aria-current={isActive ? "page" : undefined}
-              className={cn(
-                "-mb-px border-b-2 px-4 py-2.5 text-[14px] transition-colors",
-                isActive
-                  ? "border-brand-blue font-medium text-ink"
-                  : "border-transparent text-muted hover:text-ink",
-              )}
-            >
-              {section.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="pt-6">
+      <div>
         {active === "aufgaben" && can("job.read") ? (
           <JobsScreen />
         ) : active === "diagnose" ? (

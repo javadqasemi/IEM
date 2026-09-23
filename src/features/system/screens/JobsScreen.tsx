@@ -154,8 +154,13 @@ export function JobsScreen() {
       </div>
 
       {/* ---- Filters ---- */}
+      {/*
+        Not "Hintergrundaufgaben": since P1B that is the page's own heading
+        (the section title replaced the tab strip), and the card repeating it
+        one line below read as the same thing twice.
+      */}
       <Card
-        title="Hintergrundaufgaben"
+        title="Warteschlange und Verlauf"
         description="Alles, was ausserhalb einer Anfrage läuft: Veröffentlichungen, Sicherungen, Zustellungen, Aufräumarbeiten."
       >
         <div className="flex flex-col gap-4">

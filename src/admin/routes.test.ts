@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ROUTES, matchRoute } from "./routes";
-import { buildNavigation, flattenNavigation } from "./lib/navigation";
+import { DESTINATIONS, isOffered, ownerOf } from "./lib/navigation";
+import { SEEDED_ROLES, canFor } from "./lib/seededRoles.testing";
 
 /**
  * The route table, checked against the two things it has to agree with: the
@@ -124,42 +125,58 @@ describe("route matching", () => {
 });
 
 describe("the menu and the route table agree", () => {
-  /**
-   * The fixed part of the menu, built for a user who can do everything.
-   *
-   * `types: []` leaves out the Website groups, which are generated from the
-   * server's content types at runtime and all point at `/inhalte/:type` — a
-   * pattern this table does serve, and one no static check can enumerate.
-   */
-  const sections = buildNavigation({ types: [], canAny: () => true });
-  const destinations = flattenNavigation(sections);
-
-  it("built a menu worth checking", () => {
-    expect(destinations.length).toBeGreaterThan(5);
+  it("has a registry worth checking", () => {
+    expect(DESTINATIONS.length).toBeGreaterThan(20);
   });
 
-  it.each(destinations)("$label → $to is a route the app serves", ({ to }) => {
+  it.each(DESTINATIONS)("$label → $to is a route the app serves", ({ to }) => {
     expect(matchRoute(to), `the menu points at "${to}" and nothing renders it`).not.toBeNull();
   });
 
-  it("opens each menu entry to at least the permissions the menu requires", () => {
-    /**
-     * The menu shows a row when the user holds any of *its* keys; the route
-     * opens when they hold any of *its* keys. If the route asked for something
-     * the menu does not, a user would see a row that answers "no access" — the
-     * exact dead end the route guard was added to avoid.
-     */
-    for (const item of destinations) {
-      const hit = matchRoute(item.to);
-      if (!hit || hit.route.permissions.length === 0) continue;
-      if (item.permissions.length === 0) continue;
-      const routeOpens = new Set(hit.route.permissions);
-      const unmatched = item.permissions.filter((k) => !routeOpens.has(k));
-      expect(
-        unmatched,
-        `menu entry "${item.label}" shows for ${unmatched.join(", ")} but ${hit.route.pattern} does not open for it`,
-      ).toEqual([]);
-    }
+  /**
+   * A row shown to somebody must open for them.
+   *
+   * The rail's rules are predicates now (`visibleWhen` plus the workspace's
+   * audience), so the old check — "the menu's keys are a subset of the
+   * route's" — has no keys to compare. It is asked of every seeded role
+   * instead: for each destination the role is offered, the route has to let
+   * that role in. A row that answers "Dafür fehlt Ihnen die Berechtigung" is
+   * the dead end the route guard was added to avoid.
+   */
+  it.each(SEEDED_ROLES.map((r) => r.key))("every destination offered to %s opens for it", (key) => {
+    const can = canFor(key);
+    const dead = DESTINATIONS.filter((d) => isOffered(d, can))
+      .map((d) => ({ d, hit: matchRoute(d.to)! }))
+      .filter(({ hit }) => hit.route.permissions.length > 0 && !hit.route.permissions.some(can))
+      .map(({ d, hit }) => `${d.label} → ${hit.route.pattern}`);
+    expect(dead).toEqual([]);
+  });
+
+  it("read the seeded roles, so the check above is checking something", () => {
+    expect(SEEDED_ROLES.length).toBeGreaterThanOrEqual(15);
+    expect(SEEDED_ROLES.find((r) => r.key === "super_admin")?.permissions).toBe("*");
+    expect(canFor("project_manager")("project.read")).toBe(true);
+    expect(canFor("guest")("project.read")).toBe(false);
+  });
+
+  it("every route in the table has at most one workspace owner", () => {
+    /*
+      `ownerOf` resolves by longest match, so a single answer is guaranteed
+      per path; what this catches is a route no destination claims at all
+      (other than the reader's own account pages), which would render with no
+      workspace in the bar and nothing lit in the rail.
+    */
+    // A real value for the parameters that select a section; an id elsewhere.
+    const example = (pattern: string) =>
+      pattern.startsWith("/einstellungen/")
+        ? "/einstellungen/unternehmen"
+        : pattern.startsWith("/system/")
+          ? "/system/aufgaben"
+          : pattern.replace(/:[a-z]+/g, "x");
+    const unowned = ROUTES.map((r) => r.pattern)
+      .filter((p) => !["/profil", "/benachrichtigungen", "/benachrichtigungen/einstellungen"].includes(p))
+      .filter((p) => !ownerOf(example(p))?.workspace);
+    expect(unowned).toEqual([]);
   });
 });
 

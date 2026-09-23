@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AdminLayout } from "./layout/AdminLayout";
 import { AuthProvider } from "@/core/auth";
-import type { NavSection } from "./lib/navigation";
+import { buildNavigation } from "./lib/navigation";
+import { canFor } from "./lib/seededRoles.testing";
 
 /**
  * Does the dashboard shell still render?
@@ -22,8 +23,9 @@ import type { NavSection } from "./lib/navigation";
  *   whichever runs first.
  * - Effects do not run under `renderToStaticMarkup`, so the session stays empty
  *   and `UserMenu` renders nothing. That is fine for what is asserted here —
- *   and it is why the shell is rendered directly with a hand-built `sections`
- *   array rather than through `App`, which would show the signed-out screen.
+ *   and it is why the shell is rendered directly with a real, role-derived
+ *   `workspaces` list rather than through `App`, which would show the
+ *   signed-out screen.
  */
 
 const REAL_WINDOW = globalThis.window;
@@ -41,9 +43,6 @@ beforeAll(() => {
       location: { hash: "#/", origin: "http://localhost:5173" },
       addEventListener: () => {},
       removeEventListener: () => {},
-      // `useTheme` reads both during render. Each access is already wrapped in
-      // try/catch, so the stub only has to not be a trap — but returning real
-      // shapes keeps the test honest about the light default.
       localStorage: { getItem: () => null, setItem: () => {} },
       matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
     },
@@ -58,35 +57,11 @@ afterAll(() => {
   });
 });
 
-/** A menu shaped like the real one, without needing a server to build it. */
-const SECTIONS: NavSection[] = [
-  {
-    id: "overview",
-    label: "Übersicht",
-    icon: "overview",
-    zone: "work",
-    to: "/",
-    permissions: ["system.health"],
-    items: [],
-  },
-  {
-    id: "people",
-    label: "Benutzer & Rollen",
-    icon: "users",
-    zone: "admin",
-    permissions: ["user.read"],
-    items: [
-      { id: "users", to: "/benutzer", label: "Benutzer", permissions: ["user.read"] },
-      { id: "roles", to: "/rollen", label: "Rollen", permissions: ["role.read"] },
-    ],
-  },
-];
-
-function render(): string {
+function render(role = "super_admin"): string {
   return renderToStaticMarkup(
     <ToastProvider>
       <AuthProvider>
-        <AdminLayout sections={SECTIONS}>
+        <AdminLayout workspaces={buildNavigation({ can: canFor(role) })}>
           <p>Inhalt</p>
         </AdminLayout>
       </AuthProvider>
@@ -97,6 +72,7 @@ function render(): string {
 describe("the dashboard shell renders", () => {
   let html = "";
   beforeAll(() => {
+    at("#/");
     html = render();
   });
 
@@ -108,105 +84,77 @@ describe("the dashboard shell renders", () => {
     expect(html).toContain("Inhalt");
   });
 
-  it("renders the rail's groups", () => {
-    expect(html).toContain("Übersicht");
-    expect(html).toContain("Benutzer &amp; Rollen");
+  it("renders the seven workspaces", () => {
+    for (const label of ["Übersicht", "Aufgaben", "Projekte", "Website", "Personal", "Unternehmen", "System"]) {
+      expect(html).toContain(`>${label}<`);
+    }
   });
 
   it("keeps the skip link first", () => {
     // The first focusable thing on the page, and the only way a keyboard user
-    // skips a thirteen-row rail. Easy to lose to a layout change and invisible
-    // when it goes.
+    // skips the rail. Easy to lose to a layout change and invisible when it goes.
     expect(html).toContain("Zum Inhalt springen");
     expect(html.indexOf("Zum Inhalt springen")).toBeLessThan(html.indexOf("Inhalt</p>"));
   });
 
   it("uses the theme tokens rather than hardcoded colours", () => {
-    // The whole point of the token migration: the markup says `bg-base`, and
-    // what `base` means is decided by the stylesheet. A literal hex or an
-    // `rgb(` in a class attribute would mean something bypassed it.
     expect(html).toContain("bg-base");
     expect(html).not.toMatch(/class="[^"]*#[0-9a-fA-F]{6}/);
   });
 
   it("puts the rail's labels on the inverse token, not on surface", () => {
-    // `text-surface` on the rail would be dark-on-dark in the dark theme. All
-    // twenty call sites moved to `text-inverse`; this is the one that would be
-    // noticed last, because the rail looks fine in the light theme either way.
     expect(html).toContain("text-inverse");
     expect(html).not.toContain("text-surface");
   });
 });
 
 /**
- * The rail's groups fold open in place.
+ * One workspace open at a time, and it is the one the route is in.
  *
- * Asserted through a real render rather than by reading the component, because
- * the behaviour that matters is a *derivation*: which group is open is computed
- * from the path during render, not stored. A test that called a helper would
- * miss the wiring, which is the part that broke when the entries lived in the
- * top bar.
+ * Asserted through a real render because the behaviour is a *derivation*:
+ * which workspace is open is computed from the path during render, not stored.
  */
-describe("the rail folds a group open", () => {
-  it("offers a disclosure on a group with several entries", () => {
+describe("the rail opens the route's workspace", () => {
+  it("lists a closed workspace's destinations nowhere", () => {
     at("#/");
     const html = render();
-    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('href="#/rollen"');
+    expect(html).not.toContain('href="#/sitzungen"');
   });
 
-  it("makes a foldable group a button, not a second link to its first entry", () => {
-    /**
-     * `sectionHref` makes a group stand for its first entry, which was right
-     * when the entries were not in the rail. Folded open it put two adjacent
-     * links to `#/benutzer` in one block — the group row and the entry — which
-     * is the duplicated navigation the fold was meant to end, and it made the
-     * group answer to a page that is really one of its children. A real browser
-     * found it as a strict-mode violation on `a[href="#/benutzer"]`.
-     */
+  it("opens the workspace a detail route belongs to", () => {
+    at("#/plaene/abc/revisionen");
+    const html = render();
+    expect(html).toContain('href="#/sitzungen"');
+    expect(html).toMatch(/href="#\/plaene"[^>]*aria-current="page"/);
+    // …and names it in the bar.
+    expect(html).toMatch(/<h2[^>]*>Projekte<\/h2>/);
+  });
+
+  it("links to each destination once — the open workspace's row is not a second link", () => {
+    /*
+      Two adjacent links to one page is the duplicated navigation a browser
+      test once caught as a strict-mode violation. The open workspace names
+      itself as text; its first destination is the one link to that page.
+    */
     at("#/benutzer");
     const html = render();
-    expect((html.match(/href="#\/benutzer"/g) ?? []).length).toBe(1);
+    const rail = html.slice(html.indexOf('aria-label="Hauptnavigation"'), html.indexOf("Website ansehen"));
+    expect((rail.match(/href="#\/benutzer"/g) ?? []).length).toBe(1);
   });
 
-  it("keeps a group's entries out of the DOM while it is closed", () => {
-    // Unmounted rather than hidden: the rail's arrow-key navigation reads
-    // `[data-nav-link]` off the DOM, so a hidden entry would be a stop on a
-    // journey through rows nobody can see.
+  it("opens System for a settings section it owns, and Unternehmen for one it owns", () => {
+    at("#/einstellungen/email");
+    expect(render()).toMatch(/<h2[^>]*>System<\/h2>/);
+    at("#/einstellungen/standorte");
+    expect(render()).toMatch(/<h2[^>]*>Unternehmen<\/h2>/);
+  });
+
+  it("gives a content editor two workspaces and no System", () => {
     at("#/");
-    expect(render()).not.toContain('href="#/rollen"');
-  });
-
-  it("opens the group the current route is in, with no stored state", () => {
-    at("#/benutzer");
-    const html = render();
-    expect(html).toContain('aria-expanded="true"');
-    expect(html).toContain('href="#/rollen"');
-  });
-
-  it("marks the open entry as the current page", () => {
-    at("#/rollen");
-    const html = render();
-    expect(html).toContain('href="#/rollen"');
-    expect(html).toMatch(/href="#\/rollen"[^>]*aria-current="page"/);
-  });
-
-  it("keeps a single destination a link, with its favourite star", () => {
-    // "Übersicht" is one page: no disclosure, and still starrable, because a
-    // star marks a page. A *group* is no longer starrable — its entries are,
-    // individually, which is both more precise and what the star was for.
-    at("#/");
-    const html = render();
-    expect(html).toContain('href="#/"');
-    const overview = html.slice(html.indexOf("Übersicht") - 600, html.indexOf("Übersicht"));
-    expect(overview).not.toContain('aria-expanded="');
-  });
-
-  it("no longer renders the entries a second time in the top bar", () => {
-    // `SectionTabs` was removed with this change. Two copies of one navigation
-    // is what the choice between them was about.
-    at("#/benutzer");
-    const html = render();
-    expect(html).not.toContain("Unterbereiche");
-    expect((html.match(/href="#\/rollen"/g) ?? []).length).toBe(1);
+    const html = render("content_editor");
+    expect(html).toContain(">Website<");
+    expect(html).not.toContain(">System<");
+    expect(html).not.toContain(">Projekte<");
   });
 });

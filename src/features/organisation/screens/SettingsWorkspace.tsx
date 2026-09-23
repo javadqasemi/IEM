@@ -1,16 +1,10 @@
 import { Suspense, useMemo, type ReactNode } from "react";
 import { EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { SideNav, type SideNavGroup } from "@/shared/ui/navigation";
 import { ModulePlaceholder } from "@/shared/ui/feedback";
 import { useAuth } from "@/core/auth";
 import { usePageTitle } from "@/core/router";
 import { useOrganisation, useSettings } from "../hooks/useOrganisation";
-import {
-  DEFAULT_SECTION,
-  sectionFor,
-  sectionGroups,
-  visibleSections,
-} from "../service";
+import { DEFAULT_SECTION, sectionFor, visibleSections } from "../service";
 import { OfficesSection } from "./OfficesSection";
 import { OrganisationSection } from "./OrganisationSection";
 import { SettingsGroupSection } from "./SettingsGroupSection";
@@ -64,19 +58,6 @@ export function SettingsWorkspace({
   const section = sectionFor(slug);
 
   const sections = useMemo(() => visibleSections(can), [can]);
-  const groups = useMemo<SideNavGroup[]>(
-    () =>
-      sectionGroups(sections).map((group) => ({
-        id: group.id,
-        label: group.label,
-        items: group.items.map((item) => ({
-          id: item.slug,
-          label: item.label,
-          href: `#/einstellungen/${item.slug}`,
-        })),
-      })),
-    [sections],
-  );
 
   /*
     The settings list is fetched only where a section reads it; the
@@ -101,7 +82,7 @@ export function SettingsWorkspace({
       return (
         <EmptyState
           title="Diesen Bereich gibt es nicht"
-          description="Der Abschnitt in der Adresse ist unbekannt. Links steht, was es gibt."
+          description="Der Abschnitt in der Adresse ist unbekannt. Die Suche (Strg + K) findet jede Einstellung."
         />
       );
     }
@@ -233,30 +214,23 @@ export function SettingsWorkspace({
     }
   })();
 
+  /*
+    No sub-navigation of its own any more (P1B).
+
+    This page used to carry a `SideNav` of all eleven sections, cut into
+    "what the firm is" and "how the system runs" — a second menu, shaped
+    differently from the rail's. The sections now belong to the workspaces
+    that own them (Unternehmen, Personal, Website, System), and the shell's
+    workspace navigation lists each where its reader looks for it. The page is
+    one section; the rail says which workspace it is in.
+  */
   return (
     <>
       <PageHeader
         eyebrow="Einstellungen"
-        title="Unternehmen und Betrieb"
-        description="Die Angaben zur Firma, ihre Standorte und die Vorgaben, nach denen das System läuft."
+        title={section?.label ?? "Einstellungen"}
       />
-
-      {/*
-        Two columns on a laptop, stacked on a phone — and the rail becomes a
-        scrolling strip rather than a menu, because a second disclosure to
-        reach configuration is a tap nobody expects. `min-w-0` on the content
-        column is what stops a wide table pushing the page into a horizontal
-        scroll; without it the grid track sizes to the content.
-      */}
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-8">
-        <SideNav
-          groups={groups}
-          activeId={section?.slug ?? null}
-          ariaLabel="Einstellungsbereiche"
-          className="lg:sticky lg:top-24 lg:self-start"
-        />
-        <div className="flex min-w-0 flex-col">{body}</div>
-      </div>
+      <div className="flex min-w-0 flex-col">{body}</div>
     </>
   );
 }

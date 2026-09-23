@@ -139,7 +139,8 @@ export const ROUTES: Route[] = [
     pattern: "/inhalte",
     permissions: ["content.read"],
     component: page(() => import("./pages/Content"), "ContentIndexPage"),
-    label: "Website bearbeiten",
+    // "Inhalte", the name the Website workspace lists it under (P1B).
+    label: "Inhalte",
   },
 
   {
@@ -487,7 +488,12 @@ export const ROUTES: Route[] = [
     component: page(() => import("./pages/SettingsPage"), "SettingsPage"),
     props: ({ section }) => ({ section }),
     label: "Einstellungen",
-    parent: "/einstellungen",
+    /*
+      No `parent` since P1B. The sections now belong to four workspaces, and
+      `/einstellungen` shows the first of them — Unternehmen's — so a crumb
+      "Einstellungen" above *E-Mail* led from System into the company record.
+      The bar names the workspace instead, which is the parent a reader means.
+    */
   },
   {
     pattern: "/einstellungen",

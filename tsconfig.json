@@ -39,6 +39,10 @@
    * read files off disk — the contrast test parses `admin.css` rather than
    * restating the palette — and that needs Node types the application must not
    * have. `npm run typecheck` runs both.
+   *
+   * `*.testing.ts` is a test *helper* — shared by several tests, run by none —
+   * and belongs to the same program for the same reason: `seededRoles.testing.ts`
+   * reads the server's role catalogue off disk.
    */
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.testing.ts"]
 }

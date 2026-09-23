@@ -371,3 +371,49 @@ describe("P1A: a conflict is not answered by reloading the application", () => {
     expect(offenders).toEqual([]);
   });
 });
+describe("P1B: navigation has one source and one rule", () => {
+  /**
+   * The registry in `src/admin/lib/navigation.ts` is the only place a menu is
+   * declared, and `AUDIENCES` plus each destination's `visibleWhen` the only
+   * place visibility is decided. The components that draw it — rail, strip,
+   * palette — receive the derived result and must not ask the auth context
+   * themselves: a `can(...)` in a component is a second rule that the palette
+   * would not share, which is exactly how search leaks a hidden destination.
+   */
+  const DRAWERS = [
+    join(SRC, "admin", "ui", "Sidebar.tsx"),
+    join(SRC, "admin", "ui", "WorkspaceStrip.tsx"),
+    join(SRC, "admin", "ui", "CommandPalette.tsx"),
+  ];
+
+  it("the rail, the strip and the palette decide no visibility themselves", () => {
+    const offenders = DRAWERS.filter((file) =>
+      /\buseAuth\b|\bcan\(|\bcanAny\(|permissions\.(has|includes)\(/.test(withoutComments(read(file))),
+    ).map(rel);
+    expect(offenders).toEqual([]);
+  });
+
+  it("there is one navigation definition, not a v2 beside a legacy", () => {
+    // The dashboard only: the public site's header (`components/Nav.tsx`) is a
+    // different application with its own menu.
+    const definitions = sources(join(SRC, "admin"))
+      .filter((f) => !/\.test\.tsx?$|\.testing\.ts$/.test(f))
+      .filter((f) => /(^|[\\/])(legacy)?[nN]av(igation)?(-?v\d+)?\.tsx?$/.test(f))
+      .map(rel);
+    expect(definitions).toEqual(["src/admin/lib/navigation.ts"]);
+  });
+
+  it("no screen builds its own workspace sub-navigation beside the rail", () => {
+    /*
+      The settings page carried a `SideNav` of eleven sections and the System
+      page a tab strip of three; both were workspace navigation in a second
+      shape. Record-level navigation (a project's tabs) is a different thing
+      and is not what this checks.
+    */
+    const offenders = [
+      join(SRC, "features", "organisation", "screens", "SettingsWorkspace.tsx"),
+      join(SRC, "features", "system", "screens", "SystemWorkspace.tsx"),
+    ].filter((f) => /<SideNav\b|<nav\b/.test(withoutComments(read(f)))).map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
