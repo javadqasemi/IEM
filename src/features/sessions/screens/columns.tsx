@@ -83,7 +83,7 @@ export function sessionColumns(options: {
 /** The row action both screens happen to want: a quiet "Beenden". */
 export function endButton(onClick: () => void) {
   return (
-    <Button size="sm" variant="ghost" onClick={onClick}>
+    <Button size="sm" variant="danger-quiet" onClick={onClick}>
       Beenden
     </Button>
   );

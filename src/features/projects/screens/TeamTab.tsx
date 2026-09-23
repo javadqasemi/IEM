@@ -115,7 +115,7 @@ export function TeamTab({ project, readOnly }: { project: ProjectDetail; readOnl
                 {mayEdit ? (
                   <Button
                     size="sm"
-                    variant="ghost"
+                    variant="danger-quiet"
                     onClick={() => setRemoving({ id: member.id, name: member.employee.name })}
                   >
                     Entfernen

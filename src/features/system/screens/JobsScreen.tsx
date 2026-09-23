@@ -117,25 +117,32 @@ export function JobsScreen() {
             Details
           </Button>
           {can("job.retry") ? (
+            /*
+              `disabledReason`, not `title` (P1C, UX-14): a `disabled`
+              button receives no pointer events, so the refusal the server
+              computed for this row was a tooltip that could never appear.
+            */
             <Button
               size="sm"
               variant="secondary"
               disabled={!job.capabilities.retryable || actions.busy === job.id}
-              title={job.capabilities.retryRefusal ?? undefined}
+              disabledReason={job.capabilities.retryable ? null : job.capabilities.retryRefusal}
               onClick={() => setConfirm({ job, action: "retry" })}
             >
               Wiederholen
             </Button>
           ) : null}
           {can("job.cancel") ? (
+            // "Stoppen", not "Abbrechen": the confirmation used to show two
+            // buttons with that word, one that dismissed and one that acted.
             <Button
               size="sm"
-              variant="ghost"
+              variant="danger-quiet"
               disabled={!job.capabilities.cancellable || actions.busy === job.id}
-              title={job.capabilities.cancelRefusal ?? undefined}
+              disabledReason={job.capabilities.cancellable ? null : job.capabilities.cancelRefusal}
               onClick={() => setConfirm({ job, action: "cancel" })}
             >
-              Abbrechen
+              Stoppen
             </Button>
           ) : null}
         </div>
@@ -294,9 +301,9 @@ export function JobsScreen() {
         title={
           confirm?.action === "retry"
             ? `„${confirm ? jobLabel(confirm.job.name) : ""}“ wiederholen?`
-            : `„${confirm ? jobLabel(confirm.job.name) : ""}“ abbrechen?`
+            : `„${confirm ? jobLabel(confirm.job.name) : ""}“ stoppen?`
         }
-        confirmLabel={confirm?.action === "retry" ? "Wiederholen" : "Abbrechen"}
+        confirmLabel={confirm?.action === "retry" ? "Wiederholen" : "Aufgabe stoppen"}
         message={
           confirm?.action === "retry" ? (
             <>

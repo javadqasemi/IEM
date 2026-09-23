@@ -3,7 +3,6 @@ import { toFailure } from "@/core/api";
 import { Badge, Card } from "@/shared/ui/primitives";
 import { Field, Form, Input, ListInput, SaveBar, Select, Textarea, Toggle } from "@/shared/ui/forms";
 import { ConfirmDialog } from "@/shared/ui/overlays";
-import { useToast } from "@/shared/ui/feedback";
 import { useUnsavedGuard } from "@/shared/hooks";
 import type { Setting, SettingGroup } from "@/entities/organisation";
 import { useSaveSettings } from "../hooks/useOrganisation";
@@ -43,7 +42,6 @@ export function SettingsGroupSection({
   canEdit: boolean;
   canSeeSecrets: boolean;
 }) {
-  const toast = useToast();
   const saveSettings = useSaveSettings();
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
@@ -87,8 +85,9 @@ export function SettingsGroupSection({
     try {
       await saveSettings(updates);
       setEdits({});
+      // The save bar's "Gespeichert." is the one confirmation (Part 10.5, P1C);
+      // the toast that followed it said the same thing again, elsewhere.
       setSavedAt(Date.now());
-      toast.success("Gespeichert", `${updates.length} Einstellung(en) übernommen.`);
     } catch (err) {
       setError(toFailure(err).message);
     } finally {
@@ -148,7 +147,11 @@ export function SettingsGroupSection({
           dirty={dirty}
           saving={saving}
           savedAt={savedAt}
-          onReset={() => setEdits({})}
+          failed={Boolean(error)}
+          onReset={() => {
+            setEdits({});
+            setError(null);
+          }}
         >
           {dangerous.length ? (
             <Badge tone="gold">{dangerous.length} mit Rückfrage</Badge>

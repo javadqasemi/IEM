@@ -1,13 +1,13 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { toFailure } from "@/core/api";
 import { Link, navigate, useRoute, usePageTitle } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import {
-  DRAWING_STATUS_OPTIONS,
   DrawingStatusBadge,
   RevisionBadge,
   IssuedRevisionBadge,
   drawingStatusLabel,
+  drawingStatusTone,
   drawingTypeLabel,
   formatLabel,
   phaseLabel,
@@ -18,8 +18,12 @@ import {
 } from "@/entities/drawing";
 import { DisciplineDot } from "@/entities/project";
 import { Badge, Button, Card, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
-import { Field, Form, Select, Textarea } from "@/shared/ui/forms";
+import {
+  ConfirmDialog,
+  RecordActions,
+  StatusTransitionDialog,
+  type TransitionTarget,
+} from "@/shared/ui/overlays";
 import { Pair } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
 import { formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
@@ -48,6 +52,7 @@ export function DrawingDetail({ drawingId }: { drawingId: string }) {
   const route = useRoute();
   const { can } = useAuth();
   const drawing = useDrawing(drawingId);
+  const [deleting, setDeleting] = useState(false);
 
   const record = drawing.data ?? null;
   usePageTitle(record ? `${record.number} — ${record.title}` : null);
@@ -107,13 +112,24 @@ export function DrawingDetail({ drawingId }: { drawingId: string }) {
             ) : null}
             <DrawingStatusBadge status={record.status} />
             {record.readOnly ? <Badge tone="bronze">Schreibgeschützt</Badge> : null}
-            {can("drawing.update") && !record.readOnly ? <EditButton drawing={record} /> : null}
-            {can("drawing.create") ? <RevisionButton drawing={record} /> : null}
-            {record.allowedTransitions.length ? <StatusButton drawing={record} /> : null}
-            {can("drawing.delete") ? <DeleteButton drawing={record} /> : null}
+            <RecordActions
+              secondary={
+                <>
+                  {can("drawing.update") && !record.readOnly ? <EditButton drawing={record} /> : null}
+                  {can("drawing.create") ? <RevisionButton drawing={record} /> : null}
+                  {record.allowedTransitions.length ? <StatusButton drawing={record} /> : null}
+                </>
+              }
+              more={
+                can("drawing.delete")
+                  ? [{ id: "delete", label: "Löschen", destructive: true, onSelect: () => setDeleting(true) }]
+                  : []
+              }
+            />
           </div>
         }
       />
+      <DeleteDialog drawing={record} open={deleting} onClose={() => setDeleting(false)} />
 
       {/*
         The four-eyes warning, above everything.
@@ -392,12 +408,7 @@ function StatusButton({ drawing }: { drawing: Drawing }) {
   const { can } = useAuth();
   const toast = useToast();
   const mutations = useDrawingMutations();
-  const ids = { status: useId(), reason: useId() };
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState<DrawingStatus>(
-    drawing.allowedTransitions[0] ?? drawing.status,
-  );
-  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -414,85 +425,83 @@ function StatusButton({ drawing }: { drawing: Drawing }) {
   const allowed = drawing.allowedTransitions.filter((target) => can(keyFor(target)));
   if (!allowed.length) return null;
 
-  const options = DRAWING_STATUS_OPTIONS.filter((option) =>
-    (allowed as string[]).includes(option.value),
-  );
-
-  // A withdrawal needs a reason: the server refuses without one, because
-  // everybody holding the plan has to be told why.
-  const needsReason = status === "WITHDRAWN";
+  /*
+    One target per allowed transition, each named for the act it performs
+    (the glossary: "Freigeben" alone is content approval; a plan is released
+    *for construction*). A withdrawal needs a reason — the server refuses
+    without one, because everybody holding the plan has to be told why — and
+    it is the one destructive target.
+  */
+  const targets: TransitionTarget[] = allowed.map((value: DrawingStatus) => ({
+    value,
+    label: drawingStatusLabel(value),
+    tone: drawingStatusTone(value),
+    confirmLabel:
+      value === "IN_CHECK"
+        ? "Zur Prüfung geben"
+        : value === "CHECKED"
+          ? "Als geprüft markieren"
+          : value === "RELEASED"
+            ? "Zur Ausführung freigeben"
+            : value === "WITHDRAWN"
+              ? "Plan zurückziehen"
+              : undefined,
+    destructive: value === "WITHDRAWN",
+    reason:
+      value === "WITHDRAWN"
+        ? {
+            label: "Begründung",
+            required: true,
+            hint: "Wer den Plan hat, muss wissen, warum er nicht mehr gilt.",
+          }
+        : { label: "Begründung", hint: "Wird im Verlauf und im Audit-Log festgehalten." },
+    consequence:
+      value === "WITHDRAWN" ? (
+        <p>
+          Der Plan gilt danach nicht mehr. Zurückgezogen ist endgültig: der Status lässt sich
+          danach nicht mehr ändern.
+        </p>
+      ) : value === "RELEASED" ? (
+        <p>Freigegeben heisst: intern geprüft und bereit zum Versand. Ausgegeben ist er erst mit einem Planversand.</p>
+      ) : undefined,
+  }));
 
   return (
     <>
       <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
         Status ändern
       </Button>
-      <Modal
+      <StatusTransitionDialog
         open={open}
-        onClose={() => setOpen(false)}
-        busy={busy}
+        onClose={() => {
+          setOpen(false);
+          setError(null);
+        }}
         title="Status ändern"
-        description={`Aktuell: ${drawingStatusLabel(drawing.status)}. Ausgegeben und überholt werden nicht gesetzt, sondern verursacht.`}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-              Abbrechen
-            </Button>
-            <Button
-              busy={busy}
-              disabled={needsReason && !reason.trim()}
-              onClick={async () => {
-                setError(null);
-                setBusy(true);
-                try {
-                  await mutations.changeStatus(drawing.id, {
-                    status,
-                    reason: reason.trim() || undefined,
-                  });
-                  toast.success(`Status: ${drawingStatusLabel(status)}`);
-                  setOpen(false);
-                } catch (err) {
-                  // The server's refusal, verbatim: "Wer den Plan gezeichnet
-                  // hat, kann ihn nicht selbst prüfen." says what to do next.
-                  setError(toFailure(err).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Ändern
-            </Button>
-          </>
-        }
-      >
-        <Form onSubmit={() => undefined} error={error}>
-          <Field label="Neuer Status" htmlFor={ids.status}>
-            <Select
-              id={ids.status}
-              value={status}
-              onChange={(event) => setStatus(event.target.value as DrawingStatus)}
-              options={options}
-            />
-          </Field>
-          <Field
-            label="Begründung"
-            htmlFor={ids.reason}
-            optional={!needsReason}
-            hint={
-              needsReason
-                ? "Pflicht. Wer den Plan hat, muss wissen warum er nicht mehr gilt."
-                : "Wird im Audit-Log festgehalten."
-            }
-          >
-            <Textarea
-              id={ids.reason}
-              rows={2}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
-        </Form>
-      </Modal>
+        description="Ausgegeben und überholt werden nicht gesetzt, sondern verursacht — durch einen Planversand und eine neuere Revision."
+        from={{ label: drawingStatusLabel(drawing.status), tone: drawingStatusTone(drawing.status) }}
+        targets={targets}
+        busy={busy}
+        error={error}
+        onConfirm={async (status, text) => {
+          setError(null);
+          setBusy(true);
+          try {
+            await mutations.changeStatus(drawing.id, {
+              status: status as DrawingStatus,
+              reason: text || undefined,
+            });
+            toast.success(`Status: ${drawingStatusLabel(status)}`);
+            setOpen(false);
+          } catch (err) {
+            // The server's refusal, verbatim: "Wer den Plan gezeichnet hat,
+            // kann ihn nicht selbst prüfen." says what to do next.
+            setError(toFailure(err).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
     </>
   );
 }
@@ -544,20 +553,33 @@ function RevisionButton({ drawing }: { drawing: Drawing }) {
   );
 }
 
-function DeleteButton({ drawing }: { drawing: Drawing }) {
+/** Deleting the plan — opened from the record's "Mehr" menu (P1C). HIGH level: the number is typed. */
+function DeleteDialog({
+  drawing,
+  open,
+  onClose,
+}: {
+  drawing: Drawing;
+  open: boolean;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const mutations = useDrawingMutations();
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const setOpen = (next: boolean) => {
+    if (!next) {
+      setError(null);
+      onClose();
+    }
+  };
 
   return (
     <>
-      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-        Löschen
-      </Button>
       <ConfirmDialog
         open={open}
         busy={busy}
+        error={error}
         onClose={() => setOpen(false)}
         title="Plan löschen?"
         message={
@@ -582,15 +604,17 @@ function DeleteButton({ drawing }: { drawing: Drawing }) {
         confirmText={drawing.number}
         onConfirm={async () => {
           setBusy(true);
+          setError(null);
           try {
             await mutations.remove(drawing.id);
             toast.success("Gelöscht");
+            setOpen(false);
             navigate("/plaene");
           } catch (err) {
-            toast.error(toFailure(err).message);
+            // In the dialog: an issued plan's refusal says to withdraw it instead.
+            setError(toFailure(err).message);
           } finally {
             setBusy(false);
-            setOpen(false);
           }
         }}
       />

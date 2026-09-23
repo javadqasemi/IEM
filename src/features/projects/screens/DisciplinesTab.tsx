@@ -258,7 +258,7 @@ function ScopeDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={() => void submit()} busy={busy} disabled={!disciplineId}>
+          <Button variant="primary" onClick={() => void submit()} busy={busy} disabled={!disciplineId}>
             Speichern
           </Button>
         </>

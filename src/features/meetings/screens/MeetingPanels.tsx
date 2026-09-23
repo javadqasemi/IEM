@@ -8,6 +8,7 @@ import {
   type AttendanceEntry,
   type Attendee,
   type MeetingDetail,
+  minutesState,
 } from "@/entities/meeting";
 import { Badge, Button, Card, EmptyState } from "@/shared/ui/primitives";
 import {
@@ -16,11 +17,15 @@ import {
   Field,
   Form,
   Input,
-  Select,
   Textarea,
   type EntityOption,
 } from "@/shared/ui/forms";
-import { Modal } from "@/shared/ui/overlays";
+import {
+  ConfirmDialog,
+  Modal,
+  StatusTransitionDialog,
+  type TransitionTarget,
+} from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
 import { formatDateTime } from "@/shared/utils/format";
 import { meetingRepository } from "../repository";
@@ -54,6 +59,8 @@ export function AttendancePanel({ meeting }: { meeting: MeetingDetail }) {
   const [pending, setPending] = useState<Map<string, AttendanceEntry>>(new Map());
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [removingAttendee, setRemovingAttendee] = useState<{ id: string; name: string } | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   /*
     `protocolLocked`, not a hand-rolled status test.
@@ -196,21 +203,13 @@ export function AttendancePanel({ meeting }: { meeting: MeetingDetail }) {
                 )}
 
                 {mayWrite ? (
+                  // A destructive trigger now asks first (P1C): it used to
+                  // remove the person on one click, a stray tap on a phone.
                   <Button
                     size="sm"
-                    variant="ghost"
+                    variant="danger-quiet"
                     disabled={busy}
-                    onClick={async () => {
-                      setBusy(true);
-                      try {
-                        await mutations.removeAttendee(meeting.id, attendee.id);
-                        toast.success("Entfernt");
-                      } catch (err) {
-                        toast.error(toFailure(err).message);
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
+                    onClick={() => setRemovingAttendee({ id: attendee.id, name: attendee.name })}
                   >
                     Entfernen
                   </Button>
@@ -231,6 +230,34 @@ export function AttendancePanel({ meeting }: { meeting: MeetingDetail }) {
       {adding ? (
         <AddAttendeeDialog meetingId={meeting.id} onClose={() => setAdding(false)} />
       ) : null}
+
+      <ConfirmDialog
+        open={removingAttendee !== null}
+        busy={busy}
+        onClose={() => {
+          setRemovingAttendee(null);
+          setRemoveError(null);
+        }}
+        onConfirm={async () => {
+          if (!removingAttendee) return;
+          setBusy(true);
+          setRemoveError(null);
+          try {
+            await mutations.removeAttendee(meeting.id, removingAttendee.id);
+            toast.success("Entfernt", `${removingAttendee.name} steht nicht mehr auf der Teilnehmerliste.`);
+            setRemovingAttendee(null);
+          } catch (err) {
+            setRemoveError(toFailure(err).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        destructive
+        error={removeError}
+        confirmLabel="Entfernen"
+        title={`${removingAttendee?.name ?? ""} entfernen?`}
+        message="Die Person wird von der Teilnehmerliste dieser Sitzung genommen."
+      />
     </Card>
   );
 }
@@ -286,7 +313,7 @@ function AddAttendeeDialog({ meetingId, onClose }: { meetingId: string; onClose:
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button
+          <Button variant="primary"
             busy={busy}
             disabled={!ready}
             disabledReason={blocked}
@@ -409,6 +436,10 @@ export function AgendaPanel({ meeting }: { meeting: MeetingDetail }) {
 
   const [editing, setEditing] = useState<string | null | false>(false);
   const [busy, setBusy] = useState(false);
+  const [removingItem, setRemovingItem] = useState<{ id: string; title: string; lines: number } | null>(
+    null,
+  );
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const mayWrite = can("meeting.update") && !meeting.protocolLocked;
   const total = meeting.agenda.reduce((sum, item) => sum + (item.durationMinutes ?? 0), 0);
@@ -466,19 +497,9 @@ export function AgendaPanel({ meeting }: { meeting: MeetingDetail }) {
                     </Button>
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="danger-quiet"
                       disabled={busy}
-                      onClick={async () => {
-                        setBusy(true);
-                        try {
-                          await mutations.removeAgendaItem(meeting.id, item.id);
-                          toast.success("Traktandum entfernt");
-                        } catch (err) {
-                          toast.error(toFailure(err).message);
-                        } finally {
-                          setBusy(false);
-                        }
-                      }}
+                      onClick={() => setRemovingItem({ id: item.id, title: item.title, lines })}
                     >
                       Entfernen
                     </Button>
@@ -497,6 +518,43 @@ export function AgendaPanel({ meeting }: { meeting: MeetingDetail }) {
           onClose={() => setEditing(false)}
         />
       ) : null}
+
+      {/* MEDIUM level: the consequence for the protocol is stated, not discovered. */}
+      <ConfirmDialog
+        open={removingItem !== null}
+        busy={busy}
+        onClose={() => {
+          setRemovingItem(null);
+          setRemoveError(null);
+        }}
+        onConfirm={async () => {
+          if (!removingItem) return;
+          setBusy(true);
+          setRemoveError(null);
+          try {
+            await mutations.removeAgendaItem(meeting.id, removingItem.id);
+            toast.success("Traktandum entfernt");
+            setRemovingItem(null);
+          } catch (err) {
+            setRemoveError(toFailure(err).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        destructive
+        error={removeError}
+        confirmLabel="Entfernen"
+        title={`Traktandum „${removingItem?.title ?? ""}“ entfernen?`}
+        message="Das Traktandum verschwindet aus der Traktandenliste."
+        consequence={
+          removingItem?.lines ? (
+            <p>
+              {removingItem.lines === 1 ? "Eine Protokollzeile gehört" : `${removingItem.lines} Protokollzeilen gehören`}{" "}
+              dazu. Sie bleiben im Protokoll und erscheinen danach unter „Ohne Traktandum“.
+            </p>
+          ) : undefined
+        }
+      />
     </Card>
   );
 }
@@ -557,7 +615,7 @@ function AgendaDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button busy={busy} disabled={title.trim().length < 2} onClick={() => void submit()}>
+          <Button variant="primary" busy={busy} disabled={title.trim().length < 2} onClick={() => void submit()}>
             {existing ? "Speichern" : "Hinzufügen"}
           </Button>
         </>
@@ -690,91 +748,89 @@ export function ApprovalPanel({ meeting }: { meeting: MeetingDetail }) {
   );
 }
 
+/**
+ * Approving the minutes, as a status transition (P1C).
+ *
+ * The two ways to approve are the two targets; "mit Änderung" carries the
+ * reason the server requires. The consequence is a `warning` because the act
+ * cannot be undone — and it is `primary`, not `danger`: approval is the
+ * protocol's next step, not a removal, and the warning is what slows the
+ * reader down.
+ */
 function ApproveDialog({ meeting, onClose }: { meeting: MeetingDetail; onClose: () => void }) {
-  const ids = { decision: useId(), note: useId() };
   const toast = useToast();
   const mutations = useMeetingMutations();
-
-  const [decision, setDecision] = useState<ApprovalDecision>("APPROVED");
-  const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // The server's rule, before the request rather than after the 400.
-  const needsNote = decision === "AMENDED" && !note.trim();
+  const lines = `${meeting.counts.items} ${meeting.counts.items === 1 ? "Zeile wird" : "Zeilen werden"}`;
+  const consequence = (
+    <>
+      <p>
+        <strong>Nicht rückgängig zu machen.</strong> Danach ist das Protokoll der Stand und lässt
+        sich nicht mehr bearbeiten — {lines} festgeschrieben.
+      </p>
+      <p>
+        Eine spätere Korrektur wird als Änderung an der nächsten Sitzung genehmigt und steht neben
+        dem ursprünglichen Text.
+      </p>
+    </>
+  );
+
+  const targets: TransitionTarget[] = APPROVAL_DECISIONS.map((value: ApprovalDecision) =>
+    value === "AMENDED"
+      ? {
+          value,
+          label: "Mit Änderung genehmigt",
+          tone: "gold",
+          confirmLabel: "Mit Änderung genehmigen",
+          consequenceTone: "warning",
+          consequence,
+          // The server's rule, before the request rather than after the 400.
+          reason: {
+            label: "Änderung",
+            required: true,
+            hint: "Was gegenüber dem versandten Protokoll korrigiert wurde. Beides bleibt auf dem Record.",
+          },
+        }
+      : {
+          value,
+          label: "Genehmigt",
+          tone: "energy",
+          confirmLabel: "Protokoll genehmigen",
+          consequenceTone: "warning",
+          consequence,
+        },
+  );
+
+  const current = minutesState(meeting) ?? { label: "Durchgeführt", tone: "navy" as const };
 
   return (
-    <Modal
+    <StatusTransitionDialog
       open
       onClose={onClose}
-      busy={busy}
       title="Protokoll genehmigen"
-      description="Danach ist das Protokoll der Stand. Es lässt sich nicht mehr bearbeiten."
-      footer={
-        <>
-          <div className="flex-1" />
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Abbrechen
-          </Button>
-          <Button
-            busy={busy}
-            disabled={needsNote}
-            onClick={async () => {
-              setError(null);
-              setBusy(true);
-              try {
-                await mutations.approve(meeting.id, {
-                  decision,
-                  note: note.trim() || undefined,
-                });
-                toast.success("Protokoll genehmigt");
-                onClose();
-              } catch (err) {
-                setError(toFailure(err).message);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Genehmigen
-          </Button>
-        </>
-      }
-    >
-      <Form onSubmit={() => undefined} error={error}>
-        <Field label="Entscheid" htmlFor={ids.decision}>
-          <Select
-            id={ids.decision}
-            value={decision}
-            onChange={(event) => setDecision(event.target.value as ApprovalDecision)}
-            options={APPROVAL_DECISIONS.map((value) => ({
-              value,
-              label: value === "AMENDED" ? "Mit Änderung genehmigt" : "Unverändert genehmigt",
-            }))}
-          />
-        </Field>
-
-        <Field
-          label="Änderung"
-          htmlFor={ids.note}
-          optional={decision !== "AMENDED"}
-          error={needsNote ? "Eine Genehmigung mit Änderung braucht eine Beschreibung." : undefined}
-          hint="Was gegenüber dem versandten Protokoll korrigiert wurde. Beides bleibt auf dem Record."
-        >
-          <Textarea
-            id={ids.note}
-            rows={3}
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </Field>
-
-        <p className="text-[13px] leading-relaxed text-muted">
-          {meeting.counts.items} {meeting.counts.items === 1 ? "Zeile" : "Zeilen"} werden damit
-          festgeschrieben. Eine spätere Korrektur wird als Änderung an der nächsten Sitzung
-          genehmigt und steht neben dem ursprünglichen Text.
-        </p>
-      </Form>
-    </Modal>
+      description="Unverändert oder mit einer beschriebenen Änderung."
+      from={current}
+      targets={targets}
+      busy={busy}
+      error={error}
+      onConfirm={async (decision, note) => {
+        setError(null);
+        setBusy(true);
+        try {
+          await mutations.approve(meeting.id, {
+            decision: decision as ApprovalDecision,
+            note: note || undefined,
+          });
+          toast.success("Protokoll genehmigt");
+          onClose();
+        } catch (err) {
+          setError(toFailure(err).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    />
   );
 }

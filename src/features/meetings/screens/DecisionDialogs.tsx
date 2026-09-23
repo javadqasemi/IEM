@@ -401,7 +401,7 @@ export function DecisionCreateDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={() => void submit()} busy={busy} disabled={!ready}>
+          <Button variant="primary" onClick={() => void submit()} busy={busy} disabled={!ready}>
             Festhalten
           </Button>
         </>
@@ -537,7 +537,7 @@ export function DecisionEditDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button
+          <Button variant="primary"
             onClick={() => void submit()}
             busy={busy}
             disabled={Boolean(blocked)}

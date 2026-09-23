@@ -128,7 +128,7 @@ export function TransmittalDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={() => void submit()} busy={busy} disabled={!ready}>
+          <Button variant="primary" onClick={() => void submit()} busy={busy} disabled={!ready}>
             Versenden
           </Button>
         </>
@@ -448,7 +448,10 @@ function SentReport({ result, onClose }: { result: TransmittalResult; onClose: (
       footer={
         <>
           <div className="flex-1" />
-          <Button onClick={onClose}>Schliessen</Button>
+          {/* A report's only action is to close it — a dismissal, so `ghost`. */}
+          <Button variant="ghost" onClick={onClose}>
+            Schliessen
+          </Button>
         </>
       }
     >

@@ -217,7 +217,7 @@ export function ProjectList() {
         description="Jedes Projekt hat eine Bauherrschaft, ein Objekt und eine verantwortliche Person. Zustand und Fortschritt werden berechnet, nicht erfasst."
         actions={
           can("project.create") ? (
-            <Button onClick={() => setCreating(true)}>Neues Projekt</Button>
+            <Button variant="primary" onClick={() => setCreating(true)}>Neues Projekt</Button>
           ) : null
         }
       />

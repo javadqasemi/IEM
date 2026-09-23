@@ -146,7 +146,7 @@ export function MfaCard({ account }: { account: string }) {
                 <Button variant="secondary" onClick={() => setConfirming("regenerate")}>
                   Neue Wiederherstellungscodes
                 </Button>
-                <Button variant="ghost" onClick={() => setConfirming("disable")}>
+                <Button variant="danger-quiet" onClick={() => setConfirming("disable")}>
                   Deaktivieren
                 </Button>
               </div>

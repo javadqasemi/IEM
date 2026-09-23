@@ -9,7 +9,8 @@ import { useAwaitingCheckCount } from "@/features/drawings";
 import { api } from "./lib/api";
 import { useAuth } from "@/core/auth";
 import { RouteMetaProvider, buildTrail, useRoute, useScrollReset, type Crumb } from "@/core/router";
-import { useAsync } from "./lib/useAsync";
+import { useQuery } from "@/core/api";
+import { FRESH_ON_VISIT } from "./lib/queries";
 import { AdminLayout } from "./layout/AdminLayout";
 import { buildNavigation, searchIndex, type NavWorkspace } from "./lib/navigation";
 import { ROUTES, matchRoute, SPENT_AUTH_ROUTES } from "./routes";
@@ -34,10 +35,12 @@ export function App() {
   // are silent — a missing badge is not worth an error screen.
   // Gated on the key that shows the row it counts: a badge nobody can see
   // should cost no request.
-  const reviews = useAsync(
-    () =>
-      user && can("content.approve") ? api.reviews().catch(() => []) : Promise.resolve([]),
-    [user?.id],
+  // Off `useAsync` (P1C). A `null` key asks nothing, and the key carries the
+  // user so the next person signing in on this tab never sees the last one's count.
+  const reviews = useQuery(
+    user && can("content.approve") ? ["shell", "reviews", user.id] : null,
+    () => api.reviews().catch(() => []),
+    FRESH_ON_VISIT,
   );
   // Applications is the one group that has moved to a feature folder, so its
   // count comes through the feature's public surface rather than off the shared
@@ -67,10 +70,10 @@ export function App() {
    * Only asked for by somebody who can read content; failing quietly is right,
    * because an empty list costs a few search entries and nothing else.
    */
-  const types = useAsync(
-    () =>
-      user && can("content.read") ? api.contentTypes().catch(() => []) : Promise.resolve([]),
-    [user?.id],
+  // The types change only with a deployment, so the default cache is right.
+  const types = useQuery(
+    user && can("content.read") ? ["shell", "contentTypes", user.id] : null,
+    () => api.contentTypes().catch(() => []),
   );
 
   /*

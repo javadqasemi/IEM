@@ -143,7 +143,7 @@ export function TaskCreateDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button
+          <Button variant="primary"
             onClick={() => void submit()}
             busy={busy}
             disabled={title.trim().length < 2}

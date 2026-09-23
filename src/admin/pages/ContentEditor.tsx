@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import { Button, Card, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
 import { Field, FieldRenderer, Input, Textarea } from "@/shared/ui/forms";
-import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
+import { ConfirmDialog, Modal, StatusTransitionDialog } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
-import { WorkflowBadge } from "@/entities/content";
+import { WorkflowBadge, workflowLabel, workflowTone } from "@/entities/content";
 import { api, type EntryRow, type VersionRow } from "../lib/api";
 import { useAuth } from "@/core/auth";
 import { navigate, usePageTitle } from "@/core/router";
@@ -206,7 +206,8 @@ export function ContentEditorPage({
                   disabled={dirty}
                   disabledReason="Erst speichern — eingereicht wird der gespeicherte Stand."
                 >
-                  Zur Freigabe
+                  {/* The glossary: "Freigeben" is what the reviewer does. */}
+                  Zur Prüfung einreichen
                 </Button>
               ) : null}
               {canEdit ? (
@@ -359,6 +360,7 @@ export function ContentEditorPage({
 
       <SubmitDialog
         open={submitOpen}
+        status={status}
         onClose={() => setSubmitOpen(false)}
         busy={submit.busy}
         error={submit.error}
@@ -570,62 +572,53 @@ function SubmitDialog({
   open,
   onClose,
   onSubmit,
+  status,
   busy,
   error,
 }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (message: string) => void;
+  /** The entry's current workflow state, for the "from" badge. */
+  status: string;
   busy: boolean;
   /** Why the last attempt was refused — shown in the dialog, not in a toast. */
   error: string | null;
 }) {
-  const [message, setMessage] = useState("");
-  useEffect(() => {
-    if (open) setMessage("");
-  }, [open]);
-
+  /*
+    A status transition (P1C), not a one-off dialog: where the entry is, where
+    it goes, what follows, and the message to the reviewer as the transition's
+    reason. The consequence is the one thing an editor gets wrong — that
+    submitting publishes nothing.
+  */
   return (
-    <Modal
+    <StatusTransitionDialog
       open={open}
       onClose={onClose}
-      title="Zur Freigabe einreichen"
-      description="Die geprüfte Fassung ist der aktuelle Stand dieses Eintrags."
-      size="sm"
+      title="Zur Prüfung einreichen"
+      description="Eingereicht wird der gespeicherte Stand dieses Eintrags."
+      from={{ label: workflowLabel(status), tone: workflowTone(status) }}
+      targets={[
+        {
+          value: "IN_REVIEW",
+          label: workflowLabel("IN_REVIEW"),
+          tone: workflowTone("IN_REVIEW"),
+          confirmLabel: "Zur Prüfung einreichen",
+          consequence: (
+            <p>
+              Eine zweite Person prüft den Eintrag. Auf der Website erscheint er erst nach der
+              Freigabe <strong>und</strong> der nächsten Veröffentlichung.
+            </p>
+          ),
+          reason: {
+            label: "Nachricht an die prüfende Person",
+            hint: "Was geändert wurde und worauf zu achten ist.",
+          },
+        },
+      ]}
       busy={busy}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Abbrechen
-          </Button>
-          <Button variant="primary" onClick={() => onSubmit(message)} busy={busy}>
-            Einreichen
-          </Button>
-        </>
-      }
-    >
-      {error ? (
-        <p
-          role="alert"
-          className="mb-4 rounded-md bg-brand-bronze/[0.08] px-4 py-3 text-[13px] font-medium text-brand-bronze ring-1 ring-brand-bronze/25"
-        >
-          {error}
-        </p>
-      ) : null}
-      <Field
-        label="Nachricht an die prüfende Person"
-        htmlFor="submit-message"
-        optional
-        hint="Was geändert wurde und worauf zu achten ist."
-      >
-        <Textarea
-          id="submit-message"
-          rows={3}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          autoFocus
-        />
-      </Field>
-    </Modal>
+      error={error}
+      onConfirm={(_target, message) => onSubmit(message)}
+    />
   );
 }

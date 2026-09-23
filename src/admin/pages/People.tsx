@@ -1,10 +1,10 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { Checkbox, Field, Input, SearchInput, Select, Textarea } from "@/shared/ui/forms";
+import { Checkbox, Field, Form, Input, SearchInput, Select, Textarea } from "@/shared/ui/forms";
 import { ConfirmDialog, Modal, ReauthenticationDialog } from "@/shared/ui/overlays";
 import { type Column, DataView } from "@/shared/ui/data";
-import { useToast } from "@/shared/ui/feedback";
+import { Callout, useToast } from "@/shared/ui/feedback";
 import { UserMfaRoute } from "@/features/mfa";
 import { UserSessionsRoute } from "@/features/sessions";
 import { ApiError, toFailure } from "@/core/api";
@@ -209,7 +209,7 @@ export function UsersPage() {
             </Button>
           ) : null}
           {can("user.delete") && r.id !== me?.id && !above(r) ? (
-            <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(r)}>
+            <Button size="sm" variant="danger-quiet" onClick={() => setConfirmDelete(r)}>
               Löschen
             </Button>
           ) : null}
@@ -444,7 +444,13 @@ function InviteDialog({
         </>
       }
     >
-      <div className="flex flex-col gap-5">
+      {/*
+        A real form since P1C: the error sits above the fields as the shared
+        `Callout`, and a failed submit moves focus to the first invalid field.
+        The password dialog stays *outside* it — it is a form of its own, and
+        a form inside a form is invalid HTML.
+      */}
+      <Form onSubmit={() => (inviteBlocked ? undefined : submit())} error={invite.error}>
         <Field label="Name" htmlFor="invite-name" error={invite.fields.name?.[0]}>
           <Input
             id="invite-name"
@@ -466,13 +472,7 @@ function InviteDialog({
         </Field>
 
         <RolePicker roles={roles} selected={roleIds} onChange={setRoleIds} />
-
-        {invite.error ? (
-          <p role="alert" className="text-[13px] font-medium text-brand-bronze">
-            {invite.error}
-          </p>
-        ) : null}
-      </div>
+      </Form>
       {reauth.dialog}
     </Modal>
   );
@@ -580,38 +580,48 @@ function EditUserDialog({
     >
       <div className="flex flex-col gap-5">
         {above ? (
-          <p className="rounded-md bg-surface-2 px-4 py-3 text-[13px] leading-relaxed text-muted">
-            Dieses Konto hat Rechte, die Sie selbst nicht besitzen. Status und Rollen kann nur
-            ändern, wer mindestens dieselben Rechte hat.
+          <Callout tone="security">
+            <p>
+              Dieses Konto hat Rechte, die Sie selbst nicht besitzen. Status und Rollen kann nur
+              ändern, wer mindestens dieselben Rechte hat.
+            </p>
+          </Callout>
+        ) : null}
+
+        {/*
+          Only the account's own fields are the form. The MFA and session
+          panels below act immediately through their own confirmations — and
+          open dialogs with forms of their own, which must not end up nested
+          inside this one.
+        */}
+        <Form onSubmit={() => (above ? undefined : save())} error={error}>
+          {can("user.update") && !above ? (
+            <Field
+              label="Status"
+              htmlFor="user-status"
+              hint="Ein gesperrtes Konto verliert sofort alle offenen Sitzungen."
+            >
+              <Select
+                id="user-status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as UserRow["status"])}
+                options={[
+                  { value: "ACTIVE", label: "Aktiv" },
+                  { value: "SUSPENDED", label: "Gesperrt" },
+                ]}
+              />
+            </Field>
+          ) : null}
+
+          {can("user.assign") && !above ? (
+            <RolePicker roles={roles} selected={roleIds} onChange={setRoleIds} />
+          ) : null}
+
+          <p className="text-[12px] leading-relaxed text-muted">
+            Beim Ändern von Rollen werden die offenen Sitzungen dieser Person beendet, damit die
+            neuen Rechte sofort und vollständig greifen.
           </p>
-        ) : null}
-
-        {can("user.update") && !above ? (
-          <Field
-            label="Status"
-            htmlFor="user-status"
-            hint="Ein gesperrtes Konto verliert sofort alle offenen Sitzungen."
-          >
-            <Select
-              id="user-status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as UserRow["status"])}
-              options={[
-                { value: "ACTIVE", label: "Aktiv" },
-                { value: "SUSPENDED", label: "Gesperrt" },
-              ]}
-            />
-          </Field>
-        ) : null}
-
-        {can("user.assign") && !above ? (
-          <RolePicker roles={roles} selected={roleIds} onChange={setRoleIds} />
-        ) : null}
-
-        <p className="text-[12px] leading-relaxed text-muted">
-          Beim Ändern von Rollen werden die offenen Sitzungen dieser Person beendet, damit die
-          neuen Rechte sofort und vollständig greifen.
-        </p>
+        </Form>
 
         {/*
           Zwei-Faktor-Authentisierung — the feature's administrative slice.
@@ -660,12 +670,6 @@ function EditUserDialog({
               />
             </Suspense>
           </div>
-        ) : null}
-
-        {error ? (
-          <p role="alert" className="text-[13px] font-medium text-brand-bronze">
-            {error}
-          </p>
         ) : null}
       </div>
       {reauth.dialog}
@@ -794,7 +798,7 @@ export function RolesPage() {
                       </Button>
                     ) : null}
                     {can("role.delete") && !role.isSystem && role.grantable !== false ? (
-                      <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(role)}>
+                      <Button size="sm" variant="danger-quiet" onClick={() => setConfirmDelete(role)}>
                         Löschen
                       </Button>
                     ) : null}
@@ -964,7 +968,7 @@ function RoleDialog({
         </>
       }
     >
-      <div className="flex flex-col gap-5">
+      <Form onSubmit={() => (roleBlocked ? undefined : save())} error={error}>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Name" htmlFor="role-name" error={create.fields.name?.[0]}>
             <Input id="role-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
@@ -1041,13 +1045,7 @@ function RoleDialog({
             );
           })}
         </div>
-
-        {error ? (
-          <p role="alert" className="text-[13px] font-medium text-brand-bronze">
-            {error}
-          </p>
-        ) : null}
-      </div>
+      </Form>
       {reauth.dialog}
     </Modal>
   );

@@ -170,14 +170,15 @@ export function BackupRoute() {
               );
             }}
           >
-            {row.protected ? "Freigeben" : "Schützen"}
+            {/* "Schutz aufheben", not "Freigeben" — that word is content approval. */}
+          {row.protected ? "Schutz aufheben" : "Schützen"}
           </Button>
           {canRestore && row.status === "SUCCESS" && row.verification === "PASSED" ? (
             <Button variant="secondary" size="sm" onClick={() => setRestoring(row)}>
               Einspielen
             </Button>
           ) : null}
-          <Button variant="ghost" size="sm" onClick={() => setDeleting(row)}>
+          <Button variant="danger-quiet" size="sm" onClick={() => setDeleting(row)}>
             Löschen
           </Button>
         </span>

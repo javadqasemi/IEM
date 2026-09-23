@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { invalidate, peek, prime, useQuery } from "@/core/api";
+import { invalidate, peek, prime, revalidate, useQuery } from "@/core/api";
 import type {
   Office,
   OfficeDraft,
@@ -108,6 +108,17 @@ export function useSaveOrganisation() {
     },
     [],
   );
+}
+
+/**
+ * "Neueste Fassung laden" after a 409 (P1C): refetches the record *in place* —
+ * `revalidate`, which keeps what is on screen until the fresh copy lands, so
+ * the form does not unmount under the reader. Never a page reload.
+ */
+export function useReloadOrganisation() {
+  return useCallback(() => {
+    revalidate([...RECORD_KEY]);
+  }, []);
 }
 
 /* ================================================================== */

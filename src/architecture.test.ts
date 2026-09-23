@@ -417,3 +417,240 @@ describe("P1B: navigation has one source and one rule", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/* ================================================================== */
+/* P1C — one interaction standard                                      */
+/* ================================================================== */
+
+/**
+ * The forms-and-actions standard (P1C), as rules a new screen cannot quietly
+ * break. Each walks the syntax tree rather than grepping, because the thing
+ * being checked is a *relationship* — a button's text and its variant, a
+ * dialog's body and whether it holds a form — and a regex over JSX gets that
+ * wrong in both directions. Every allowlist is shrink-only: an entry that no
+ * longer needs to be there fails the test until it is removed.
+ */
+describe("P1C: one interaction standard", async () => {
+  const ts = (await import("typescript")).default;
+  type Node = import("typescript").Node;
+
+  const screens = [
+    ...sources(join(SRC, "admin")),
+    ...sources(join(SRC, "features")),
+    ...sources(join(SRC, "shared")),
+    ...sources(join(SRC, "widgets")),
+  ].filter((f) => f.endsWith(".tsx") && !/\.test\.tsx$/.test(f));
+
+  const parsed = screens.map((file) => ({
+    file,
+    source: ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX),
+  }));
+
+  const tagOf = (n: Node) =>
+    ts.isJsxElement(n) ? n.openingElement.tagName : ts.isJsxSelfClosingElement(n) ? n.tagName : null;
+  const openingOf = (n: Node) =>
+    ts.isJsxElement(n) ? n.openingElement : ts.isJsxSelfClosingElement(n) ? n : null;
+  const attr = (n: Node, name: string) =>
+    openingOf(n)?.attributes.properties.find(
+      (a): a is import("typescript").JsxAttribute => ts.isJsxAttribute(a) && a.name.getText() === name,
+    );
+  const variantOf = (n: Node) => {
+    const v = attr(n, "variant");
+    return v?.initializer ? v.initializer.getText().replace(/[{}"]/g, "") : "secondary";
+  };
+  const textOf = (n: Node) =>
+    ts.isJsxElement(n)
+      ? n.children
+          .filter((c) => ts.isJsxText(c))
+          .map((c) => c.getText())
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim()
+      : "";
+  const where = (file: string, source: import("typescript").SourceFile, n: Node) =>
+    `${rel(file)}:${source.getLineAndCharacterOfPosition(n.getStart()).line + 1}`;
+  const walk = (n: Node, visit: (n: Node) => void) => {
+    visit(n);
+    ts.forEachChild(n, (c) => walk(c, visit));
+  };
+
+  /**
+   * `useAsync` — the pre-cache loader — is retired screen by screen. P1C moved
+   * the home page, the shell's badges, the audit log and the profile to
+   * `useQuery`; these five remain, and each says why.
+   */
+  const USE_ASYNC_ALLOWED: Record<string, string> = {
+    "src/admin/pages/Content.tsx": "content lists — rebuilt by the page editor (P2, Edit Website)",
+    "src/admin/pages/ContentEditor.tsx": "the entry editor — rebuilt by the page editor (P2)",
+    "src/admin/pages/Media.tsx": "the media library — moves with the page editor's picker (P2)",
+    "src/admin/pages/Workflow.tsx": "Freigaben / Veröffentlichen — become the editor's workflow bar (P2)",
+    "src/admin/pages/People.tsx":
+      "users and roles — the P0 privilege-ceiling and re-authentication flows, not reworked in P1C",
+  };
+
+  it("useAsync is used only where it is still allowed, and the list only shrinks", () => {
+    const using = sources(SRC)
+      .filter((f) => !/\.test\.tsx?$/.test(f) && !f.endsWith(join("lib", "useAsync.ts")))
+      .filter((f) => /\buseAsync\(/.test(withoutComments(read(f))))
+      .map(rel)
+      .sort();
+    expect(using).toEqual(Object.keys(USE_ASYNC_ALLOWED).sort());
+  });
+
+  /**
+   * UX-16. A destructive trigger is `danger-quiet` and its confirmation
+   * `danger`; every "Löschen" used to be a grey `ghost`, the same as the
+   * "Abbrechen" beside it. Judged by the button's own text.
+   */
+  const DESTRUCTIVE = /\b(l[öo]schen|entfernen|archivieren|zur[üu]ckziehen|deaktivieren|widerrufen|beenden|stoppen|zur[üu]cksetzen)\b/i;
+  const NOT_DESTRUCTIVE = new Set([
+    // Resets a *filter*, not a record.
+    "Suche zurücksetzen",
+    "Alle zurücksetzen",
+  ]);
+  const DESTRUCTIVE_EXCEPTIONS: Record<string, string> = {
+    "src/features/drawings/screens/TransmittalDialog.tsx":
+      "removes a recipient row from an unsent draft — nothing persisted is touched",
+  };
+
+  it("a destructive button is danger or danger-quiet", () => {
+    const offenders: string[] = [];
+    const excused = new Set<string>();
+    for (const { file, source } of parsed) {
+      walk(source, (n) => {
+        if (tagOf(n)?.getText() !== "Button") return;
+        const text = textOf(n);
+        if (!DESTRUCTIVE.test(text) || NOT_DESTRUCTIVE.has(text)) return;
+        if (variantOf(n).startsWith("danger")) return;
+        if (DESTRUCTIVE_EXCEPTIONS[rel(file)]) {
+          excused.add(rel(file));
+          return;
+        }
+        offenders.push(`${where(file, source, n)} «${text}» is ${variantOf(n)}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+    expect([...excused].sort(), "an exception that is no longer needed").toEqual(
+      Object.keys(DESTRUCTIVE_EXCEPTIONS).sort(),
+    );
+  });
+
+  /**
+   * A dialog with fields is a `<Form>`: Enter, the error `Callout`, focus on
+   * the first invalid field and required semantics all hang off it. The two
+   * exceptions are HIGH-level confirmations, where the typed word must never
+   * be submittable by Enter.
+   */
+  const MODAL_WITHOUT_FORM: Record<string, string> = {
+    "src/shared/ui/overlays/Modal.tsx": "ConfirmDialog's typed confirmation — a deliberate click",
+    "src/features/backup/screens/RestoreDialog.tsx": "restore: typed word + re-authentication (HIGH)",
+  };
+
+  it("a dialog with fields wraps them in a Form", () => {
+    const found = new Set<string>();
+    const offenders: string[] = [];
+    for (const { file, source } of parsed) {
+      walk(source, (n) => {
+        if (tagOf(n)?.getText() !== "Modal" || !ts.isJsxElement(n)) return;
+        let field = false;
+        let form = false;
+        n.children.forEach((c) =>
+          walk(c, (d) => {
+            const name = tagOf(d)?.getText();
+            if (name === "Field") field = true;
+            if (name === "Form" || name === "form") form = true;
+          }),
+        );
+        if (!field || form) return;
+        if (MODAL_WITHOUT_FORM[rel(file)]) found.add(rel(file));
+        else offenders.push(where(file, source, n));
+      });
+    }
+    expect(offenders).toEqual([]);
+    expect([...found].sort()).toEqual(Object.keys(MODAL_WITHOUT_FORM).sort());
+  });
+
+  /**
+   * One primary per decision context. The rightmost footer button that is not
+   * a dismissal (`ghost`) or a destructive trigger (`danger-quiet`) is what the
+   * dialog exists for, and it looks like it: `primary`, or `danger` when the
+   * act removes something. The Wave-2 dialogs left it on the default
+   * `secondary`, so a project's "Speichern" weighed the same as everything else.
+   */
+  it("a dialog's main action is primary (or danger)", () => {
+    const offenders: string[] = [];
+    for (const { file, source } of parsed) {
+      walk(source, (n) => {
+        if (tagOf(n)?.getText() !== "Modal") return;
+        const footer = attr(n, "footer");
+        if (!footer?.initializer) return;
+        const buttons: Node[] = [];
+        walk(footer.initializer, (d) => {
+          if (tagOf(d)?.getText() === "Button") buttons.push(d);
+        });
+        const main = buttons.filter((b) => {
+          const v = variantOf(b);
+          return v !== "ghost" && v !== "danger-quiet";
+        });
+        const last = main[main.length - 1];
+        if (!last) return;
+        const v = variantOf(last);
+        // A conditional (`destructive ? "danger" : "primary"`) names both.
+        if (/\b(primary|danger)\b/.test(v) && !/secondary/.test(v)) return;
+        offenders.push(`${where(file, source, n)} main action is ${v}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * No permission key in what a person reads (Part 23). Checked against the
+   * real catalogue, over JSX text and the attributes that are shown —
+   * `permission=` and `permissions=` are configuration, not copy. The role
+   * editor lists keys as hints on purpose: it is the one technical context.
+   */
+  it("no permission key appears in user-visible copy", () => {
+    const catalogue = read(resolve(SRC, "..", "server", "src", "rbac", "permissions.catalog.ts"));
+    const keys = new Set([...catalogue.matchAll(/"([a-z]+\.[a-z][a-zA-Z]*)"/g)].map((m) => m[1]));
+    expect(keys.size, "the catalogue parsed").toBeGreaterThan(50);
+
+    const SHOWN = new Set([
+      "title",
+      "description",
+      "label",
+      "hint",
+      "message",
+      "disabledReason",
+      "placeholder",
+      "confirmLabel",
+      "aria-label",
+      "emptyLabel",
+      "caption",
+      "eyebrow",
+    ]);
+    const offenders: string[] = [];
+    for (const { file, source } of parsed) {
+      const check = (text: string, n: Node) => {
+        const hit = text
+          .split(/[\s,;:()„“"'`]+/)
+          .map((w) => w.replace(/[.!?]$/, ""))
+          .find((w) => keys.has(w));
+        if (hit) offenders.push(`${where(file, source, n)} shows "${hit}"`);
+      };
+      walk(source, (n) => {
+        if (ts.isJsxText(n)) check(n.getText(), n);
+        if (ts.isJsxAttribute(n) && SHOWN.has(n.name.getText()) && n.initializer) {
+          const init = n.initializer;
+          if (ts.isStringLiteral(init)) check(init.text, n);
+          else if (
+            ts.isJsxExpression(init) &&
+            init.expression &&
+            (ts.isStringLiteral(init.expression) || ts.isNoSubstitutionTemplateLiteral(init.expression))
+          )
+            check(init.expression.text, n);
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+});

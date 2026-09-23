@@ -231,7 +231,7 @@ export function TaskList() {
               ))}
             </div>
             {can("task.create") ? (
-              <Button onClick={() => setCreating(true)}>Neue Aufgabe</Button>
+              <Button variant="primary" onClick={() => setCreating(true)}>Neue Aufgabe</Button>
             ) : null}
           </div>
         }

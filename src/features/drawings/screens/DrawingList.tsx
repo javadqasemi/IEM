@@ -178,7 +178,7 @@ export function DrawingList() {
         description="Der Planbestand mit Revisionen. Freigegeben ist intern, ausgegeben heisst, jemand baut danach."
         actions={
           can("drawing.create") ? (
-            <Button onClick={() => setCreating(true)}>Neuer Plan</Button>
+            <Button variant="primary" onClick={() => setCreating(true)}>Neuer Plan</Button>
           ) : null
         }
       />

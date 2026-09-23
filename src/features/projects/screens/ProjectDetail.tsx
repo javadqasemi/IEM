@@ -3,18 +3,22 @@ import { toFailure } from "@/core/api";
 import { Link, navigate, useRoute } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import {
-  PROJECT_STATUS_OPTIONS,
   ProjectHealthDot,
   ProjectStatusBadge,
   projectStatusLabel,
+  projectStatusTone,
   type ProjectDetail as Project,
+  type ProjectStatus,
 } from "@/entities/project";
 import { Badge, Button, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
-import { Field, Form, Select, Textarea } from "@/shared/ui/forms";
+import {
+  ConfirmDialog,
+  RecordActions,
+  StatusTransitionDialog,
+  type TransitionTarget,
+} from "@/shared/ui/overlays";
 import { ModulePlaceholder, useToast } from "@/shared/ui/feedback";
 import { cn } from "@/shared/utils/cn";
-import { useId } from "react";
 import { useProject, useProjectMutations } from "../hooks/useProjects";
 import { isReadOnly } from "../service";
 import { EMBEDDED_TABS, type ProjectTab } from "./tabs";
@@ -67,6 +71,7 @@ export function ProjectDetail({
   const route = useRoute();
   const { can } = useAuth();
   const project = useProject(projectId);
+  const [deleting, setDeleting] = useState(false);
 
   const owned = ownedTabs();
   const tabs = [...owned, ...EMBEDDED_TABS];
@@ -111,14 +116,25 @@ export function ProjectDetail({
             <ProjectHealthDot health={record.health} />
             <ProjectStatusBadge status={record.status} />
             {readOnly ? <Badge tone="bronze">Schreibgeschützt</Badge> : null}
-            {can("project.update") && !readOnly ? <EditButton project={record} /> : null}
-            {can("project.update") && !readOnly && record.allowedTransitions.length ? (
-              <StatusButton project={record} />
-            ) : null}
-            {can("project.delete") ? <DeleteButton project={record} /> : null}
+            <RecordActions
+              secondary={
+                can("project.update") && !readOnly ? (
+                  <>
+                    <EditButton project={record} />
+                    {record.allowedTransitions.length ? <StatusButton project={record} /> : null}
+                  </>
+                ) : null
+              }
+              more={
+                can("project.delete")
+                  ? [{ id: "delete", label: "Löschen", destructive: true, onSelect: () => setDeleting(true) }]
+                  : []
+              }
+            />
           </div>
         }
       />
+      <DeleteDialog project={record} open={deleting} onClose={() => setDeleting(false)} />
 
       {/*
         Anchors in a `<nav>`, not `role="tab"` — see the note at the top.
@@ -290,85 +306,71 @@ function ownedTabs(): ProjectTab[] {
 function StatusButton({ project }: { project: Project }) {
   const toast = useToast();
   const mutations = useProjectMutations();
-  const ids = { status: useId(), reason: useId() };
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState(project.allowedTransitions[0] ?? project.status);
-  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const options = PROJECT_STATUS_OPTIONS.filter((option) =>
-    (project.allowedTransitions as string[]).includes(option.value),
-  );
+  const reason = {
+    label: "Begründung",
+    hint: "Wird im Verlauf und im Audit-Log festgehalten — bei einem Baustopp oder Abbruch die wichtigste Zeile.",
+  };
+
+  /*
+    The server's targets, in its order. Stopping a project is the one that
+    ends work for everybody on it, so it carries the destructive weight; the
+    rest are ordinary steps in the record's life.
+  */
+  const targets: TransitionTarget[] = project.allowedTransitions.map((value) => ({
+    value,
+    label: projectStatusLabel(value),
+    tone: projectStatusTone(value),
+    reason,
+    destructive: value === "CANCELLED",
+    consequence:
+      value === "CANCELLED" ? (
+        <p>Ein abgebrochenes Projekt ist abgeschlossen. Die Begründung ist das, was später jemand nachliest.</p>
+      ) : undefined,
+  }));
+
+  if (!targets.length) return null;
 
   return (
     <>
       <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
         Status ändern
       </Button>
-      <Modal
+      <StatusTransitionDialog
         open={open}
-        onClose={() => setOpen(false)}
-        busy={busy}
+        onClose={() => {
+          setOpen(false);
+          setError(null);
+        }}
         title="Status ändern"
-        description={`Aktuell: ${projectStatusLabel(project.status)}. Nur erlaubte Übergänge werden angeboten.`}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-              Abbrechen
-            </Button>
-            <Button
-              busy={busy}
-              onClick={async () => {
-                setError(null);
-                setBusy(true);
-                try {
-                  await mutations.changeStatus(project.id, {
-                    status,
-                    reason: reason.trim() || undefined,
-                  });
-                  toast.success(`Status: ${projectStatusLabel(status)}`);
-                  setOpen(false);
-                } catch (err) {
-                  // The server's refusal, verbatim: "2 Meilenstein(e) sind
-                  // weder erreicht noch ausdrücklich erlassen." is a better
-                  // message than anything this screen could compose, and it is
-                  // the authoritative one.
-                  setError(toFailure(err).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Ändern
-            </Button>
-          </>
-        }
-      >
-        <Form onSubmit={() => undefined} error={error}>
-          <Field label="Neuer Status" htmlFor={ids.status}>
-            <Select
-              id={ids.status}
-              value={status}
-              onChange={(e) => setStatus(e.target.value as typeof status)}
-              options={options}
-            />
-          </Field>
-          <Field
-            label="Begründung"
-            htmlFor={ids.reason}
-            optional
-            hint="Wird im Audit-Log festgehalten — bei einem Baustopp oder Abbruch die wichtigste Zeile."
-          >
-            <Textarea
-              id={ids.reason}
-              rows={2}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </Field>
-        </Form>
-      </Modal>
+        description="Nur die Übergänge, die der Server für dieses Projekt jetzt zulässt."
+        from={{ label: projectStatusLabel(project.status), tone: projectStatusTone(project.status) }}
+        targets={targets}
+        busy={busy}
+        error={error}
+        onConfirm={async (status, text) => {
+          setError(null);
+          setBusy(true);
+          try {
+            await mutations.changeStatus(project.id, {
+              status: status as ProjectStatus,
+              reason: text || undefined,
+            });
+            toast.success(`Status: ${projectStatusLabel(status)}`);
+            setOpen(false);
+          } catch (err) {
+            // The server's refusal, verbatim: "2 Meilenstein(e) sind weder
+            // erreicht noch ausdrücklich erlassen." is a better message than
+            // anything this screen could compose, and it is the authoritative one.
+            setError(toFailure(err).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
     </>
   );
 }
@@ -403,20 +405,37 @@ function EditButton({ project }: { project: Project }) {
   );
 }
 
-function DeleteButton({ project }: { project: Project }) {
+/**
+ * Deleting the project — opened from the record's "Mehr" menu (P1C): a rare,
+ * destructive act does not sit as a visible button beside "Bearbeiten".
+ * HIGH level: the project number is typed to confirm.
+ */
+function DeleteDialog({
+  project,
+  open,
+  onClose,
+}: {
+  project: Project;
+  open: boolean;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const mutations = useProjectMutations();
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const setOpen = (next: boolean) => {
+    if (!next) {
+      setError(null);
+      onClose();
+    }
+  };
 
   return (
     <>
-      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-        Löschen
-      </Button>
       <ConfirmDialog
         open={open}
         busy={busy}
+        error={error}
         onClose={() => setOpen(false)}
         title="Projekt löschen?"
         message={
@@ -441,15 +460,18 @@ function DeleteButton({ project }: { project: Project }) {
         confirmText={project.number}
         onConfirm={async () => {
           setBusy(true);
+          setError(null);
           try {
             await mutations.remove(project.id);
             toast.success("Gelöscht");
+            setOpen(false);
             navigate("/projekte");
           } catch (err) {
-            toast.error(toFailure(err).message);
+            // In the dialog: "Ein laufendes Projekt lässt sich nicht löschen"
+            // is what the reader needs next, not a toast behind the confirm.
+            setError(toFailure(err).message);
           } finally {
             setBusy(false);
-            setOpen(false);
           }
         }}
       />

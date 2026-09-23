@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { formatBytes, formatDate, formatDateTime } from "@/shared/utils/format";
 import { Badge, Button, DownloadButton, ErrorState, Skeleton } from "@/shared/ui/primitives";
 import { Pair } from "@/shared/ui/data";
-import { Field, Select, Textarea } from "@/shared/ui/forms";
+import { Field, Form, Select, Textarea } from "@/shared/ui/forms";
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
 import { useMutation } from "@/shared/hooks";
@@ -87,6 +87,16 @@ export function ApplicationDetail({
     );
   }
 
+  /** One save for the footer button and Enter in the form. */
+  async function save() {
+    if (!application) return;
+    const result = await update.run(application.id, { status, note });
+    // The refusal is rendered above the fields from `update.error`.
+    if (!result.ok) return;
+    onSaved();
+    onClose();
+  }
+
   const daysLeft = retentionDaysLeft(application);
   const expiring = isRetentionExpiring(application);
   const statusOptions = APPLICATION_STATUS_OPTIONS.filter((o) =>
@@ -105,7 +115,7 @@ export function ApplicationDetail({
         footer={
           <>
             {can("application.delete") ? (
-              <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+              <Button variant="danger-quiet" onClick={() => setConfirmDelete(true)}>
                 Löschen
               </Button>
             ) : null}
@@ -114,17 +124,7 @@ export function ApplicationDetail({
               Schliessen
             </Button>
             {can("application.update") ? (
-              <Button
-                variant="primary"
-                busy={update.busy}
-                onClick={async () => {
-                  const result = await update.run(application.id, { status, note });
-                  // The refusal is rendered above the fields from `update.error`.
-                  if (!result.ok) return;
-                  onSaved();
-                  onClose();
-                }}
-              >
+              <Button variant="primary" busy={update.busy} onClick={() => void save()}>
                 Speichern
               </Button>
             ) : null}
@@ -132,12 +132,6 @@ export function ApplicationDetail({
         }
       >
         <div className="flex flex-col gap-5">
-          {update.error ? (
-            <p role="alert" className="text-[13px] font-medium text-brand-bronze">
-              {update.error}
-            </p>
-          ) : null}
-
           <dl className="grid gap-x-6 gap-y-3 text-[14px] sm:grid-cols-2">
             <Pair label="E-Mail">
               <a
@@ -211,8 +205,12 @@ export function ApplicationDetail({
             )}
           </div>
 
+          {/*
+            The two editable fields are the form (P1C). The dossier above is
+            read-only and its downloads act at once, so they stay outside it.
+          */}
           {can("application.update") ? (
-            <>
+            <Form onSubmit={save} error={update.error} className="gap-5">
               <Field
                 label="Status"
                 htmlFor="app-status"
@@ -234,7 +232,7 @@ export function ApplicationDetail({
                   onChange={(e) => setNote(e.target.value)}
                 />
               </Field>
-            </>
+            </Form>
           ) : null}
         </div>
       </Modal>

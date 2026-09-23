@@ -1,19 +1,23 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { toFailure } from "@/core/api";
 import { Link, navigate, useRoute } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import { usePageTitle } from "@/core/router";
 import {
-  MEETING_STATUS_OPTIONS,
   MeetingStatusBadge,
   MinutesBadge,
   meetingStatusLabel,
+  meetingStatusTone,
   type MeetingDetail as Meeting,
   type MeetingStatus,
 } from "@/entities/meeting";
 import { Badge, Button, Card, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
-import { Field, Form, Select, Textarea } from "@/shared/ui/forms";
+import {
+  ConfirmDialog,
+  RecordActions,
+  StatusTransitionDialog,
+  type TransitionTarget,
+} from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
 import { Pair } from "@/shared/ui/data";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
@@ -48,6 +52,7 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
   const route = useRoute();
   const { can } = useAuth();
   const meeting = useMeeting(meetingId);
+  const [deleting, setDeleting] = useState(false);
 
   const record = meeting.data ?? null;
   usePageTitle(record?.label ?? null);
@@ -95,26 +100,39 @@ export function MeetingDetail({ meetingId }: { meetingId: string }) {
             <MeetingStatusBadge status={record.status} />
             <MinutesBadge meeting={record} />
             {record.protocolLocked ? <Badge tone="bronze">Schreibgeschützt</Badge> : null}
-            {can("meeting.update") && !record.protocolLocked ? (
-              <EditButton meeting={record} />
-            ) : null}
-            {record.allowedTransitions.length ? <StatusButton meeting={record} /> : null}
-            {/*
-              Gated on `minutesSentAt` as well as the status, because the server
-              refuses a second send outright — "Dieses Protokoll wurde bereits
-              versandt." A button that can only ever produce that 400 is worse
-              than no button: it reads as an offer.
-
-              Found by reading `sendMinutes`, after this screen had already been
-              written with an "Erneut versenden" variant.
-            */}
-            {can("meeting.sendMinutes") && record.status === "HELD" && !record.minutesSentAt ? (
-              <SendMinutesButton meeting={record} />
-            ) : null}
-            {can("meeting.delete") ? <DeleteButton meeting={record} /> : null}
+            <RecordActions
+              secondary={
+                <>
+                  {can("meeting.update") && !record.protocolLocked ? (
+                    <EditButton meeting={record} />
+                  ) : null}
+                  {record.allowedTransitions.length ? <StatusButton meeting={record} /> : null}
+                </>
+              }
+              more={
+                can("meeting.delete")
+                  ? [{ id: "delete", label: "Löschen", destructive: true, onSelect: () => setDeleting(true) }]
+                  : []
+              }
+              /*
+                Gated on `minutesSentAt` as well as the status, because the
+                server refuses a second send outright — "Dieses Protokoll wurde
+                bereits versandt." A button that can only ever produce that 400
+                is worse than no button: it reads as an offer. Found by reading
+                `sendMinutes`, after this screen had already been written with
+                an "Erneut versenden" variant. It is the meeting's next step,
+                so it is the record's primary action.
+              */
+              primary={
+                can("meeting.sendMinutes") && record.status === "HELD" && !record.minutesSentAt ? (
+                  <SendMinutesButton meeting={record} />
+                ) : null
+              }
+            />
           </div>
         }
       />
+      <DeleteDialog meeting={record} open={deleting} onClose={() => setDeleting(false)} />
 
       {/*
         The one figure on this page somebody acts on, and it is deliberately not
@@ -194,12 +212,7 @@ function StatusButton({ meeting }: { meeting: Meeting }) {
   const { can } = useAuth();
   const toast = useToast();
   const mutations = useMeetingMutations();
-  const ids = { status: useId(), reason: useId() };
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState<MeetingStatus>(
-    meeting.allowedTransitions[0] ?? meeting.status,
-  );
-  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -211,77 +224,56 @@ function StatusButton({ meeting }: { meeting: Meeting }) {
   );
   if (!allowed.length) return null;
 
-  const options = MEETING_STATUS_OPTIONS.filter((option) =>
-    (allowed as string[]).includes(option.value),
-  );
+  const targets: TransitionTarget[] = allowed.map((value: MeetingStatus) => ({
+    value,
+    label: meetingStatusLabel(value),
+    tone: meetingStatusTone(value),
+    confirmLabel:
+      value === "HELD" ? "Als durchgeführt markieren" : value === "CANCELLED" ? "Sitzung absagen" : undefined,
+    destructive: value === "CANCELLED",
+    reason: {
+      label: "Begründung",
+      hint: "Wird im Verlauf und im Audit-Log festgehalten — bei einer Absage die wichtigste Zeile.",
+    },
+  }));
 
   return (
     <>
       <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
         Status ändern
       </Button>
-      <Modal
+      <StatusTransitionDialog
         open={open}
-        onClose={() => setOpen(false)}
-        busy={busy}
+        onClose={() => {
+          setOpen(false);
+          setError(null);
+        }}
         title="Status ändern"
-        description={`Aktuell: ${meetingStatusLabel(meeting.status)}. Nur erlaubte Übergänge werden angeboten.`}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-              Abbrechen
-            </Button>
-            <Button
-              busy={busy}
-              onClick={async () => {
-                setError(null);
-                setBusy(true);
-                try {
-                  await mutations.changeStatus(meeting.id, {
-                    status,
-                    reason: reason.trim() || undefined,
-                  });
-                  toast.success(`Status: ${meetingStatusLabel(status)}`);
-                  setOpen(false);
-                } catch (err) {
-                  // The server's refusal, verbatim: "Für keine eingeladene
-                  // Person ist die Anwesenheit erfasst." says what to do next,
-                  // which nothing this screen could compose would.
-                  setError(toFailure(err).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Ändern
-            </Button>
-          </>
-        }
-      >
-        <Form onSubmit={() => undefined} error={error}>
-          <Field label="Neuer Status" htmlFor={ids.status}>
-            <Select
-              id={ids.status}
-              value={status}
-              onChange={(event) => setStatus(event.target.value as MeetingStatus)}
-              options={options}
-            />
-          </Field>
-          <Field
-            label="Begründung"
-            htmlFor={ids.reason}
-            optional
-            hint="Wird im Audit-Log festgehalten — bei einer Absage die wichtigste Zeile."
-          >
-            <Textarea
-              id={ids.reason}
-              rows={2}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
-        </Form>
-      </Modal>
+        description="Nur die Übergänge, die der Server für diese Sitzung jetzt zulässt."
+        from={{ label: meetingStatusLabel(meeting.status), tone: meetingStatusTone(meeting.status) }}
+        targets={targets}
+        busy={busy}
+        error={error}
+        onConfirm={async (status, text) => {
+          setError(null);
+          setBusy(true);
+          try {
+            await mutations.changeStatus(meeting.id, {
+              status: status as MeetingStatus,
+              reason: text || undefined,
+            });
+            toast.success(`Status: ${meetingStatusLabel(status)}`);
+            setOpen(false);
+          } catch (err) {
+            // The server's refusal, verbatim: "Für keine eingeladene Person ist
+            // die Anwesenheit erfasst." says what to do next, which nothing
+            // this screen could compose would.
+            setError(toFailure(err).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
     </>
   );
 }
@@ -330,7 +322,7 @@ function SendMinutesButton({ meeting }: { meeting: Meeting }) {
 
   return (
     <>
-      <Button size="sm" onClick={() => setOpen(true)}>
+      <Button size="sm" variant="primary" onClick={() => setOpen(true)}>
         Protokoll versenden
       </Button>
       <ConfirmDialog
@@ -371,20 +363,33 @@ function SendMinutesButton({ meeting }: { meeting: Meeting }) {
   );
 }
 
-function DeleteButton({ meeting }: { meeting: Meeting }) {
+/** Deleting the meeting — opened from the record's "Mehr" menu (P1C). */
+function DeleteDialog({
+  meeting,
+  open,
+  onClose,
+}: {
+  meeting: Meeting;
+  open: boolean;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const mutations = useMeetingMutations();
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const setOpen = (next: boolean) => {
+    if (!next) {
+      setError(null);
+      onClose();
+    }
+  };
 
   return (
     <>
-      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-        Löschen
-      </Button>
       <ConfirmDialog
         open={open}
         busy={busy}
+        error={error}
         onClose={() => setOpen(false)}
         title="Sitzung löschen?"
         message={
@@ -401,24 +406,26 @@ function DeleteButton({ meeting }: { meeting: Meeting }) {
               board.
             */}
             <p className="mt-2 text-muted">
-              Ein genehmigtes Protokoll lässt sich nicht löschen — es ist der Stand. Aufgaben, die
-              aus Pendenzen entstanden sind, bleiben bestehen.
+              Ein genehmigtes Protokoll lässt sich nicht löschen — es ist der Stand.
             </p>
           </>
         }
+        // MEDIUM level: the effect beyond the meeting itself, stated first.
+        consequence={<p>Aufgaben, die aus Pendenzen entstanden sind, bleiben bestehen.</p>}
         confirmLabel="Löschen"
         destructive
         onConfirm={async () => {
           setBusy(true);
+          setError(null);
           try {
             await mutations.remove(meeting.id);
             toast.success("Gelöscht");
+            setOpen(false);
             navigate("/sitzungen");
           } catch (err) {
-            toast.error(toFailure(err).message);
+            setError(toFailure(err).message);
           } finally {
             setBusy(false);
-            setOpen(false);
           }
         }}
       />

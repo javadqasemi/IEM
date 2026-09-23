@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/shared/utils/cn";
 import { formatBytes, formatDateTime } from "@/shared/utils/format";
 import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { Checkbox, Field, Input, ListInput, SearchInput, Select, Textarea } from "@/shared/ui/forms";
+import { Checkbox, Field, Form, Input, ListInput, SearchInput, Select, Textarea } from "@/shared/ui/forms";
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { BarChart } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
@@ -111,7 +111,7 @@ export function MediaPage() {
         {selection.size > 0 && can("media.delete") ? (
           <div className="ml-auto flex items-center gap-2">
             <span className="text-[13px] text-muted">{selection.size} ausgewählt</span>
-            <Button size="sm" variant="danger" onClick={() => setConfirmBulk(true)}>
+            <Button size="sm" variant="danger-quiet" onClick={() => setConfirmBulk(true)}>
               Löschen
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelection(new Set())}>
@@ -222,20 +222,15 @@ export function MediaPage() {
         }}
         busy={bulkDelete.busy}
         destructive
+        error={bulkDelete.error}
         title={`${selection.size} Dateien löschen?`}
         confirmLabel="Löschen"
-        message={
-          <>
-            <p>
-              Die Dateien werden aus der Bibliothek entfernt. Inhalte, die noch darauf verweisen,
-              zeigen dann ein fehlendes Bild — prüfen Sie das vor dem Veröffentlichen.
-            </p>
-            {bulkDelete.error ? (
-              <p role="alert" className="mt-3 font-medium text-brand-bronze">
-                {bulkDelete.error}
-              </p>
-            ) : null}
-          </>
+        message={<p>Die Dateien werden aus der Bibliothek entfernt.</p>}
+        consequence={
+          <p>
+            Inhalte, die noch darauf verweisen, zeigen dann ein fehlendes Bild — prüfen Sie das vor
+            dem Veröffentlichen.
+          </p>
         }
         onConfirm={async () => {
           const result = await bulkDelete.run([...selection]);
@@ -426,7 +421,7 @@ export function UploadDialog({
         </>
       }
     >
-      <div className="flex flex-col gap-5">
+      <Form onSubmit={() => (uploadBlocked ? undefined : submit())} error={upload.error}>
         <input
           ref={inputRef}
           type="file"
@@ -510,13 +505,7 @@ export function UploadDialog({
             onChange={(e) => setCopyright(e.target.value)}
           />
         </Field>
-
-        {upload.error ? (
-          <p role="alert" className="text-[13px] font-medium text-brand-bronze">
-            {upload.error}
-          </p>
-        ) : null}
-      </div>
+      </Form>
     </Modal>
   );
 }
@@ -560,6 +549,17 @@ function AssetDetailDialog({
   if (!asset) return null;
   const isImage = asset.mimeType.startsWith("image/");
 
+  /** One save for the footer button and Enter in the metadata form. */
+  async function save() {
+    if (!asset || !can("media.update")) return;
+    const result = await update.run(asset.id, form);
+    // The refusal is shown above the fields; the edits stay.
+    if (!result.ok) return;
+    toast.success("Gespeichert");
+    onChanged();
+    onClose();
+  }
+
   return (
     <>
       <Modal
@@ -573,7 +573,7 @@ function AssetDetailDialog({
         footer={
           <>
             {can("media.delete") ? (
-              <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+              <Button variant="danger-quiet" onClick={() => setConfirmDelete(true)}>
                 Löschen
               </Button>
             ) : null}
@@ -582,18 +582,7 @@ function AssetDetailDialog({
               Schliessen
             </Button>
             {can("media.update") ? (
-              <Button
-                variant="primary"
-                busy={update.busy}
-                onClick={async () => {
-                  const result = await update.run(asset.id, form);
-                  // The refusal is shown below the fields; the edits stay.
-                  if (!result.ok) return;
-                  toast.success("Gespeichert");
-                  onChanged();
-                  onClose();
-                }}
-              >
+              <Button variant="primary" busy={update.busy} onClick={() => void save()}>
                 Speichern
               </Button>
             ) : null}
@@ -673,7 +662,11 @@ function AssetDetailDialog({
             ) : null}
           </div>
 
-          <div className="flex flex-col gap-4">
+          {/*
+            The metadata is the form; "Datei ersetzen" on the left acts at
+            once and is deliberately outside it.
+          */}
+          <Form onSubmit={save} error={update.error} className="gap-4">
             {isImage ? (
               <>
                 <Field
@@ -737,19 +730,13 @@ function AssetDetailDialog({
               />
             </Field>
 
-            {update.error ? (
-              <p role="alert" className="text-[13px] font-medium text-brand-bronze">
-                {update.error}
-              </p>
-            ) : null}
-
             {asset.srcset ? (
               <div className="flex flex-col gap-1.5">
                 <span className="field-label">Erzeugte Grössen</span>
                 <p className="font-mono text-[11px] leading-relaxed text-muted">{asset.srcset}</p>
               </div>
             ) : null}
-          </div>
+          </Form>
         </div>
       </Modal>
 
@@ -761,20 +748,13 @@ function AssetDetailDialog({
         }}
         busy={remove.busy}
         destructive
+        error={remove.error}
         title="Datei löschen?"
         confirmLabel="Löschen"
-        message={
-          <>
-            <p>
-              „{asset.filename}“ wird aus der Bibliothek entfernt. Inhalte, die noch darauf
-              verweisen, zeigen danach ein fehlendes Bild.
-            </p>
-            {remove.error ? (
-              <p role="alert" className="mt-3 font-medium text-brand-bronze">
-                {remove.error}
-              </p>
-            ) : null}
-          </>
+        message={<p>„{asset.filename}“ wird aus der Bibliothek entfernt.</p>}
+        // MEDIUM level: the effect beyond the file itself, stated before.
+        consequence={
+          <p>Inhalte, die noch darauf verweisen, zeigen danach ein fehlendes Bild.</p>
         }
         onConfirm={async () => {
           const result = await remove.run(asset.id);

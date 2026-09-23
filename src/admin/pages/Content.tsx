@@ -442,7 +442,7 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
             </Button>
           ) : null}
           {can("content.delete") && type?.kind === "COLLECTION" ? (
-            <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(r)}>
+            <Button size="sm" variant="danger-quiet" onClick={() => setConfirmDelete(r)}>
               Löschen
             </Button>
           ) : null}

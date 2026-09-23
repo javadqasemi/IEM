@@ -171,7 +171,7 @@ export function MeetingList() {
         description="Was besprochen, entschieden und aufgetragen wurde. Ein genehmigtes Protokoll ist der Stand."
         actions={
           can("meeting.create") ? (
-            <Button onClick={() => setCreating(true)}>Neue Sitzung</Button>
+            <Button variant="primary" onClick={() => setCreating(true)}>Neue Sitzung</Button>
           ) : null
         }
       />

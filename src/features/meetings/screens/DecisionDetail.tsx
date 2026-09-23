@@ -7,6 +7,7 @@ import {
   DECISION_STATUS_OPTIONS,
   DecisionStatusBadge,
   decisionStatusLabel,
+  decisionStatusTone,
   decisionTypeLabel,
   impactSummary,
   type DecisionDetail as Decision,
@@ -14,10 +15,17 @@ import {
 } from "@/entities/meeting";
 import { DisciplineDot } from "@/entities/project";
 import { Badge, Button, Card, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
-import { EntityPicker, Field, Form, Select, Textarea, type EntityOption } from "@/shared/ui/forms";
+import {
+  ConfirmDialog,
+  Modal,
+  RecordActions,
+  StatusTransitionDialog,
+  type ActionMenuItem,
+  type TransitionTarget,
+} from "@/shared/ui/overlays";
+import { EntityPicker, Field, Form, type EntityOption } from "@/shared/ui/forms";
 import { Pair } from "@/shared/ui/data";
-import { useToast } from "@/shared/ui/feedback";
+import { Callout, useToast } from "@/shared/ui/feedback";
 import { formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
 import {
   useDecision,
@@ -44,6 +52,7 @@ import { FIELD_LABELS } from "./fieldLabels";
 export function DecisionDetail({ decisionId }: { decisionId: string }) {
   const { can } = useAuth();
   const decision = useDecision(decisionId);
+  const [dialog, setDialog] = useState<"supersede" | "delete" | null>(null);
 
   const record = decision.data ?? null;
   usePageTitle(record ? `${record.number} — ${record.title}` : null);
@@ -61,6 +70,29 @@ export function DecisionDetail({ decisionId }: { decisionId: string }) {
 
   const readOnly = isReadOnly(record);
   const notice = supersessionNotice(record);
+  const mayEdit = can("decision.update") && !readOnly;
+
+  /*
+    The record's actions in the standard shape (P1C): the two common ones
+    visible, the two consequential ones in "Mehr" — superseding a decision
+    and deleting one are rare, and neither should sit one misclick away from
+    "Korrigieren".
+  */
+  const more: ActionMenuItem[] = [
+    ...(can("decision.supersede") && !readOnly
+      ? [
+          {
+            id: "supersede",
+            label: "Durch neuen Entscheid ersetzen",
+            destructive: true,
+            onSelect: () => setDialog("supersede"),
+          },
+        ]
+      : []),
+    ...(can("decision.delete")
+      ? [{ id: "delete", label: "Löschen", destructive: true, onSelect: () => setDialog("delete") }]
+      : []),
+  ];
 
   return (
     <>
@@ -74,13 +106,26 @@ export function DecisionDetail({ decisionId }: { decisionId: string }) {
               {record.number}
             </Badge>
             <DecisionStatusBadge status={record.status} />
-            {can("decision.update") && !readOnly ? <EditButton decision={record} /> : null}
-            {can("decision.update") && !readOnly ? <StatusButton decision={record} /> : null}
-            {can("decision.supersede") && !readOnly ? <SupersedeButton decision={record} /> : null}
-            {can("decision.delete") ? <DeleteButton decision={record} /> : null}
+            <RecordActions
+              secondary={
+                mayEdit ? (
+                  <>
+                    <EditButton decision={record} />
+                    <StatusButton decision={record} />
+                  </>
+                ) : null
+              }
+              more={more}
+            />
           </div>
         }
       />
+      <SupersedeDialog
+        decision={record}
+        open={dialog === "supersede"}
+        onClose={() => setDialog(null)}
+      />
+      <DeleteDialog decision={record} open={dialog === "delete"} onClose={() => setDialog(null)} />
 
       {/*
         The supersession notice, above everything.
@@ -210,77 +255,54 @@ function EditButton({ decision }: { decision: Decision }) {
 function StatusButton({ decision }: { decision: Decision }) {
   const toast = useToast();
   const mutations = useMeetingMutations();
-  const ids = { status: useId(), reason: useId() };
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState<DecisionStatus>(decision.status);
-  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const options = DECISION_STATUS_OPTIONS.filter(
+  const targets: TransitionTarget[] = DECISION_STATUS_OPTIONS.filter(
     (option) => option.value !== "AUFGEHOBEN" && option.value !== decision.status,
-  );
-  if (!options.length) return null;
+  ).map((option) => ({
+    value: option.value,
+    label: option.label,
+    tone: decisionStatusTone(option.value),
+    reason: { label: "Begründung", hint: "Steht im Verlauf und im Audit-Log." },
+  }));
+  if (!targets.length) return null;
 
   return (
     <>
       <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>
         Status ändern
       </Button>
-      <Modal
+      <StatusTransitionDialog
         open={open}
-        onClose={() => setOpen(false)}
-        busy={busy}
+        onClose={() => {
+          setOpen(false);
+          setError(null);
+        }}
         title="Status ändern"
-        description={`Aktuell: ${decisionStatusLabel(decision.status)}. Aufheben ist kein Status, sondern ein eigener Vorgang.`}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-              Abbrechen
-            </Button>
-            <Button
-              busy={busy}
-              onClick={async () => {
-                setError(null);
-                setBusy(true);
-                try {
-                  await mutations.changeDecisionStatus(decision.id, {
-                    status,
-                    reason: reason.trim() || undefined,
-                  });
-                  toast.success(`Status: ${decisionStatusLabel(status)}`);
-                  setOpen(false);
-                } catch (err) {
-                  setError(toFailure(err).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Ändern
-            </Button>
-          </>
-        }
-      >
-        <Form onSubmit={() => undefined} error={error}>
-          <Field label="Neuer Status" htmlFor={ids.status}>
-            <Select
-              id={ids.status}
-              value={status}
-              onChange={(event) => setStatus(event.target.value as DecisionStatus)}
-              options={options}
-            />
-          </Field>
-          <Field label="Begründung" htmlFor={ids.reason} optional hint="Steht im Audit-Log.">
-            <Textarea
-              id={ids.reason}
-              rows={2}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
-        </Form>
-      </Modal>
+        description="Aufgehoben ist kein Status, sondern ein eigener Vorgang: „Durch neuen Entscheid ersetzen“ unter „Mehr“."
+        from={{ label: decisionStatusLabel(decision.status), tone: decisionStatusTone(decision.status) }}
+        targets={targets}
+        busy={busy}
+        error={error}
+        onConfirm={async (status, text) => {
+          setError(null);
+          setBusy(true);
+          try {
+            await mutations.changeDecisionStatus(decision.id, {
+              status: status as DecisionStatus,
+              reason: text || undefined,
+            });
+            toast.success(`Status: ${decisionStatusLabel(status)}`);
+            setOpen(false);
+          } catch (err) {
+            setError(toFailure(err).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
     </>
   );
 }
@@ -300,35 +322,58 @@ function StatusButton({ decision }: { decision: Decision }) {
  * refuses a cross-project reversal: the number encodes the project, and a
  * decision on the Schulhaus cannot overrule one on the Gewerbehaus.
  */
-function SupersedeButton({ decision }: { decision: Decision }) {
+function SupersedeDialog({
+  decision,
+  open,
+  onClose,
+}: {
+  decision: Decision;
+  open: boolean;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const mutations = useMeetingMutations();
-  const [open, setOpen] = useState(false);
   const [replacement, setReplacement] = useState<EntityOption | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const pickerId = useId();
+  // Always mounted now (opened from "Mehr"), so closing clears what was picked:
+  // a replacement chosen and cancelled must not be pre-selected next time.
+  const setOpen = (next: boolean) => {
+    if (!next) {
+      setError(null);
+      setReplacement(null);
+      onClose();
+    }
+  };
+  const blocked = replacement ? null : "Erst den ersetzenden Entscheid wählen.";
 
   return (
     <>
-      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-        Aufheben
-      </Button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         busy={busy}
-        title={`${decision.number} aufheben`}
+        title={`${decision.number} durch neuen Entscheid ersetzen`}
         description="Ein aufgehobener Entscheid bleibt lesbar und zitierbar — er gilt nur nicht mehr."
+        hint={blocked}
         footer={
           <>
             <div className="flex-1" />
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
               Abbrechen
             </Button>
+            {/*
+              `danger`: irreversible, and deliberately not reachable by Enter.
+              The audit found this confirm on the default variant — the same
+              weight as "Speichern" for the one act in the module that cannot
+              be taken back.
+            */}
             <Button
+              variant="danger"
               busy={busy}
-              disabled={!replacement}
+              disabled={Boolean(blocked)}
+              disabledReason={blocked}
               onClick={async () => {
                 setError(null);
                 setBusy(true);
@@ -345,17 +390,23 @@ function SupersedeButton({ decision }: { decision: Decision }) {
                 }
               }}
             >
-              Aufheben
+              Ersetzen und aufheben
             </Button>
           </>
         }
       >
         <Form onSubmit={() => undefined} error={error}>
-          <p className="text-[13px] leading-relaxed text-muted">
-            Der ersetzende Entscheid muss bereits festgehalten sein — mit eigener Nummer und eigener
-            Begründung. Das ist Absicht: ein Widerruf ohne begründeten Nachfolger ist die Lücke, die
-            hinterher niemand mehr füllen kann.
-          </p>
+          <Callout tone="warning">
+            <p>
+              <strong>Nicht rückgängig zu machen.</strong> {decision.number} gilt danach als
+              aufgehoben und verweist auf seinen Nachfolger.
+            </p>
+            <p>
+              Der ersetzende Entscheid muss bereits festgehalten sein — mit eigener Nummer und
+              eigener Begründung. Das ist Absicht: ein Widerruf ohne begründeten Nachfolger ist die
+              Lücke, die hinterher niemand mehr füllen kann.
+            </p>
+          </Callout>
 
           <Field
             label="Ersetzt durch"
@@ -391,20 +442,32 @@ function SupersedeButton({ decision }: { decision: Decision }) {
   );
 }
 
-function DeleteButton({ decision }: { decision: Decision }) {
+function DeleteDialog({
+  decision,
+  open,
+  onClose,
+}: {
+  decision: Decision;
+  open: boolean;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const mutations = useMeetingMutations();
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const setOpen = (next: boolean) => {
+    if (!next) {
+      setError(null);
+      onClose();
+    }
+  };
 
   return (
     <>
-      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-        Löschen
-      </Button>
       <ConfirmDialog
         open={open}
         busy={busy}
+        error={error}
         onClose={() => setOpen(false)}
         title="Entscheid löschen?"
         message={
@@ -420,8 +483,8 @@ function DeleteButton({ decision }: { decision: Decision }) {
             */}
             <p className="mt-2 text-muted">
               Löschen ist für einen Fehleintrag. Ein Entscheid, der gefallen ist und nicht mehr
-              gilt, wird <strong>aufgehoben</strong> — dann bleibt er zitierbar. Ein Entscheid, der
-              selbst einen anderen aufhebt, lässt sich nicht löschen.
+              gilt, wird <strong>durch einen neuen Entscheid ersetzt</strong> — dann bleibt er
+              zitierbar. Ein Entscheid, der selbst einen anderen ersetzt, lässt sich nicht löschen.
             </p>
           </>
         }
@@ -430,15 +493,18 @@ function DeleteButton({ decision }: { decision: Decision }) {
         confirmText={decision.number}
         onConfirm={async () => {
           setBusy(true);
+          setError(null);
           try {
             await mutations.removeDecision(decision.id);
             toast.success("Gelöscht");
+            setOpen(false);
             navigate("/entscheide");
           } catch (err) {
-            toast.error(toFailure(err).message);
+            // In the dialog, not a toast: the refusal ("Ein Entscheid, der
+            // selbst einen anderen aufhebt …") is the reader's next step.
+            setError(toFailure(err).message);
           } finally {
             setBusy(false);
-            setOpen(false);
           }
         }}
       />

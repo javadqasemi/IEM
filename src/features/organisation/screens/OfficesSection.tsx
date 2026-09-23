@@ -3,7 +3,7 @@ import { toFailure } from "@/core/api";
 import { Badge, Button, Card, EmptyState, ErrorState, SkeletonTable } from "@/shared/ui/primitives";
 import { DataTable, type Column } from "@/shared/ui/data";
 import { ConfirmDialog } from "@/shared/ui/overlays";
-import { useToast } from "@/shared/ui/feedback";
+import { Callout, useToast } from "@/shared/ui/feedback";
 import { Checkbox } from "@/shared/ui/forms";
 import type { Office, OfficeDraft } from "@/entities/organisation";
 import { OfficeStateBadge, officeAddressLine } from "@/entities/organisation";
@@ -141,16 +141,19 @@ export function OfficesSection({
           {canArchive ? (
             <Button
               size="sm"
-              variant="ghost"
+              // Archiving takes the office off the website: a destructive
+              // trigger. Bringing it back is not, and is not "Wiederherstellen"
+              // either — that word is kept for restoring a version or a backup.
+              variant={office.archivedAt ? "ghost" : "danger-quiet"}
               onClick={() =>
                 setConfirm({ kind: office.archivedAt ? "restore" : "archive", office })
               }
             >
-              {office.archivedAt ? "Wiederherstellen" : "Archivieren"}
+              {office.archivedAt ? "Reaktivieren" : "Archivieren"}
             </Button>
           ) : null}
           {canDelete ? (
-            <Button size="sm" variant="ghost" onClick={() => setConfirm({ kind: "delete", office })}>
+            <Button size="sm" variant="danger-quiet" onClick={() => setConfirm({ kind: "delete", office })}>
               Löschen
             </Button>
           ) : null}
@@ -177,13 +180,15 @@ export function OfficesSection({
         }
         bodyClassName="p-0"
       >
-        {error ? (
-          <p
-            role="alert"
-            className="m-5 rounded-md bg-brand-bronze/[0.08] px-4 py-3 text-[13px] font-medium leading-relaxed text-brand-bronze ring-1 ring-brand-bronze/25"
-          >
-            {error}
-          </p>
+        {/*
+          A refusal is shown in the confirmation that caused it (P1C) — it used
+          to render here, *behind* the still-open dialog, where nobody could
+          read it. This copy is for the moment after that dialog is closed.
+        */}
+        {error && !confirm ? (
+          <Callout tone="danger" announce className="m-5">
+            <p className="font-medium text-ink">{error}</p>
+          </Callout>
         ) : null}
 
         {offices.loading && !offices.data ? (
@@ -285,18 +290,19 @@ export function OfficesSection({
           }
         }}
         destructive={confirm?.kind !== "restore"}
+        error={error}
         confirmLabel={
           confirm?.kind === "delete"
             ? "Löschen"
             : confirm?.kind === "restore"
-              ? "Wiederherstellen"
+              ? "Reaktivieren"
               : "Archivieren"
         }
         title={
           confirm?.kind === "delete"
             ? `„${confirm.office.name}“ löschen?`
             : confirm?.kind === "restore"
-              ? `„${confirm?.office.name}“ wiederherstellen?`
+              ? `„${confirm?.office.name}“ reaktivieren?`
               : `„${confirm?.office.name}“ archivieren?`
         }
         message={

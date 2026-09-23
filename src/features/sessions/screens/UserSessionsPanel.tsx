@@ -111,7 +111,7 @@ export function UserSessionsPanel({
           </p>
         </div>
         {canRevoke && rows.length > 0 ? (
-          <Button variant="secondary" size="sm" onClick={() => setConfirmAll(true)}>
+          <Button variant="danger-quiet" size="sm" onClick={() => setConfirmAll(true)}>
             Alle beenden ({rows.length})
           </Button>
         ) : null}

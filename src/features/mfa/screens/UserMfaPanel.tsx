@@ -79,7 +79,7 @@ export function UserMfaPanel({
         <div className="flex shrink-0 items-center gap-2">
           {enabled ? <Badge tone="energy">Aktiv</Badge> : <Badge tone="neutral">Nicht aktiv</Badge>}
           {canReset && enabled ? (
-            <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+            <Button size="sm" variant="danger-quiet" onClick={() => setConfirming(true)}>
               Zurücksetzen
             </Button>
           ) : null}

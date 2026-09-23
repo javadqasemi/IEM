@@ -5,7 +5,8 @@ import { WorkflowBadge } from "@/entities/content";
 import { ActivityFeed } from "@/widgets/activity";
 import { api } from "../lib/api";
 import { useAuth } from "@/core/auth";
-import { useAsync } from "../lib/useAsync";
+import { useQuery } from "@/core/api";
+import { FRESH_ON_VISIT } from "../lib/queries";
 import { Link } from "@/core/router";
 
 /**
@@ -31,11 +32,18 @@ export function DashboardPage() {
    * judgement the KPI tiles already make about metrics with no data source.
    */
   const mayReadOverview = can("system.health");
-  const overview = useAsync(
-    () => (mayReadOverview ? api.overview() : Promise.resolve(null)),
-    [mayReadOverview],
+  // Off `useAsync` (P1C): a `null` key is "not asked", so a role without the
+  // key makes no request at all rather than a resolved `null`.
+  const overview = useQuery(
+    mayReadOverview ? ["home", "overview"] : null,
+    () => api.overview(),
+    FRESH_ON_VISIT,
   );
-  const health = useAsync(() => (can("system.health") ? api.health() : Promise.resolve(null)), []);
+  const health = useQuery(
+    mayReadOverview ? ["home", "health"] : null,
+    () => api.health(),
+    FRESH_ON_VISIT,
+  );
 
   /**
    * What the next publish would change — the **same** question the publish
@@ -49,9 +57,10 @@ export function DashboardPage() {
    * date" two ways is how they came to disagree; now neither derives it.
    */
   const mayReadContent = can("content.read");
-  const pending = useAsync(
-    () => (mayReadContent ? api.pendingChanges() : Promise.resolve(null)),
-    [mayReadContent],
+  const pending = useQuery(
+    mayReadContent ? ["home", "pending"] : null,
+    () => api.pendingChanges(),
+    FRESH_ON_VISIT,
   );
   const areas = pending.data?.changed ? pending.data.changes.length : 0;
 
@@ -79,7 +88,7 @@ export function DashboardPage() {
         <ErrorState
           title="Die Übersicht konnte nicht geladen werden."
           message={overview.error}
-          onRetry={overview.reload}
+          onRetry={overview.refetch}
         />
       ) : null}
 
@@ -336,7 +345,7 @@ export function DashboardPage() {
           <EmptyState
             title="Keine Daten"
             description="Der Server hat keine Übersicht geliefert."
-            action={<Button onClick={overview.reload}>Nochmals versuchen</Button>}
+            action={<Button onClick={overview.refetch}>Nochmals versuchen</Button>}
           />
         ) : (
           /* Not an error: this role is not meant to see the figures. Saying so

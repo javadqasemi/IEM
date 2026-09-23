@@ -172,7 +172,7 @@ export function DecisionList() {
         description="Was entschieden wurde, von wem und warum. Ein aufgehobener Entscheid bleibt lesbar — er gilt nur nicht mehr."
         actions={
           can("decision.create") ? (
-            <Button onClick={() => setCreating(true)}>Entscheid festhalten</Button>
+            <Button variant="primary" onClick={() => setCreating(true)}>Entscheid festhalten</Button>
           ) : null
         }
       />

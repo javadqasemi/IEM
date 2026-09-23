@@ -63,7 +63,7 @@ export function MailSection() {
           title="Zugangsdaten"
           description="Das SMTP-Passwort wird verschlüsselt gespeichert und nie zurückgegeben. Ein leeres Feld im Formular oben lässt es unverändert — entfernen ist eine eigene Handlung."
         >
-          <Button variant="ghost" size="sm" onClick={() => setConfirming(true)}>
+          <Button variant="danger-quiet" size="sm" onClick={() => setConfirming(true)}>
             Passwort entfernen
           </Button>
         </Card>

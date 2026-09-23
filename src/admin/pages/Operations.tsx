@@ -1,5 +1,5 @@
-﻿import { Suspense, useId, useMemo, useState } from "react";
-import { toFailure } from "@/core/api";
+import { Suspense, useId, useMemo, useState } from "react";
+import { toFailure, useQuery } from "@/core/api";
 import { cn } from "@/shared/utils/cn";
 import { formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
 import {
@@ -14,6 +14,8 @@ import {
   DateRangePicker,
   EMPTY_RANGE,
   Field,
+  Form,
+  FormActions,
   Input,
   SearchInput,
   Select,
@@ -31,7 +33,7 @@ import { SessionsRoute } from "@/features/sessions";
 import { api } from "../lib/api";
 import { authRepository, useAuth } from "@/core/auth";
 import { THEME_CHOICES, useTheme } from "../lib/theme";
-import { useAsync } from "../lib/useAsync";
+import { FRESH_ON_VISIT } from "../lib/queries";
 
 /**
  * Two screens that share a file: Audit and Profile.
@@ -160,19 +162,25 @@ export function AuditPage() {
   );
   usePageActions(pageActions);
 
-  const actions = useAsync(() => api.auditActions(), []);
-  const list = useAsync(
+  // Off `useAsync` (P1C). The filters are the key: changing one asks a
+  // different question, which is what `useAsync`'s `deps` expressed. A filter
+  // form is *transient* — it applies as it changes and has no save.
+  const actions = useQuery(["audit", "actions"], () => api.auditActions());
+  const from = isoStart(range.from);
+  const to = isoEnd(range.to);
+  const list = useQuery(
+    ["audit", "list", debounced, action, outcome, from, to, page],
     () =>
       api.audit({
         search: debounced || undefined,
         action: action || undefined,
         outcome: outcome || undefined,
-        from: isoStart(range.from),
-        to: isoEnd(range.to),
+        from,
+        to,
         page,
         perPage: 50,
       }),
-    [debounced, action, outcome, range.from, range.to, page],
+    FRESH_ON_VISIT,
   );
 
   const columns: Column<import("../lib/api").AuditRow>[] = [
@@ -251,7 +259,7 @@ export function AuditPage() {
           open={{ onOpen: (r) => setDetail(r) }}
           loading={list.loading}
           error={list.error}
-          onRetry={list.reload}
+          onRetry={list.refetch}
           caption="Audit-Log"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}
@@ -464,12 +472,16 @@ export function ProfilePage() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [repeat, setRepeat] = useState("");
-  const [mismatch, setMismatch] = useState("");
+  /** The client's own checks, by field — empty inputs and a mismatch. */
+  const [missing, setMissing] = useState<Record<string, string>>({});
 
   const change = useMutation(authRepository.changePassword);
-  const activity = useAsync(
-    () => (user ? api.audit({ actorId: user.id, perPage: 15 }) : Promise.resolve(null)),
-    [user?.id],
+  // Off `useAsync` (P1C). Refused for most roles — `audit.read` — which the
+  // card below says in words rather than as an empty feed.
+  const activity = useQuery(
+    user ? ["profile", "activity", user.id] : null,
+    () => api.audit({ actorId: user!.id, perPage: 15 }),
+    FRESH_ON_VISIT,
   );
 
   if (!user) return null;
@@ -503,15 +515,23 @@ export function ProfilePage() {
           title="Passwort ändern"
           description="Beim Ändern werden alle anderen offenen Sitzungen beendet."
         >
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (next !== repeat) {
-                setMismatch("Die beiden neuen Passwörter stimmen nicht überein.");
-                return;
-              }
-              setMismatch("");
+          {/*
+            A one-shot action form (P1C): the shared `Form` rather than a bare
+            `<form>` with `required` — the browser's validation bubbles were
+            untranslatable and gone on the next click. The messages are ours,
+            beside their fields, and a failed submit moves focus to the first
+            one. The server's rules (length, the current password) are the
+            authority; its field messages land on the same inputs.
+          */}
+          <Form
+            error={change.error && !Object.keys(change.fields).length ? change.error : null}
+            onSubmit={async () => {
+              const found: Record<string, string> = {};
+              if (!current) found.current = "Bitte das aktuelle Passwort eingeben.";
+              if (!next) found.next = "Bitte ein neues Passwort eingeben.";
+              else if (next !== repeat) found.repeat = "Die beiden neuen Passwörter stimmen nicht überein.";
+              setMissing(found);
+              if (Object.keys(found).length) return;
               const result = await change.run(current, next);
               if (result.ok) {
                 toast.success("Passwort geändert", "Andere Sitzungen wurden abgemeldet.");
@@ -522,20 +542,24 @@ export function ProfilePage() {
               }
             }}
           >
-            <Field label="Aktuelles Passwort" htmlFor="pw-current">
+            <Field
+              label="Aktuelles Passwort"
+              htmlFor="pw-current"
+              error={missing.current ?? change.fields.currentPassword?.[0]}
+            >
               <Input
                 id="pw-current"
                 type="password"
                 value={current}
                 onChange={(e) => setCurrent(e.target.value)}
                 autoComplete="current-password"
-                required
               />
             </Field>
             <Field
               label="Neues Passwort"
               htmlFor="pw-new"
               hint="Mindestens 12 Zeichen. Länge zählt mehr als Sonderzeichen."
+              error={missing.next ?? change.fields.newPassword?.[0]}
             >
               <Input
                 id="pw-new"
@@ -543,35 +567,24 @@ export function ProfilePage() {
                 value={next}
                 onChange={(e) => setNext(e.target.value)}
                 autoComplete="new-password"
-                minLength={12}
-                required
               />
             </Field>
-            <Field label="Wiederholen" htmlFor="pw-repeat" error={mismatch || undefined}>
+            <Field label="Wiederholen" htmlFor="pw-repeat" error={missing.repeat}>
               <Input
                 id="pw-repeat"
                 type="password"
                 value={repeat}
                 onChange={(e) => setRepeat(e.target.value)}
                 autoComplete="new-password"
-                minLength={12}
-                invalid={Boolean(mismatch)}
-                required
               />
             </Field>
 
-            {change.error ? (
-              <p role="alert" className="text-[13px] font-medium text-brand-bronze">
-                {change.error}
-              </p>
-            ) : null}
-
-            <div>
+            <FormActions className="justify-start">
               <Button type="submit" variant="primary" busy={change.busy}>
                 Passwort ändern
               </Button>
-            </div>
-          </form>
+            </FormActions>
+          </Form>
         </Card>
       </div>
 

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { DateTimePicker, Field, Textarea, toLocalInput } from "@/shared/ui/forms";
+import { DateTimePicker, Field, Form, Textarea, toLocalInput } from "@/shared/ui/forms";
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { type Column, DataTable } from "@/shared/ui/data";
 import { Badge } from "@/shared/ui/primitives";
-import { useToast } from "@/shared/ui/feedback";
+import { Callout, useToast } from "@/shared/ui/feedback";
 import { WorkflowBadge } from "@/entities/content";
 import { api, type PublishEffect, type QueueRow, type ReviewRow } from "../lib/api";
 import { useAuth } from "@/core/auth";
@@ -128,6 +128,9 @@ export function ReviewsPage() {
       )}
 
       <ReviewDialog
+        // Keyed by the review: the note typed for one review must not be
+        // pre-filled into the next (Part 10.2, "note persists across reviews").
+        key={open?.id ?? "none"}
         review={open}
         onClose={() => setOpen(null)}
         canDecide={can("content.approve")}
@@ -192,7 +195,12 @@ function ReviewDialog({
             <Button variant="ghost" onClick={onClose} disabled={busy}>
               Abbrechen
             </Button>
-            <Button variant="danger" onClick={() => onDecide("REJECTED", note)} busy={busy}>
+            {/*
+              `secondary`, not `danger` (P1C): rejecting sends the entry back
+              to its author with a reason — a safe alternative, not a removal.
+              One primary per decision context; "Freigeben" is it.
+            */}
+            <Button variant="secondary" onClick={() => onDecide("REJECTED", note)} busy={busy}>
               Ablehnen
             </Button>
             <Button variant="primary" onClick={() => onDecide("APPROVED", note)} busy={busy}>
@@ -247,26 +255,31 @@ function ReviewDialog({
           Eintrag im Editor öffnen →
         </Link>
 
+        {/*
+          The decision's one field is a form, so its refusal is the shared
+          `Callout` above it. There is no submit on Enter: the dialog has two
+          outcomes and the reader picks one with a button.
+        */}
         {canDecide && !ownSubmission ? (
-          <Field
-            label="Begründung"
-            htmlFor="review-note"
-            optional
-            hint="Bei einer Ablehnung wichtig — sie sagt, was zu ändern ist."
-          >
-            <Textarea
-              id="review-note"
-              rows={2}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </Field>
-        ) : null}
-
-        {error ? (
-          <p role="alert" className="text-[13px] font-medium text-brand-bronze">
-            {error}
-          </p>
+          <Form onSubmit={() => undefined} error={error}>
+            <Field
+              label="Begründung"
+              htmlFor="review-note"
+              optional
+              hint="Bei einer Ablehnung wichtig — sie sagt, was zu ändern ist."
+            >
+              <Textarea
+                id="review-note"
+                rows={2}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+            </Field>
+          </Form>
+        ) : error ? (
+          <Callout tone="danger" announce>
+            <p className="font-medium text-ink">{error}</p>
+          </Callout>
         ) : null}
       </div>
     </Modal>
@@ -472,7 +485,7 @@ export function PublishPage() {
                     </Button>
                   ) : null}
                   {can("content.unpublish") && row.publishedAt && !row.deleted ? (
-                    <Button size="sm" variant="ghost" onClick={() => setWithdrawing(row)}>
+                    <Button size="sm" variant="danger-quiet" onClick={() => setWithdrawing(row)}>
                       Zurückziehen
                     </Button>
                   ) : null}
@@ -621,25 +634,23 @@ export function PublishPage() {
           </>
         }
       >
-        <Field
-          label="Notiz"
-          htmlFor="publish-note"
-          optional
-          hint="Erscheint im Verlauf. Hilft später beim Einordnen, was dieser Stand enthielt."
-        >
-          <Textarea
-            id="publish-note"
-            rows={2}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            autoFocus
-          />
-        </Field>
-        {publish.error ? (
-          <p role="alert" className="mt-4 text-[13px] font-medium text-brand-bronze">
-            {publish.error}
-          </p>
-        ) : null}
+        {/* One optional note; publishing is the footer's button, not Enter in a textarea. */}
+        <Form onSubmit={() => undefined} error={publish.error}>
+          <Field
+            label="Notiz"
+            htmlFor="publish-note"
+            optional
+            hint="Erscheint im Verlauf. Hilft später beim Einordnen, was dieser Stand enthielt."
+          >
+            <Textarea
+              id="publish-note"
+              rows={2}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              autoFocus
+            />
+          </Field>
+        </Form>
       </Modal>
 
       <ConfirmDialog
@@ -647,7 +658,8 @@ export function PublishPage() {
         onClose={() => setRestore(null)}
         busy={restoreSnapshot.busy}
         title={`Version ${restore} wiederherstellen?`}
-        confirmLabel="Wiederherstellen"
+        // Names the effect: this does not stage anything, it goes live now.
+        confirmLabel="Wiederherstellen und veröffentlichen"
         message={
           <>
             <p>
@@ -701,7 +713,7 @@ export function PublishPage() {
         onClose={() => setCancelling(null)}
         busy={cancelSchedule.busy}
         title="Terminierung aufheben?"
-        confirmLabel="Aufheben"
+        confirmLabel="Terminierung aufheben"
         message={
           <>
             <p>
@@ -731,7 +743,7 @@ export function PublishPage() {
         busy={unpublish.busy}
         destructive
         title={`„${withdrawing?.key}“ von der Website zurückziehen?`}
-        confirmLabel="Zurückziehen"
+        confirmLabel="Veröffentlichung zurückziehen"
         message={
           <>
             <p>

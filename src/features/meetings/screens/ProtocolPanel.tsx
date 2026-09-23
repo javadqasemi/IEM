@@ -23,6 +23,7 @@ import {
   type EntityOption,
 } from "@/shared/ui/forms";
 import { useToast } from "@/shared/ui/feedback";
+import { ConfirmDialog } from "@/shared/ui/overlays";
 import { formatDate, parseDateInput, toDateInput } from "@/shared/utils/format";
 import { meetingRepository } from "../repository";
 import { useMeetingMutations } from "../hooks/useMeetings";
@@ -50,20 +51,24 @@ export function ProtocolPanel({ meeting }: { meeting: MeetingDetail }) {
 
   const [adding, setAdding] = useState<string | null | false>(false);
   const [editing, setEditing] = useState<MeetingItem | null>(null);
+  const [removing, setRemoving] = useState<MeetingItem | null>(null);
   const [busy, setBusy] = useState(false);
 
   const mayWrite = can("meeting.update") && !meeting.protocolLocked;
   const groups = groupProtocol(meeting);
 
-  async function run(action: () => Promise<unknown>, success: string) {
+  /** Resolves to whether it worked, so a confirmation closes only on success. */
+  async function run(action: () => Promise<unknown>, success: string): Promise<boolean> {
     setBusy(true);
     try {
       await action();
       toast.success(success);
       setAdding(false);
       setEditing(null);
+      return true;
     } catch (err) {
       toast.error(toFailure(err).message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -118,9 +123,7 @@ export function ProtocolPanel({ meeting }: { meeting: MeetingDetail }) {
               mayWrite={mayWrite}
               busy={busy}
               onEdit={() => setEditing(item)}
-              onRemove={() =>
-                void run(() => mutations.removeItem(meeting.id, item.id), "Zeile entfernt")
-              }
+              onRemove={() => setRemoving(item)}
             />
           ))}
 
@@ -180,6 +183,25 @@ export function ProtocolPanel({ meeting }: { meeting: MeetingDetail }) {
           }
         />
       ) : null}
+
+      {/* A line of minutes is cited by its key; removing one is asked, not done on a stray tap. */}
+      <ConfirmDialog
+        open={removing !== null}
+        busy={busy}
+        onClose={() => setRemoving(null)}
+        onConfirm={() => {
+          if (!removing) return;
+          void run(() => mutations.removeItem(meeting.id, removing.id), "Zeile entfernt").then(
+            (ok) => {
+              if (ok) setRemoving(null);
+            },
+          );
+        }}
+        destructive
+        confirmLabel="Entfernen"
+        title={`Zeile ${removing?.key ?? ""} entfernen?`}
+        message="Die Zeile wird aus dem Protokoll entfernt."
+      />
     </div>
   );
 }
@@ -252,11 +274,16 @@ function ProtocolRow({
       </div>
 
       {mayWrite ? (
-        <div className="flex shrink-0 items-start gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        /*
+          Revealed on hover only where there *is* hover (P1C, UX-25). On a
+          touch screen `group-hover` never fires, so these two buttons were
+          invisible — and unreachable — on a tablet in the site office.
+        */
+        <div className="flex shrink-0 items-start gap-1 transition-opacity focus-within:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">
           <Button size="sm" variant="ghost" disabled={busy} onClick={onEdit}>
             Ändern
           </Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onRemove}>
+          <Button size="sm" variant="danger-quiet" disabled={busy} onClick={onRemove}>
             Entfernen
           </Button>
         </div>

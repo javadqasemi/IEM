@@ -72,7 +72,7 @@ export function SessionsCard({ onSignedOut }: { onSignedOut?: () => void }) {
         description="Jede Anmeldung an diesem Konto — auf diesem Gerät und auf allen anderen. Was Sie hier beenden, muss sich neu anmelden."
         action={
           others > 0 ? (
-            <Button variant="secondary" onClick={() => setConfirmOthers(true)}>
+            <Button variant="danger-quiet" onClick={() => setConfirmOthers(true)}>
               Andere beenden ({others})
             </Button>
           ) : null

@@ -147,7 +147,7 @@ export function ProjectEditDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button
+          <Button variant="primary"
             onClick={() => void submit()}
             busy={busy}
             disabled={Boolean(blocked)}

@@ -1,11 +1,11 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Badge, Card } from "@/shared/ui/primitives";
 import { Field, Form, Input, SaveBar, Select, Textarea, useForm } from "@/shared/ui/forms";
-import { useToast } from "@/shared/ui/feedback";
+import { CONFLICT_BLOCKS_SAVE, ConflictNotice } from "@/shared/ui/feedback";
 import { useUnsavedGuard } from "@/shared/hooks";
 import { ConfirmDialog } from "@/shared/ui/overlays";
 import type { Organisation } from "@/entities/organisation";
-import { useSaveOrganisation } from "../hooks/useOrganisation";
+import { useReloadOrganisation, useSaveOrganisation } from "../hooks/useOrganisation";
 import { validateOrganisation, type SettingsSection } from "../service";
 import { ORGANISATION_FIELDS, fieldValue, parseFieldValue } from "./fields";
 
@@ -42,8 +42,8 @@ export function OrganisationSection({
   /** The server's answer, sent with the record — never inferred here. */
   canEditLegal: boolean;
 }) {
-  const toast = useToast();
   const save = useSaveOrganisation();
+  const reloadRecord = useReloadOrganisation();
   const idPrefix = useId();
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -57,11 +57,19 @@ export function OrganisationSection({
     onSubmit: async (values) => {
       const result = await save(record, values);
       setWarnings(result.warnings);
+      /*
+        One signal, not two (Part 10.5, P1C): the save bar's "Gespeichert."
+        is the confirmation, where the reader is looking. The toast that used
+        to follow it said the same thing in a corner a moment later — and on
+        a phone sat on top of the bar's own button.
+      */
       setSavedAt(Date.now());
-      toast.success("Gespeichert", "Die Unternehmensangaben wurden übernommen.");
       return result;
     },
   });
+
+  /** A 409: somebody else saved this record first. The one failure the form cannot be saved past. */
+  const conflict = form.failureKind === "conflict";
 
   /*
     Re-seed when the record arrives or changes underneath.
@@ -102,7 +110,24 @@ export function OrganisationSection({
 
   return (
     <>
-      <Form onSubmit={form.submit} error={form.error}>
+      <Form onSubmit={form.submit} error={conflict ? null : form.error}>
+        {/*
+          The conflict, in place, with the input still below it — the shared
+          `ConflictNotice` the edit dialogs use. The doc above always promised
+          a reload here; until P1C the 409 was only an error sentence.
+          "Neueste Fassung laden" drops the local edits (the reader has seen
+          them) and refetches the record without taking the form off screen.
+        */}
+        {conflict ? (
+          <ConflictNotice
+            message={form.error ?? ""}
+            compareHint="Das Audit-Log zeigt, wer was geändert hat."
+            onReload={() => {
+              form.reset(record);
+              reloadRecord();
+            }}
+          />
+        ) : null}
         <Card title={section.title} description={section.description}>
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             {rows.map(({ name, def }) => {
@@ -206,6 +231,10 @@ export function OrganisationSection({
             dirty={form.dirty}
             saving={form.submitting}
             savedAt={savedAt}
+            failed={Boolean(form.error) && !conflict}
+            conflict={conflict}
+            disabled={conflict}
+            disabledReason={conflict ? CONFLICT_BLOCKS_SAVE : undefined}
             onReset={() => form.reset(record)}
           />
         ) : null}
