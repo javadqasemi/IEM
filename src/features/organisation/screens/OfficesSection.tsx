@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { toFailure } from "@/core/api";
 import { Badge, Button, Card, EmptyState, ErrorState, SkeletonTable } from "@/shared/ui/primitives";
 import { DataTable, type Column } from "@/shared/ui/data";
 import { ConfirmDialog } from "@/shared/ui/overlays";
@@ -83,7 +84,7 @@ export function OfficesSection({
         four seconds; this keeps it beside the register until the reader has
         acted on it.
       */
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }
@@ -201,6 +202,8 @@ export function OfficesSection({
             rows={rows}
             columns={columns}
             rowKey={(office) => office.id}
+            error={offices.error}
+            onRetry={offices.refetch}
             caption="Standorte der Firma"
           />
         )}
@@ -234,6 +237,13 @@ export function OfficesSection({
       </Card>
 
       <OfficeDialog
+        /*
+          Keyed by the office being edited. The dialog is always mounted and
+          `useForm` takes its `initial` once, so without a key the second
+          office opened started from the first one's values — an edit to
+          Spiez that would have saved Thun's telephone number (UX-40).
+        */
+        key={editing?.id ?? (creating ? "new" : "closed")}
         open={creating || editing !== null}
         office={editing}
         kinds={kinds}

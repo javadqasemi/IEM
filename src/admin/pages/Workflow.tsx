@@ -33,8 +33,6 @@ export function ReviewsPage() {
 
   const decide = useMutation(api.decide);
 
-  if (reviews.error) return <ErrorState message={reviews.error} onRetry={reviews.reload} />;
-
   const rows = reviews.data ?? [];
 
   const columns: Column<ReviewRow>[] = [
@@ -100,13 +98,21 @@ export function ReviewsPage() {
         }
       />
 
-      {reviews.loading ? (
+      {reviews.error ? (
+        <ErrorState
+          title="Die Freigaben konnten nicht geladen werden."
+          message={reviews.error}
+          onRetry={reviews.reload}
+        />
+      ) : reviews.loading ? (
         <Skeleton className="h-48 rounded-lg" />
       ) : rows.length ? (
         <DataTable
           rows={rows}
           columns={columns}
           rowKey={(r) => r.id}
+          open={{ onOpen: (r) => setOpen(r) }}
+          error={reviews.error}
           caption="Offene Freigabeanfragen"
         />
       ) : (
@@ -130,8 +136,14 @@ export function ReviewsPage() {
         error={decide.error}
         onDecide={async (decision, note) => {
           if (!open) return;
-          const ok = await decide.run(open.id, decision, note);
-          if (ok === null && decide.error) return;
+          const result = await decide.run(open.id, decision, note);
+          /*
+            This used to read `decide.error` right after the await — which is
+            the value from the render *before* the call, always `null` here,
+            so a refused approval fell through to "Freigegeben". The refusal
+            is shown in the dialog from the hook's state, as before.
+          */
+          if (!result.ok) return;
           toast.success(
             decision === "APPROVED" ? "Freigegeben" : "Abgelehnt",
             decision === "APPROVED"
@@ -339,24 +351,41 @@ export function PublishPage() {
       */}
       <Card
         title={
-          differs
-            ? `${changes.length} ${changes.length === 1 ? "Bereich weicht" : "Bereiche weichen"} von der Website ab`
-            : "Website ist auf dem aktuellen Stand"
+          diff.error
+            ? "Abgleich mit der Website fehlgeschlagen"
+            : differs
+              ? `${changes.length} ${changes.length === 1 ? "Bereich weicht" : "Bereiche weichen"} von der Website ab`
+              : "Website ist auf dem aktuellen Stand"
         }
         description={
-          differs
-            ? "Diese Bereiche sehen nach dem Veröffentlichen anders aus als jetzt auf der Website."
-            : "Der Entwurf und der veröffentlichte Stand stimmen überein. Veröffentlichen würde nichts ändern."
+          diff.error
+            ? "Ob die Website aktuell ist, lässt sich gerade nicht sagen."
+            : differs
+              ? "Diese Bereiche sehen nach dem Veröffentlichen anders aus als jetzt auf der Website."
+              : "Der Entwurf und der veröffentlichte Stand stimmen überein. Veröffentlichen würde nichts ändern."
         }
         action={
           can("content.publish") ? (
-            <Button variant="primary" disabled={!differs} onClick={() => setConfirm(true)}>
+            <Button
+              variant="primary"
+              disabled={!differs}
+              disabledReason={
+                diff.error
+                  ? "Erst muss der Abgleich mit der Website gelingen."
+                  : "Nichts zu veröffentlichen — Entwurf und Website stimmen überein."
+              }
+              onClick={() => setConfirm(true)}
+            >
               Jetzt veröffentlichen
             </Button>
           ) : null
         }
       >
-        {diff.loading ? (
+        {/* A failed comparison is not "up to date" — the one reading this
+            card must never give when it does not know (UX-21). */}
+        {diff.error ? (
+          <ErrorState message={diff.error} onRetry={diff.reload} />
+        ) : diff.loading ? (
           <Skeleton className="h-24" />
         ) : differs ? (
           <ul className="flex flex-col divide-y divide-line">
@@ -401,7 +430,13 @@ export function PublishPage() {
         }
         description="Alles, was beim nächsten Veröffentlichen live geht, verschwindet oder auf einen Zeitpunkt wartet."
       >
-        {queue.loading ? (
+        {queue.error ? (
+          <ErrorState
+            title="Die Warteschlange konnte nicht geladen werden."
+            message={queue.error}
+            onRetry={queue.reload}
+          />
+        ) : queue.loading ? (
           <Skeleton className="h-24" />
         ) : queued.length ? (
           <ul className="flex flex-col divide-y divide-line">
@@ -474,7 +509,9 @@ export function PublishPage() {
           title="Fehlgeschlagene Veröffentlichungen"
           description="Zeitgesteuerte Läufe, die nicht durchgelaufen sind. Die Einträge bleiben dabei freigegeben und terminiert."
         >
-          {failures.loading ? (
+          {failures.error ? (
+            <ErrorState message={failures.error} onRetry={failures.reload} />
+          ) : failures.loading ? (
             <Skeleton className="h-16" />
           ) : failures.data?.items.length ? (
             <ul className="flex flex-col divide-y divide-line">
@@ -504,7 +541,9 @@ export function PublishPage() {
         title="Veröffentlichungen"
         description="Jeder Stand bleibt erhalten und kann wieder live geschaltet werden."
       >
-        {snapshots.loading ? (
+        {snapshots.error ? (
+          <ErrorState message={snapshots.error} onRetry={snapshots.reload} />
+        ) : snapshots.loading ? (
           <Skeleton className="h-32" />
         ) : snapshots.data?.length ? (
           <ol className="flex flex-col divide-y divide-line">
@@ -560,15 +599,17 @@ export function PublishPage() {
               busy={publish.busy}
               onClick={async () => {
                 const result = await publish.run(note || undefined);
-                if (!result) return;
+                // The refusal is shown in this dialog from `publish.error`.
+                if (!result.ok) return;
+                const published = result.data;
                 toast.push({
-                  kind: result.warnings.length ? "info" : "success",
-                  title: `Veröffentlicht — Version ${result.version}`,
-                  description: `${result.entriesPublished} Eintrag/Einträge übernommen.`,
+                  kind: published.warnings.length ? "info" : "success",
+                  title: `Veröffentlicht — Version ${published.version}`,
+                  description: `${published.entriesPublished} Eintrag/Einträge übernommen.`,
                   // Warnings are shown, not swallowed: "diese Person ist einem
                   // Standort zugeordnet, den es nicht gibt" is exactly the kind
                   // of thing that would otherwise be found by a visitor.
-                  details: result.warnings,
+                  details: published.warnings,
                 });
                 setNote("");
                 setConfirm(false);
@@ -621,11 +662,13 @@ export function PublishPage() {
         onConfirm={async () => {
           if (restore === null) return;
           const result = await restoreSnapshot.run(restore);
-          if (result) {
+          if (result.ok) {
             toast.success(
-              `Wiederhergestellt — Version ${result.version}`,
+              `Wiederhergestellt — Version ${result.data.version}`,
               `Der Stand aus Version ${restore} ist jetzt live.`,
             );
+          } else {
+            toast.error("Nicht wiederhergestellt", result.failure.message);
           }
           setRestore(null);
           reloadAll();
@@ -641,10 +684,11 @@ export function PublishPage() {
         onSchedule={async (at) => {
           if (!scheduling) return;
           const result = await schedule.run(scheduling.id, at, scheduling.version);
-          if (!result) return;
+          // The refusal is shown in the dialog from `schedule.error`.
+          if (!result.ok) return;
           toast.success(
             "Terminiert",
-            `„${scheduling.key}“ geht am ${formatDateTime(result.scheduledAt)} live.`,
+            `„${scheduling.key}“ geht am ${formatDateTime(result.data.scheduledAt)} live.`,
           );
           setScheduling(null);
           reloadAll();
@@ -673,7 +717,8 @@ export function PublishPage() {
         onConfirm={async () => {
           if (!cancelling) return;
           const result = await cancelSchedule.run(cancelling.id);
-          if (result) toast.success("Aufgehoben", `„${cancelling.key}“ wartet nicht mehr.`);
+          if (result.ok) toast.success("Aufgehoben", `„${cancelling.key}“ wartet nicht mehr.`);
+          else toast.error("Terminierung nicht aufgehoben", result.failure.message);
           setCancelling(null);
           reloadAll();
         }}
@@ -703,13 +748,17 @@ export function PublishPage() {
         onConfirm={async () => {
           if (!withdrawing) return;
           const result = await unpublish.run(withdrawing.id, withdrawing.version);
-          if (result) {
+          if (result.ok) {
             toast.push({
-              kind: result.warnings.length ? "info" : "success",
-              title: `Zurückgezogen — Stand ${result.snapshot}`,
+              kind: result.data.warnings.length ? "info" : "success",
+              title: `Zurückgezogen — Stand ${result.data.snapshot}`,
               description: `„${withdrawing.key}“ ist nicht mehr auf der Website.`,
-              details: result.warnings,
+              details: result.data.warnings,
             });
+          } else {
+            // A 409 here means the entry changed since the queue was loaded;
+            // the reload below shows the newer state, and the toast says why.
+            toast.error("Nicht zurückgezogen", result.failure.message);
           }
           setWithdrawing(null);
           reloadAll();
@@ -797,12 +846,19 @@ function ScheduleDialog({
       description={`„${entry.key}“ (${entry.typeKey}) · Version ${entry.version}`}
       size="sm"
       busy={busy}
+      hint={at ? null : "Zuerst Datum und Uhrzeit wählen."}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button variant="primary" busy={busy} disabled={!at} onClick={() => onSchedule(at)}>
+          <Button
+            variant="primary"
+            busy={busy}
+            disabled={!at}
+            disabledReason="Zuerst Datum und Uhrzeit wählen."
+            onClick={() => onSchedule(at)}
+          >
             Terminieren
           </Button>
         </>

@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
+import { CONFLICT_BLOCKS_SAVE, ConflictNotice } from "@/shared/ui/feedback";
 import { useAuth } from "@/core/auth";
 import { PRIORITY_OPTIONS, type Priority } from "@/entities/project";
 import type { TaskDetail } from "@/entities/task";
@@ -155,46 +156,24 @@ export function TaskEditDialog({
       });
       onSaved(next);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setConflict(err.message);
+      const failure = toFailure(err);
+      if (failure.kind === "conflict") {
+        setConflict(failure.message);
       } else {
-        if (err instanceof ApiError && err.fields) setErrors(err.fields);
-        setError(err instanceof Error ? err.message : "Speichern nicht möglich.");
+        setErrors(failure.fields);
+        setError(failure.message);
       }
     } finally {
       setBusy(false);
     }
   }
 
-  if (conflict) {
-    return (
-      <Modal
-        open
-        onClose={onClose}
-        title="Inzwischen geändert"
-        description="Jemand anderes hat diese Aufgabe gespeichert, während sie hier offen war."
-        footer={
-          <>
-            <Button variant="ghost" onClick={onClose}>
-              Verwerfen
-            </Button>
-            {/*
-              Reload, not "save anyway". A button that resubmitted with the new
-              version would be a two-click way to do exactly the overwrite the
-              lock exists to prevent — and it would look like the safe option,
-              which is worse.
-            */}
-            <Button onClick={() => window.location.reload()}>Neu laden</Button>
-          </>
-        }
-      >
-        <p className="text-[14px] leading-relaxed">{conflict}</p>
-        <p className="mt-3 text-[13px] text-muted">
-          Ihre Eingaben werden nicht gespeichert. Der Verlauf der Aufgabe zeigt, was geändert wurde.
-        </p>
-      </Modal>
-    );
-  }
+  /** Why "Speichern" cannot be pressed, most important first. */
+  const blocked = conflict
+    ? CONFLICT_BLOCKS_SAVE
+    : title.trim().length < 2
+      ? "Der Titel braucht mindestens zwei Zeichen."
+      : null;
 
   return (
     <Modal
@@ -204,6 +183,7 @@ export function TaskEditDialog({
       title="Aufgabe bearbeiten"
       description="Status, Position und Abhängigkeiten haben eigene Bedienelemente."
       size="lg"
+      hint={blocked}
       footer={
         <>
           <Badge tone="neutral">v{task.version}</Badge>
@@ -211,13 +191,29 @@ export function TaskEditDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={() => void submit()} busy={busy} disabled={title.trim().length < 2}>
+          <Button
+            onClick={() => void submit()}
+            busy={busy}
+            disabled={Boolean(blocked)}
+            disabledReason={blocked}
+          >
             Speichern
           </Button>
         </>
       }
     >
       <Form onSubmit={() => void submit()} error={error}>
+        {conflict ? (
+          // Reload, not "save anyway" — see `ConflictNotice`.
+          <ConflictNotice
+            message={conflict}
+            compareHint="Der Verlauf der Aufgabe zeigt, was geändert wurde."
+            onReload={() => {
+              mutations.reload(task.id);
+              onClose();
+            }}
+          />
+        ) : null}
         <Field label="Titel" htmlFor={ids.title} error={fieldError("title")}>
           <Input
             id={ids.title}

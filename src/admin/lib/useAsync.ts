@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError } from "@/core/api";
+import { ApiError, toFailure } from "@/core/api";
 
 /**
  * The pre-cache loader.
@@ -21,7 +21,17 @@ import { ApiError } from "@/core/api";
 
 export type AsyncState<T> = {
   data: T | null;
+  /**
+   * True only while there is **nothing** to show yet.
+   *
+   * A `reload()` over data already on screen is not a loading state — it used
+   * to be, and every list and editor in `src/admin/pages` dropped to a
+   * skeleton after every save, which unmounted whatever the reader had open
+   * beside it (UX-03). That is `refreshing`.
+   */
   loading: boolean;
+  /** A reload is in flight over data that is still being shown. */
+  refreshing: boolean;
   error: string | null;
   /** Re-runs the loader. */
   reload: () => void;
@@ -53,8 +63,25 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]): AsyncSta
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
 
+  /*
+    Which of the two reasons to run this is.
+
+    A change of `deps` asks a *different question* — another content type,
+    another search — so the old answer is cleared: showing the team list while
+    the jobs list loads would be showing the wrong list. A `reload()` asks the
+    same question again, so the old answer stays up until the new one lands.
+  */
+  const lastDeps = useRef<unknown[] | null>(null);
+
   useEffect(() => {
     const id = ++run.current;
+    const previous = lastDeps.current;
+    const depsChanged =
+      previous === null ||
+      previous.length !== deps.length ||
+      deps.some((dep, i) => !Object.is(dep, previous[i]));
+    lastDeps.current = deps;
+    if (depsChanged) setData(null);
     setLoading(true);
     setError(null);
 
@@ -71,7 +98,7 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]): AsyncSta
           setLoading(false);
           return;
         }
-        setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+        setError(toFailure(err).message);
         setLoading(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,5 +106,12 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]): AsyncSta
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
-  return { data, loading, error, reload, set: setData };
+  return {
+    data,
+    loading: loading && data === null,
+    refreshing: loading && data !== null,
+    error,
+    reload,
+    set: setData,
+  };
 }

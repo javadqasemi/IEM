@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
-import { clearQueryCache, fetchQuery, invalidate, peek, peekError, prime } from "./query";
+import {
+  clearQueryCache,
+  fetchQuery,
+  invalidate,
+  invalidateAround,
+  peek,
+  peekError,
+  prime,
+  revalidate,
+  settle,
+} from "./query";
 
 /**
  * The cache's behaviour, tested without React.
@@ -202,5 +212,75 @@ describe("a failed key", () => {
     await fetchQuery(["users"], () => Promise.reject(new ApiError({ statusCode: 401, code: "unauthorized", message: "Nicht angemeldet." })));
     expect(peekError(["users"])).toBeNull();
     expect(peek(["users"])).toEqual(["u1"]);
+  });
+});
+/**
+ * UX-03: a write whose response is the record must not take the record off
+ * screen. These three are the whole mechanism, and the assertion each one
+ * makes is the reader's: *is the detail still there after the write?*
+ */
+describe("settle — the record the server returned stays on screen", () => {
+  it("primes the record and drops everything else under the prefix", () => {
+    prime(["projects", "detail", "p1"], { id: "p1", name: "alt" });
+    prime(["projects", "list", "a"], [1]);
+    prime(["projects", "stats"], { n: 1 });
+
+    const dropped = settle("projects", {
+      key: ["projects", "detail", "p1"],
+      data: { id: "p1", name: "neu" },
+    });
+
+    expect(dropped).toBe(2);
+    expect(peek(["projects", "detail", "p1"])).toEqual({ id: "p1", name: "neu" });
+    expect(peek(["projects", "list", "a"])).toBeUndefined();
+    expect(peek(["projects", "stats"])).toBeUndefined();
+  });
+
+  it("leaves another project's detail alone only if it is outside the prefix", () => {
+    prime(["projects", "detail", "p2"], { id: "p2" });
+    settle("projects", { key: ["projects", "detail", "p1"], data: { id: "p1" } });
+    // Same prefix, different record: stale, so it goes — the rule that
+    // "the set of affected keys is not knowable" still holds for everything
+    // except the one record the response names.
+    expect(peek(["projects", "detail", "p2"])).toBeUndefined();
+  });
+
+  it("does not reach into another feature", () => {
+    prime(["tasks", "detail", "t1"], { id: "t1" });
+    settle("projects", { key: ["projects", "detail", "p1"], data: { id: "p1" } });
+    expect(peek(["tasks", "detail", "t1"])).toEqual({ id: "t1" });
+  });
+});
+
+describe("invalidateAround — a write that did not return the record", () => {
+  it("keeps every named record visible and drops the rest", () => {
+    prime(["tasks", "detail", "t1"], { id: "t1" });
+    prime(["tasks", "checklist", "t1"], [{ done: false }]);
+    prime(["tasks", "list", "all"], [1, 2]);
+
+    expect(invalidateAround("tasks", ["tasks", "detail", "t1"], ["tasks", "checklist", "t1"])).toBe(1);
+
+    // Still readable — revalidated, not dropped — so the drawer does not unmount.
+    expect(peek(["tasks", "detail", "t1"])).toEqual({ id: "t1" });
+    expect(peek(["tasks", "checklist", "t1"])).toEqual([{ done: false }]);
+    expect(peek(["tasks", "list", "all"])).toBeUndefined();
+  });
+});
+
+describe("revalidate — refetch without a skeleton", () => {
+  it("keeps the value readable and makes the next load fetch", async () => {
+    prime(["meetings", "detail", "m1"], { v: 1 });
+    expect(revalidate(["meetings", "detail", "m1"])).toBe(1);
+    expect(peek(["meetings", "detail", "m1"])).toEqual({ v: 1 });
+
+    const fetcher = vi.fn().mockResolvedValue({ v: 2 });
+    await fetchQuery(["meetings", "detail", "m1"], fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(peek(["meetings", "detail", "m1"])).toEqual({ v: 2 });
+  });
+
+  it("leaves a key that never resolved alone", () => {
+    expect(revalidate(["nothing", "here"])).toBe(0);
+    expect(peek(["nothing", "here"])).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { toFailure } from "@/core/api";
 import { useAuth } from "@/core/auth";
 import {
   MEMBER_ROLE_OPTIONS,
@@ -61,7 +62,7 @@ export function TeamTab({ project, readOnly }: { project: ProjectDetail; readOnl
       setFrom("");
       toast.success("Zum Team hinzugefügt");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+      toast.error(toFailure(err).message);
     } finally {
       setBusy(false);
     }
@@ -198,7 +199,7 @@ export function TeamTab({ project, readOnly }: { project: ProjectDetail; readOnl
             await mutations.removeMember(project.id, removing.id);
             toast.success("Entfernt");
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+            toast.error(toFailure(err).message);
           } finally {
             setRemoving(null);
           }

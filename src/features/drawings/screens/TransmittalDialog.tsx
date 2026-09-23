@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import {
   RECIPIENT_ROLE_OPTIONS,
   RevisionBadge,
@@ -103,7 +103,7 @@ export function TransmittalDialog({
       });
       setResult(sent);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Versand nicht möglich.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }

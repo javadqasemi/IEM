@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
+import { toFailure } from "@/core/api";
 import { Button } from "@/shared/ui/primitives";
 import { Field } from "@/shared/ui/forms/Field";
 import { Input } from "@/shared/ui/forms/inputs";
@@ -115,7 +116,7 @@ export function ReauthenticationDialog({
       // code, on purpose — this is an authenticated caller, so naming which
       // half failed would tell somebody holding the session which one they
       // still need.
-      setError(err instanceof Error ? err.message : "Die Bestätigung ist fehlgeschlagen.");
+      setError(toFailure(err).message);
       setCode("");
     } finally {
       setBusy(false);

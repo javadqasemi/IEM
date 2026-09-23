@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import {
   MEETING_TYPE_OPTIONS,
   type MeetingDetail,
@@ -102,12 +102,21 @@ export function MeetingCreateDialog({
       });
       onCreated(meeting);
     } catch (err) {
-      if (err instanceof ApiError && err.fields) setErrors(err.fields);
-      setError(err instanceof Error ? err.message : "Anlegen nicht möglich.");
+      const failure = toFailure(err);
+      setErrors(failure.fields);
+      setError(failure.message);
     } finally {
       setBusy(false);
     }
   }
+
+  /** Why "Anlegen" cannot be pressed yet, in the order the form asks. */
+  const blocked =
+    title.trim().length < 2
+      ? "Der Titel braucht mindestens zwei Zeichen."
+      : !startsAt
+        ? "Beginn fehlt."
+        : null;
 
   return (
     <Modal
@@ -117,6 +126,7 @@ export function MeetingCreateDialog({
       title="Neue Sitzung"
       description="Titel und Beginn genügen. Teilnehmende, Traktanden und Protokoll kommen auf der Sitzung selbst dazu."
       size="lg"
+      hint={blocked}
       footer={
         <>
           <div className="flex-1" />
@@ -126,7 +136,8 @@ export function MeetingCreateDialog({
           <Button
             onClick={() => void submit()}
             busy={busy}
-            disabled={title.trim().length < 2 || !startsAt}
+            disabled={Boolean(blocked)}
+            disabledReason={blocked}
           >
             Anlegen
           </Button>

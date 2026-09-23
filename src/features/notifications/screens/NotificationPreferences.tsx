@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { Button, Card, ErrorState, Skeleton } from "@/shared/ui/primitives";
 import { useToast } from "@/shared/ui/feedback";
 import { usePreferenceMutations, usePreferences } from "../hooks/useNotifications";
@@ -57,7 +58,7 @@ export function NotificationPreferences() {
       setEdits({});
       toast.success("Gespeichert", "Ihre Benachrichtigungseinstellungen sind aktiv.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Das Speichern hat nicht geklappt.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }

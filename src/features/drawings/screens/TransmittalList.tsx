@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { navigate } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import {
   PurposeBadge,
@@ -11,7 +10,6 @@ import {
   Card,
   DownloadButton,
   EmptyState,
-  ErrorState,
   PageHeader,
 } from "@/shared/ui/primitives";
 import { SearchInput, Select } from "@/shared/ui/forms";
@@ -131,8 +129,6 @@ export function TransmittalList() {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.refetch} />;
-
   return (
     <>
       <PageHeader
@@ -159,8 +155,10 @@ export function TransmittalList() {
           rows={list.data?.items ?? []}
           columns={columns}
           rowKey={(r) => r.id}
-          onRowClick={(r) => navigate(`/planversand/${r.id}`)}
+          open={{ href: (r) => `#/planversand/${r.id}` }}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.refetch}
           caption="Planversand"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}

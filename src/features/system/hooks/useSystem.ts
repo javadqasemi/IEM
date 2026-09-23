@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { invalidate, useQuery } from "@/core/api";
+import { invalidate, useQuery, toFailure } from "@/core/api";
 import { systemRepository } from "../repository";
 import type { DiagnosticsRun, JobFilters } from "../types";
 
@@ -112,7 +112,7 @@ export function useJobActions() {
         invalidate(["system", "overview"]);
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Die Aktion ist fehlgeschlagen.");
+        setError(toFailure(err).message);
         return false;
       } finally {
         setBusy(null);
@@ -150,7 +150,7 @@ export function useDiagnostics() {
     try {
       setRun(await systemRepository.runDiagnostics());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Die Diagnose ist fehlgeschlagen.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }

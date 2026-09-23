@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { useAuth } from "@/core/auth";
 import { formatDate } from "@/shared/utils/format";
 import {
@@ -6,7 +7,6 @@ import {
   Card,
   DownloadButton,
   EmptyState,
-  ErrorState,
   PageHeader,
 } from "@/shared/ui/primitives";
 import { SearchInput } from "@/shared/ui/forms";
@@ -207,8 +207,6 @@ export function TaskList() {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.refetch} />;
-
   return (
     <>
       <PageHeader
@@ -319,7 +317,7 @@ export function TaskList() {
                         setSelection(new Set());
                         toast.success(`${changed} geändert`);
                       } catch (err) {
-                        toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+                        toast.error(toFailure(err).message);
                       } finally {
                         setBusy(false);
                       }
@@ -337,8 +335,10 @@ export function TaskList() {
               columns={columns}
               rowKey={(r) => r.id}
               // A drawer, not a route — see the note on `TaskDrawer`.
-              onRowClick={(r) => setOpen(r.id)}
+              open={{ onOpen: (r) => setOpen(r.id) }}
               loading={list.loading}
+              error={list.error}
+              onRetry={list.refetch}
               caption="Aufgaben"
               page={list.data?.page ?? 1}
               pages={list.data?.pages ?? 1}

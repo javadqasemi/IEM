@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import type { Priority, ProjectDetail } from "@/entities/project";
 import { PRIORITY_OPTIONS } from "@/entities/project";
 import { parseDateInput } from "@/shared/utils/format";
@@ -98,12 +98,20 @@ export function ProjectCreateDialog({
       });
       onCreated(project);
     } catch (err) {
-      if (err instanceof ApiError && err.fields) setErrors(err.fields);
-      setError(err instanceof Error ? err.message : "Anlegen nicht möglich.");
+      const failure = toFailure(err);
+      setErrors(failure.fields);
+      setError(failure.message);
     } finally {
       setBusy(false);
     }
   }
+
+  /** Why "Anlegen" cannot be pressed yet, in the order the form asks. */
+  const blocked = !name.trim()
+    ? "Projektname fehlt."
+    : !customer
+      ? "Bauherrschaft wählen."
+      : null;
 
   return (
     <Modal
@@ -113,12 +121,18 @@ export function ProjectCreateDialog({
       title="Neues Projekt"
       description="Die Nummer wird beim Anlegen vergeben. Gewerke, Team und Termine kommen danach."
       size="lg"
+      hint={blocked}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={() => void submit()} busy={busy} disabled={!name.trim() || !customer}>
+          <Button
+            onClick={() => void submit()}
+            busy={busy}
+            disabled={Boolean(blocked)}
+            disabledReason={blocked}
+          >
             Projekt anlegen
           </Button>
         </>

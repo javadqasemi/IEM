@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { useToast } from "@/shared/ui/feedback/toast";
 import { Button } from "./Button";
 
@@ -35,7 +36,7 @@ export function DownloadButton({
     try {
       await onDownload();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Der Download ist fehlgeschlagen.");
+      toast.error(toFailure(err).message);
     } finally {
       setBusy(false);
     }

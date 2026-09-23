@@ -201,6 +201,88 @@ export function invalidate(prefix: string | QueryKey): number {
   return dropped;
 }
 
+/**
+ * A write whose response *is* the new state of one record.
+ *
+ * Primes that record and invalidates everything else under the prefix — the
+ * lists, the stats tile, the history — in the same tick.
+ *
+ * ---
+ *
+ * `invalidate(prefix)` alone takes the record's own entry off screen: it sets
+ * `updatedAt = 0`, `useQuery` gates `data` on `updatedAt > 0`, so between the
+ * invalidate and the refetch landing the detail reads `null` — and a detail
+ * screen that renders a skeleton when it has no data **unmounts**, taking
+ * with it anything the reader had typed and not yet saved beside the thing
+ * that was saved. The attendance a project lead was ticking off went with the
+ * agenda item they added. The server had just sent the answer, and the screen
+ * threw it away to ask again.
+ *
+ * Returns the number of *other* entries invalidated, which is what the test
+ * reads.
+ */
+export function settle(
+  prefix: string | QueryKey,
+  record: { key: QueryKey; data: unknown },
+): number {
+  const dropped = invalidateOthers(prefix, serialise(record.key));
+  prime(record.key, record.data);
+  return dropped;
+}
+
+/**
+ * A write that changed a record but did not return it — a checklist tick, a
+ * comment. Everything else under the prefix is invalidated; the record on
+ * screen is **revalidated**, so it refreshes behind the data it is showing
+ * instead of dropping to a skeleton and unmounting the drawer that holds it.
+ */
+export function invalidateAround(prefix: string | QueryKey, ...records: QueryKey[]): number {
+  const dropped = invalidateOthers(prefix, ...records.map(serialise));
+  for (const record of records) revalidate(record);
+  return dropped;
+}
+
+function invalidateOthers(prefix: string | QueryKey, ...kept: string[]): number {
+  const head = typeof prefix === "string" ? prefix : serialise(prefix);
+  let dropped = 0;
+  for (const key of [...cache.keys()]) {
+    if (kept.includes(key)) continue;
+    if (key !== head && !key.startsWith(`${head}|`)) continue;
+    const entry = cache.get(key)!;
+    entry.updatedAt = 0;
+    entry.error = null;
+    dropped += 1;
+    notify(key);
+  }
+  return dropped;
+}
+
+/**
+ * Refetches everything under a prefix **without** taking it off screen.
+ *
+ * The data stays visible while the fresh copy is fetched — the
+ * stale-while-revalidate promise `useQuery` makes — so this is the call for
+ * "show me the newer version" after a conflict, where the reader is looking
+ * at the record and a skeleton would be the wrong answer to a question they
+ * asked. `invalidate` remains the call for a write, where showing the old
+ * value for a moment longer would be showing something known to be false.
+ */
+export function revalidate(prefix: string | QueryKey): number {
+  const head = typeof prefix === "string" ? prefix : serialise(prefix);
+  let touched = 0;
+  for (const key of [...cache.keys()]) {
+    if (key !== head && !key.startsWith(`${head}|`)) continue;
+    const entry = cache.get(key)!;
+    // `1`, not `0`: older than any staleness window, so the next `load`
+    // fetches — but still "has resolved", so `useQuery` keeps the data.
+    if (entry.updatedAt > 0) entry.updatedAt = 1;
+    entry.failedAt = 0;
+    touched += 1;
+    notify(key);
+  }
+  return touched;
+}
+
 /** Puts a value in the cache without fetching — for a detail already in a list. */
 export function prime(key: QueryKey, data: unknown): void {
   const entry = entryFor(serialise(key));

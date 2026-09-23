@@ -249,3 +249,42 @@ export function publishEffect(entry: {
   }
   return "NONE";
 }
+
+/* ================================================================== */
+/* Ordering                                                            */
+/* ================================================================== */
+
+/**
+ * Whether a reorder request may be applied.
+ *
+ * `reorder` numbers the ids it is sent from zero, so the request has to be
+ * **the whole collection, once each**. Before this rule it was applied as
+ * sent: one page of a longer list gave page two the same positions as page
+ * one, an id from another content type was quietly renumbered into this one,
+ * and a deleted entry took a slot a live one then shared. None of it failed —
+ * the list simply came back in an order nobody chose. The dashboard now asks
+ * for the whole collection before it offers the control (UX-01); this is the
+ * half that does not depend on the client being right.
+ *
+ * `live` is every non-deleted entry of the type, in any order.
+ */
+export function refuseReorder(ids: readonly string[], live: readonly string[]): string | null {
+  if (ids.length === 0) return "Die Reihenfolge ist leer.";
+  if (new Set(ids).size !== ids.length) {
+    return "Ein Eintrag kommt in der Reihenfolge mehrfach vor.";
+  }
+  const known = new Set(live);
+  const foreign = ids.filter((id) => !known.has(id)).length;
+  if (foreign > 0) {
+    return foreign === 1
+      ? "Ein Eintrag gehört nicht zu diesem Bereich oder ist gelöscht."
+      : `${foreign} Einträge gehören nicht zu diesem Bereich oder sind gelöscht.`;
+  }
+  const missing = live.length - ids.length;
+  if (missing > 0) {
+    return missing === 1
+      ? "Ein Eintrag fehlt in der Reihenfolge — sie muss den ganzen Bereich umfassen. Bitte die Liste neu laden."
+      : `${missing} Einträge fehlen in der Reihenfolge — sie muss den ganzen Bereich umfassen. Bitte die Liste neu laden.`;
+  }
+  return null;
+}

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { invalidate, useQuery, type Paginated } from "@/core/api";
+import { invalidate, revalidate, settle, useQuery, type Paginated } from "@/core/api";
 import type {
   BuildingOption,
   CustomerOption,
@@ -179,6 +179,7 @@ export type ProjectMutations = {
     milestoneId: string,
     edit: MilestoneEdit,
   ) => Promise<ProjectDetail>;
+  reload: (id: string) => void;
 };
 
 /**
@@ -201,23 +202,34 @@ export type ProjectMutations = {
  * which turns an `ApiError`'s per-field messages into messages beside the
  * inputs — a hook that caught them would throw that away.
  */
+function settleDetail(dto: Parameters<typeof toProjectDetail>[0]): ProjectDetail {
+  const detail = toProjectDetail(dto);
+  /*
+    The response is the whole project, recomputed — so it is primed rather
+    than refetched, and only the *rest* of the feature is invalidated. The
+    rule above ("invalidate the whole feature") still holds for everything the
+    mutation cannot name; the one entry it can name is the one on screen, and
+    dropping it unmounted the detail and whatever the reader had not saved
+    (UX-03).
+  */
+  settle(KEY, { key: [KEY, "detail", detail.id], data: detail });
+  return detail;
+}
+
 export function useProjectMutations(): ProjectMutations {
   const create = useCallback(async (draft: ProjectDraft) => {
     const dto = await projectRepository.create(toCreateBody(draft));
-    invalidate(KEY);
-    return toProjectDetail(dto);
+    return settleDetail(dto);
   }, []);
 
   const update = useCallback(async (id: string, edit: ProjectEdit) => {
     const dto = await projectRepository.update(id, toUpdateBody(edit));
-    invalidate(KEY);
-    return toProjectDetail(dto);
+    return settleDetail(dto);
   }, []);
 
   const changeStatus = useCallback(async (id: string, change: StatusChange) => {
     const dto = await projectRepository.changeStatus(id, toStatusBody(change));
-    invalidate(KEY);
-    return toProjectDetail(dto);
+    return settleDetail(dto);
   }, []);
 
   const remove = useCallback(async (id: string) => {
@@ -235,26 +247,22 @@ export function useProjectMutations(): ProjectMutations {
 
   const addMember = useCallback(async (id: string, draft: MemberDraft) => {
     const dto = await projectRepository.addMember(id, toMemberBody(draft));
-    invalidate(KEY);
-    return toProjectDetail(dto);
+    return settleDetail(dto);
   }, []);
 
   const removeMember = useCallback(async (id: string, memberId: string) => {
     const dto = await projectRepository.removeMember(id, memberId);
-    invalidate(KEY);
-    return toProjectDetail(dto);
+    return settleDetail(dto);
   }, []);
 
   const scopeDiscipline = useCallback(async (id: string, draft: DisciplineScopeDraft) => {
     const dto = await projectRepository.scopeDiscipline(id, toScopeBody(draft));
-    invalidate(KEY);
-    return toProjectDetail(dto);
+    return settleDetail(dto);
   }, []);
 
   const createMilestone = useCallback(async (id: string, draft: MilestoneDraft) => {
     const dto = await projectRepository.createMilestone(id, toMilestoneCreateBody(draft));
-    invalidate(KEY);
-    return toProjectDetail(dto);
+    return settleDetail(dto);
   }, []);
 
   const updateMilestone = useCallback(
@@ -264,11 +272,16 @@ export function useProjectMutations(): ProjectMutations {
         milestoneId,
         toMilestoneUpdateBody(edit),
       );
-      invalidate(KEY);
-      return toProjectDetail(dto);
+      return settleDetail(dto);
     },
     [],
   );
+
+  /** After a 409: fetch the newer project without taking this one off screen. */
+  const reload = useCallback((id: string) => {
+    revalidate([KEY, "detail", id]);
+    revalidate([KEY, "versions", id]);
+  }, []);
 
   return {
     create,
@@ -282,5 +295,6 @@ export function useProjectMutations(): ProjectMutations {
     scopeDiscipline,
     createMilestone,
     updateMilestone,
+    reload,
   };
 }

@@ -131,7 +131,9 @@ export function SystemSection({ section }: { section: SettingsSection }) {
 
       <Card
         title="Warteschlange"
-        description="Hintergrundaufgaben nach Zustand. Noch ohne eigene Bedienoberfläche — siehe docs/ENTERPRISE_ROADMAP.md, P2-1."
+        // It said "noch ohne eigene Bedienoberfläche" and named a roadmap file;
+        // the operator surface has existed since P2-6 (UX-29).
+        description="Hintergrundaufgaben nach Zustand. Einzelne Aufgaben ansehen, wiederholen oder abbrechen: System → Aufgaben."
       >
         {jobs.length === 0 ? (
           <p className="text-[13px] text-muted">Keine Aufgaben in der Warteschlange.</p>

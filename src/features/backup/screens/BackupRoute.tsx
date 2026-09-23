@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import {
   Badge,
   Button,
@@ -165,7 +166,7 @@ export function BackupRoute() {
                       ? "Die Aufbewahrungsregel darf diese Sicherung wieder löschen."
                       : "Die Aufbewahrungsregel lässt diese Sicherung stehen.",
                   ),
-                (err: Error) => toast.error("Nicht möglich", err.message),
+                (err: unknown) => toast.error("Nicht möglich", toFailure(err).message),
               );
             }}
           >
@@ -203,7 +204,7 @@ export function BackupRoute() {
                         "Sicherung eingereiht",
                         "Sie läuft im Hintergrund; der Status aktualisiert sich hier.",
                       ),
-                    (err: Error) => toast.error("Nicht möglich", err.message),
+                    (err: unknown) => toast.error("Nicht möglich", toFailure(err).message),
                   );
                 }}
               >
@@ -248,6 +249,8 @@ export function BackupRoute() {
           columns={columns}
           rowKey={(row) => row.id}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.refetch}
           caption="Sicherungsverlauf"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}
@@ -263,7 +266,12 @@ export function BackupRoute() {
         />
       </Card>
 
-      <RestoreHistory items={restores.data?.items ?? []} loading={restores.loading} />
+      <RestoreHistory
+        items={restores.data?.items ?? []}
+        loading={restores.loading}
+        error={restores.error}
+        onRetry={restores.refetch}
+      />
 
       <RestoreDialog
         run={restoring}
@@ -292,8 +300,8 @@ export function BackupRoute() {
               toast.success("Gelöscht", "Die Sicherung und ihre Dateien sind entfernt.");
               setDeleting(null);
             },
-            (err: Error) => {
-              toast.error("Nicht möglich", err.message);
+            (err: unknown) => {
+              toast.error("Nicht möglich", toFailure(err).message);
               setDeleting(null);
             },
           );
@@ -310,7 +318,18 @@ export function BackupRoute() {
  * are recoverable rather than merely present, which is the difference between
  * a recovery system and an assumption.
  */
-function RestoreHistory({ items, loading }: { items: RestoreRun[]; loading: boolean }) {
+function RestoreHistory({
+  items,
+  loading,
+  error,
+  onRetry,
+}: {
+  items: RestoreRun[];
+  loading: boolean;
+  /** "Noch nie wiederhergestellt" under a failed request is the error-as-empty reading. */
+  error: string | null;
+  onRetry: () => void;
+}) {
   const columns: Column<RestoreRun>[] = [
     {
       key: "status",
@@ -380,6 +399,8 @@ function RestoreHistory({ items, loading }: { items: RestoreRun[]; loading: bool
         columns={columns}
         rowKey={(row) => row.id}
         loading={loading}
+        error={error}
+        onRetry={onRetry}
         caption="Wiederherstellungen"
         empty={
           <EmptyState

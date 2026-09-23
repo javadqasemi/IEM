@@ -4,6 +4,7 @@ import { Field, Input, Select } from "@/shared/ui/forms";
 import { Modal, ReauthenticationDialog } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
 import { authRepository, useAuth } from "@/core/auth";
+import { toFailure } from "@/core/api";
 import { useBackupMutations, useRestorability } from "../hooks/useBackups";
 import {
   RESTORE_CONFIRMATION,
@@ -99,6 +100,9 @@ export function RestoreDialog({
             <Button
               variant={mode === "IN_PLACE" ? "danger" : "primary"}
               disabled={Boolean(refusal)}
+              // The same sentence the dialog shows below the field, carried
+              // to the button so a keyboard user who tabs to it hears why.
+              disabledReason={refusal}
               busy={busy === "restore"}
               onClick={() => setAuthOpen(true)}
             >
@@ -242,7 +246,7 @@ export function RestoreDialog({
             onStarted();
             onClose();
           } catch (err) {
-            toast.error("Wiederherstellung abgelehnt", (err as Error).message);
+            toast.error("Wiederherstellung abgelehnt", toFailure(err).message);
             setAuthOpen(false);
           }
         }}

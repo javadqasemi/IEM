@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { Button, EmptyState, ErrorState, SkeletonTable } from "@/shared/ui/primitives";
 import { DataTable } from "@/shared/ui/data";
 import { ConfirmDialog } from "@/shared/ui/overlays";
@@ -80,7 +81,7 @@ export function UserSessionsPanel({
       setPending(null);
       setConfirmAll(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }
@@ -139,6 +140,8 @@ export function UserSessionsPanel({
           rows={rows}
           columns={columns}
           rowKey={(s) => s.id}
+          error={sessions.error}
+          onRetry={sessions.refetch}
           caption={`Aktive Sitzungen von ${userName}`}
         />
       )}

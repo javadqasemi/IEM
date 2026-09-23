@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { invalidate, useQuery, type Paginated } from "@/core/api";
+import { invalidate, revalidate, settle, useQuery, type Paginated } from "@/core/api";
 import type {
   AgendaDraft,
   ApprovalDraft,
@@ -70,6 +70,26 @@ import {
  * superseded from a meeting screen, which is the case somebody is watching.
  */
 const KEY = "meetings";
+
+/*
+  A write that returns the whole record primes it and invalidates the rest of
+  the prefix — lists, stats, the other resource — with `settle`. The shared
+  prefix below still decides *what else* is stale; what changes is that the
+  record on screen is not among it. Dropping it unmounted the meeting and the
+  attendance somebody was ticking off beside the agenda item they had just
+  added (UX-03).
+*/
+function settleMeeting(dto: Parameters<typeof toMeetingDetail>[0]): MeetingDetail {
+  const detail = toMeetingDetail(dto);
+  settle(KEY, { key: [KEY, "detail", detail.id], data: detail });
+  return detail;
+}
+
+function settleDecision(dto: Parameters<typeof toDecisionDetail>[0]): DecisionDetail {
+  const detail = toDecisionDetail(dto);
+  settle(KEY, { key: [KEY, "decision", detail.id], data: detail });
+  return detail;
+}
 
 function listKey(query: MeetingQuery): (string | number)[] {
   return [
@@ -221,6 +241,10 @@ export type MeetingMutations = {
   supersede: (id: string, supersedesId: string) => Promise<DecisionDetail>;
   removeDecision: (id: string) => Promise<void>;
   exportDecisionsCsv: (query: DecisionQuery) => Promise<void>;
+  /** After a 409: fetch the newer meeting without taking this one off screen. */
+  reloadMeeting: (id: string) => void;
+  /** After a 409: the same for a decision. */
+  reloadDecision: (id: string) => void;
 };
 
 /**
@@ -245,20 +269,17 @@ export type MeetingMutations = {
 export function useMeetingMutations(): MeetingMutations {
   const create = useCallback(async (draft: MeetingDraft) => {
     const dto = await meetingRepository.create(toCreateMeetingBody(draft));
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const update = useCallback(async (id: string, edit: MeetingEdit) => {
     const dto = await meetingRepository.update(id, toUpdateMeetingBody(edit));
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const changeStatus = useCallback(async (id: string, change: MeetingStatusChange) => {
     const dto = await meetingRepository.changeStatus(id, toMeetingStatusBody(change));
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const remove = useCallback(async (id: string) => {
@@ -270,70 +291,60 @@ export function useMeetingMutations(): MeetingMutations {
 
   const addAttendee = useCallback(async (id: string, draft: AttendeeDraft) => {
     const dto = await meetingRepository.addAttendee(id, toAttendeeBody(draft));
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const removeAttendee = useCallback(async (id: string, attendeeId: string) => {
     const dto = await meetingRepository.removeAttendee(id, attendeeId);
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const recordAttendance = useCallback(async (id: string, entries: AttendanceEntry[]) => {
     const dto = await meetingRepository.recordAttendance(id, toAttendanceBody(entries));
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const addAgendaItem = useCallback(async (id: string, draft: AgendaDraft) => {
     const dto = await meetingRepository.addAgendaItem(id, toAgendaBody(draft));
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const updateAgendaItem = useCallback(
     async (id: string, itemId: string, edit: Partial<AgendaDraft>) => {
       const dto = await meetingRepository.updateAgendaItem(id, itemId, toAgendaUpdateBody(edit));
-      invalidate(KEY);
-      return toMeetingDetail(dto);
+      return settleMeeting(dto);
     },
     [],
   );
 
   const removeAgendaItem = useCallback(async (id: string, itemId: string) => {
     const dto = await meetingRepository.removeAgendaItem(id, itemId);
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const addItem = useCallback(async (id: string, draft: ItemDraft) => {
     const dto = await meetingRepository.addItem(id, toItemBody(draft));
-    invalidate(KEY);
     // A Pendenz just created a task in another module's cache.
     if (draft.kind === "PENDENZ") invalidate("tasks");
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const updateItem = useCallback(async (id: string, itemId: string, edit: ItemEdit) => {
     const dto = await meetingRepository.updateItem(id, itemId, toItemUpdateBody(edit));
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const removeItem = useCallback(async (id: string, itemId: string) => {
     const dto = await meetingRepository.removeItem(id, itemId);
-    invalidate(KEY);
     // The task survives the line — see the server's `removeItem` — but its
     // link does not, so a task screen showing "aus Bausitzung 14" is stale.
     invalidate("tasks");
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const reorderItems = useCallback(async (id: string, order: string[]) => {
     const dto = await meetingRepository.reorderItems(id, { order });
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const bulkDiscipline = useCallback(async (ids: string[], disciplineId: string | null) => {
@@ -344,38 +355,32 @@ export function useMeetingMutations(): MeetingMutations {
 
   const approve = useCallback(async (id: string, draft: ApprovalDraft) => {
     const dto = await meetingRepository.approve(id, toApprovalBody(draft));
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const sendMinutes = useCallback(async (id: string) => {
     const dto = await meetingRepository.sendMinutes(id);
-    invalidate(KEY);
-    return toMeetingDetail(dto);
+    return settleMeeting(dto);
   }, []);
 
   const createDecision = useCallback(async (draft: DecisionDraft) => {
     const dto = await meetingRepository.createDecision(toCreateDecisionBody(draft));
-    invalidate(KEY);
-    return toDecisionDetail(dto);
+    return settleDecision(dto);
   }, []);
 
   const updateDecision = useCallback(async (id: string, edit: DecisionEdit) => {
     const dto = await meetingRepository.updateDecision(id, toUpdateDecisionBody(edit));
-    invalidate(KEY);
-    return toDecisionDetail(dto);
+    return settleDecision(dto);
   }, []);
 
   const changeDecisionStatus = useCallback(async (id: string, change: DecisionStatusChange) => {
     const dto = await meetingRepository.changeDecisionStatus(id, toDecisionStatusBody(change));
-    invalidate(KEY);
-    return toDecisionDetail(dto);
+    return settleDecision(dto);
   }, []);
 
   const supersede = useCallback(async (id: string, supersedesId: string) => {
     const dto = await meetingRepository.supersede(id, { supersedesId });
-    invalidate(KEY);
-    return toDecisionDetail(dto);
+    return settleDecision(dto);
   }, []);
 
   const removeDecision = useCallback(async (id: string) => {
@@ -387,6 +392,16 @@ export function useMeetingMutations(): MeetingMutations {
     (query: DecisionQuery) => meetingRepository.exportDecisionsCsv(query),
     [],
   );
+
+  const reloadMeeting = useCallback((id: string) => {
+    revalidate([KEY, "detail", id]);
+    revalidate([KEY, "versions", id]);
+  }, []);
+
+  const reloadDecision = useCallback((id: string) => {
+    revalidate([KEY, "decision", id]);
+    revalidate([KEY, "decisionVersions", id]);
+  }, []);
 
   return {
     create,
@@ -413,5 +428,7 @@ export function useMeetingMutations(): MeetingMutations {
     supersede,
     removeDecision,
     exportDecisionsCsv,
+    reloadMeeting,
+    reloadDecision,
   };
 }

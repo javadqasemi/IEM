@@ -228,7 +228,9 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     zone: "Betrieb",
     title: "Sicherung und Wiederherstellung",
     description:
-      "Wann automatisch gesichert wird, wie lange Sicherungen aufbewahrt werden und wohin sie geschrieben werden. Verlauf und Einspielen stehen unter „Sicherungen“.",
+      // Not "und wohin sie geschrieben werden": the location is fixed at
+      // installation (`BACKUP_ROOT`) and no setting here changes it (UX-29).
+      "Wann automatisch gesichert wird und wie lange Sicherungen aufbewahrt werden. Der Speicherort wird bei der Installation festgelegt. Verlauf und Einspielen stehen unter „Sicherungen“.",
     permissions: ["system.backup"],
     source: { kind: "settings", groups: ["Sicherung"], panel: true },
   },
@@ -238,7 +240,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     zone: "Betrieb",
     title: "Bewerbungen",
     description:
-      "Wohin Eingänge gemeldet werden, wie gross eine Datei sein darf und wie lange Unterlagen aufbewahrt werden.",
+      // "Wohin Eingänge gemeldet werden" described `applications.notifyEmail`,
+      // which was retired in P2-3: who hears about a new application follows
+      // the permission to read applications, not an address here (UX-29).
+      "Wie gross eine Datei sein darf und wie lange Unterlagen aufbewahrt werden. Über neue Bewerbungen informiert werden alle, die Bewerbungen lesen dürfen — das regeln die Rollen, nicht eine Adresse.",
     permissions: ["settings.read"],
     source: { kind: "settings", groups: ["Bewerbungen"] },
   },
@@ -257,7 +262,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     zone: "Betrieb",
     title: "Sicherheit",
     description:
-      "Sitzungsdauer und Zugriffsvorgaben. Sperrschwelle und Passwortlänge stehen noch im Code — siehe docs/ENTERPRISE_ROADMAP.md, P1-5.",
+      // The old sentence said the lockout and password numbers were "noch im
+      // Code" and sent the reader to a roadmap file. Both became settings in
+      // P1-5; the one true limit is the floor, stated here (UX-29).
+      "Sitzungsdauer, Sperrung nach Fehlversuchen und Passwortlänge. Diese Werte können die festen Mindestanforderungen verschärfen, aber nicht lockern — ein zu niedriger Wert wird beim Lesen auf das Minimum angehoben.",
     permissions: ["settings.read"],
     source: { kind: "settings", groups: ["Sicherheit"] },
   },

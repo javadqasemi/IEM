@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { Button, Card, ErrorState, Skeleton } from "@/shared/ui/primitives";
 import { ConfirmDialog } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
@@ -113,7 +114,7 @@ export function MailSection() {
           void removeSecret("mail.smtpPassword")
             .then(
               () => toast.success("Entfernt", "Das SMTP-Passwort wurde gelöscht."),
-              (err: Error) => toast.error("Entfernen fehlgeschlagen", err.message),
+              (err: unknown) => toast.error("Entfernen fehlgeschlagen", toFailure(err).message),
             )
             .finally(() => {
               setRemoving(false);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import { useAuth } from "@/core/auth";
 import {
   BOARD_COLUMNS,
@@ -94,7 +94,7 @@ export function TaskBoard({
         move, because the reader has already started reading the new column.
       */
       const message =
-        err instanceof ApiError ? err.message : "Die Karte konnte nicht verschoben werden.";
+        toFailure(err).message;
       toast.error(message);
     } finally {
       setBusyId(null);

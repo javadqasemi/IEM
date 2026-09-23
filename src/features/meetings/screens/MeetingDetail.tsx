@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { toFailure } from "@/core/api";
 import { Link, navigate, useRoute } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import { usePageTitle } from "@/core/router";
@@ -246,7 +247,7 @@ function StatusButton({ meeting }: { meeting: Meeting }) {
                   // The server's refusal, verbatim: "Für keine eingeladene
                   // Person ist die Anwesenheit erfasst." says what to do next,
                   // which nothing this screen could compose would.
-                  setError(err instanceof Error ? err.message : "Nicht möglich.");
+                  setError(toFailure(err).message);
                 } finally {
                   setBusy(false);
                 }
@@ -359,7 +360,7 @@ function SendMinutesButton({ meeting }: { meeting: Meeting }) {
             await mutations.sendMinutes(meeting.id);
             toast.success("Protokoll versandt");
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+            toast.error(toFailure(err).message);
           } finally {
             setBusy(false);
             setOpen(false);
@@ -414,7 +415,7 @@ function DeleteButton({ meeting }: { meeting: Meeting }) {
             toast.success("Gelöscht");
             navigate("/sitzungen");
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+            toast.error(toFailure(err).message);
           } finally {
             setBusy(false);
             setOpen(false);

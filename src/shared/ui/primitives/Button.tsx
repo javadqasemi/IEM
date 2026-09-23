@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useId,
   type AnchorHTMLAttributes,
   type ButtonHTMLAttributes,
   type ReactNode,
@@ -34,6 +35,19 @@ type ButtonBase = {
   trailing?: ReactNode;
   /** Shows a spinner and disables the control. */
   busy?: boolean;
+  /**
+   * Why the button cannot be pressed right now, when that is knowable.
+   *
+   * A `disabled` button with no reason is the dashboard's most common
+   * question — "why can I not save?" — and the platform makes it worse: a
+   * disabled `<button>` cannot be focused, so a keyboard or screen-reader user
+   * never even learns it is there. With a reason, the button is
+   * `aria-disabled` instead: it stays in the tab order, a press does nothing,
+   * the reason is its accessible description and its tooltip. A dialog puts
+   * the same sentence in its footer through `Modal`'s `hint`, because a
+   * tooltip is not where an essential explanation should live on its own.
+   */
+  disabledReason?: string | null;
   className?: string;
   children?: ReactNode;
 };
@@ -50,12 +64,24 @@ type ButtonAsLink = ButtonBase &
  */
 export const Button = forwardRef<HTMLButtonElement & HTMLAnchorElement, ButtonAsButton | ButtonAsLink>(
   function Button(
-    { variant = "secondary", size = "md", leading, trailing, busy, className, children, ...rest },
+    {
+      variant = "secondary",
+      size = "md",
+      leading,
+      trailing,
+      busy,
+      disabledReason,
+      className,
+      children,
+      ...rest
+    },
     ref,
   ) {
+    const reasonId = useId();
     const classes = cn(
       "inline-flex select-none items-center justify-center rounded-md font-medium transition-colors",
       "disabled:pointer-events-none disabled:opacity-50",
+      "aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
       BUTTON_VARIANTS[variant],
       BUTTON_SIZES[size],
       className,
@@ -70,17 +96,56 @@ export const Button = forwardRef<HTMLButtonElement & HTMLAnchorElement, ButtonAs
 
     if ("href" in rest && rest.href !== undefined) {
       return (
-        <a ref={ref} className={classes} {...(rest as AnchorHTMLAttributes<HTMLAnchorElement>)}>
+        <a
+          ref={ref}
+          className={classes}
+          data-variant={variant}
+          {...(rest as AnchorHTMLAttributes<HTMLAnchorElement>)}
+        >
           {content}
         </a>
       );
     }
     const buttonProps = rest as ButtonHTMLAttributes<HTMLButtonElement>;
+
+    /*
+      Blocked with a reason: focusable, announced, inert. `busy` is not a
+      reason — something is already happening, and the spinner says so.
+    */
+    if (buttonProps.disabled && disabledReason && !busy) {
+      const { onClick: _ignored, disabled: _disabled, ...inert } = buttonProps;
+      return (
+        <>
+          <button
+            ref={ref}
+            type={inert.type ?? "button"}
+            className={classes}
+            data-variant={variant}
+            data-disabled-reason={disabledReason}
+            {...inert}
+            aria-disabled="true"
+            aria-describedby={reasonId}
+            title={disabledReason}
+            onClick={(e) => {
+              // A submit button must not submit its form while blocked.
+              e.preventDefault();
+            }}
+          >
+            {content}
+          </button>
+          <span id={reasonId} className="sr-only">
+            {disabledReason}
+          </span>
+        </>
+      );
+    }
+
     return (
       <button
         ref={ref}
         type={buttonProps.type ?? "button"}
         className={classes}
+        data-variant={variant}
         {...buttonProps}
         disabled={buttonProps.disabled || busy}
       >

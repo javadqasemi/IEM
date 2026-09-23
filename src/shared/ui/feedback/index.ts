@@ -13,3 +13,4 @@ export { ErrorBoundary, RootErrorBoundary } from "./ErrorBoundary";
  * for. A primitive assumes nothing, and this one assumes there is a module.
  */
 export { ModulePlaceholder, type ModuleStatus } from "./ModulePlaceholder";
+export { ConflictNotice, CONFLICT_BLOCKS_SAVE } from "./ConflictNotice";

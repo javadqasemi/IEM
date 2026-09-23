@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/shared/utils/cn";
 import { formatBytes, formatDateTime } from "@/shared/utils/format";
 import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
-import { Checkbox, Field, Input, SearchInput, Select, Textarea } from "@/shared/ui/forms";
+import { Checkbox, Field, Input, ListInput, SearchInput, Select, Textarea } from "@/shared/ui/forms";
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
 import { BarChart } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
@@ -121,10 +121,17 @@ export function MediaPage() {
         ) : null}
       </div>
 
-      {list.error ? <ErrorState message={list.error} onRetry={list.reload} /> : null}
-
-      {/* ---- Grid ---- */}
-      {list.loading ? (
+      {/* ---- Grid ----
+          An error replaces the grid rather than sitting above an empty state:
+          "Noch keine Dateien" under a failed request is the error-as-empty
+          reading (UX-21). */}
+      {list.error && !rows.length ? (
+        <ErrorState
+          title="Die Medien konnten nicht geladen werden."
+          message={list.error}
+          onRetry={list.reload}
+        />
+      ) : list.loading ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
           {Array.from({ length: 12 }).map((_, i) => (
             <Skeleton key={i} className="aspect-square rounded-lg" />
@@ -209,14 +216,30 @@ export function MediaPage() {
 
       <ConfirmDialog
         open={confirmBulk}
-        onClose={() => setConfirmBulk(false)}
+        onClose={() => {
+          setConfirmBulk(false);
+          bulkDelete.reset();
+        }}
         busy={bulkDelete.busy}
         destructive
         title={`${selection.size} Dateien löschen?`}
         confirmLabel="Löschen"
-        message="Die Dateien werden aus der Bibliothek entfernt. Inhalte, die noch darauf verweisen, zeigen dann ein fehlendes Bild — prüfen Sie das vor dem Veröffentlichen."
+        message={
+          <>
+            <p>
+              Die Dateien werden aus der Bibliothek entfernt. Inhalte, die noch darauf verweisen,
+              zeigen dann ein fehlendes Bild — prüfen Sie das vor dem Veröffentlichen.
+            </p>
+            {bulkDelete.error ? (
+              <p role="alert" className="mt-3 font-medium text-brand-bronze">
+                {bulkDelete.error}
+              </p>
+            ) : null}
+          </>
+        }
         onConfirm={async () => {
-          await bulkDelete.run([...selection]);
+          const result = await bulkDelete.run([...selection]);
+          if (!result.ok) return;
           toast.success("Gelöscht", `${selection.size} Datei(en) entfernt.`);
           setSelection(new Set());
           setConfirmBulk(false);
@@ -355,19 +378,28 @@ export function UploadDialog({
     if (copyright) form.append("copyright", copyright);
 
     const result = await upload.run(form);
-    if (!result) return;
-    if (result.deduplicated) {
+    // The refusal is rendered in the dialog from `upload.error`; the chosen
+    // file and the alt text stay, so a retry is one click.
+    if (!result.ok) return;
+    const asset = result.data;
+    if (asset.deduplicated) {
       toast.push({
         kind: "info",
         title: "Datei war bereits vorhanden",
-        description: `Es wurde die bestehende Datei „${result.filename}“ verwendet, statt eine Kopie anzulegen.`,
+        description: `Es wurde die bestehende Datei „${asset.filename}“ verwendet, statt eine Kopie anzulegen.`,
       });
     } else {
-      toast.success("Hochgeladen", result.filename);
+      toast.success("Hochgeladen", asset.filename);
     }
-    onDone(result);
+    onDone(asset);
     onClose();
   }
+
+  const uploadBlocked = !file
+    ? "Zuerst eine Datei wählen."
+    : needsAlt
+      ? "Alternativtext fehlt — oder das Bild als dekorativ markieren."
+      : null;
 
   return (
     <Modal
@@ -376,12 +408,19 @@ export function UploadDialog({
       title="Datei hochladen"
       description="JPEG, PNG, WebP, AVIF, GIF, SVG oder PDF, bis 25 MB."
       busy={upload.busy}
+      hint={uploadBlocked}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={upload.busy}>
             Abbrechen
           </Button>
-          <Button variant="primary" onClick={submit} busy={upload.busy} disabled={!file || needsAlt}>
+          <Button
+            variant="primary"
+            onClick={submit}
+            busy={upload.busy}
+            disabled={Boolean(uploadBlocked)}
+            disabledReason={uploadBlocked}
+          >
             Hochladen
           </Button>
         </>
@@ -547,7 +586,9 @@ function AssetDetailDialog({
                 variant="primary"
                 busy={update.busy}
                 onClick={async () => {
-                  await update.run(asset.id, form);
+                  const result = await update.run(asset.id, form);
+                  // The refusal is shown below the fields; the edits stay.
+                  if (!result.ok) return;
                   toast.success("Gespeichert");
                   onChanged();
                   onClose();
@@ -606,7 +647,7 @@ function AssetDetailDialog({
                     const form = new FormData();
                     form.append("file", file);
                     const result = await replace.run(asset.id, form);
-                    if (result) {
+                    if (result.ok) {
                       toast.success(
                         "Ersetzt",
                         "Alle Verweise zeigen jetzt auf die neue Datei. Die bisherige bleibt als Version erhalten.",
@@ -689,17 +730,18 @@ function AssetDetailDialog({
               optional
               hint="Kommagetrennt. Erleichtert das Wiederfinden."
             >
-              <Input
+              <ListInput
                 id="detail-tags"
-                value={(form.tags ?? []).join(", ")}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    tags: e.target.value.split(",").map((t) => t.trim()).filter(Boolean),
-                  })
-                }
+                value={form.tags ?? []}
+                onChange={(tags) => setForm({ ...form, tags })}
               />
             </Field>
+
+            {update.error ? (
+              <p role="alert" className="text-[13px] font-medium text-brand-bronze">
+                {update.error}
+              </p>
+            ) : null}
 
             {asset.srcset ? (
               <div className="flex flex-col gap-1.5">
@@ -713,14 +755,30 @@ function AssetDetailDialog({
 
       <ConfirmDialog
         open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
+        onClose={() => {
+          setConfirmDelete(false);
+          remove.reset();
+        }}
         busy={remove.busy}
         destructive
         title="Datei löschen?"
         confirmLabel="Löschen"
-        message={`„${asset.filename}“ wird aus der Bibliothek entfernt. Inhalte, die noch darauf verweisen, zeigen danach ein fehlendes Bild.`}
+        message={
+          <>
+            <p>
+              „{asset.filename}“ wird aus der Bibliothek entfernt. Inhalte, die noch darauf
+              verweisen, zeigen danach ein fehlendes Bild.
+            </p>
+            {remove.error ? (
+              <p role="alert" className="mt-3 font-medium text-brand-bronze">
+                {remove.error}
+              </p>
+            ) : null}
+          </>
+        }
         onConfirm={async () => {
-          await remove.run(asset.id);
+          const result = await remove.run(asset.id);
+          if (!result.ok) return;
           toast.success("Gelöscht", asset.filename);
           setConfirmDelete(false);
           onChanged();

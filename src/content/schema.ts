@@ -492,6 +492,14 @@ export type BewerbungCopy = {
   doneMehrereDateien: string;
   /** `{dateien}`, `{groesse}`, `{email}`. */
   doneText: string;
+  /**
+   * `{n}`, `{kontakt}`. Shown when the server did not keep every file.
+   *
+   * Optional because it arrived after the published snapshot did: a snapshot
+   * published before it has no such key, and the dialog falls back to the
+   * default rather than rendering `undefined` (UX-43).
+   */
+  doneUebersprungen?: string;
 
   mailTitel: string;
   mailText: string;

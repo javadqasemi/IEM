@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError } from "@/core/api";
+import { ApiError, FAILURE_MESSAGES } from "@/core/api";
 import { formReducerForTest as reducer } from "./useForm";
 
 /**
@@ -133,7 +133,8 @@ describe("what a failed submit produces", () => {
   });
 
   it("survives something that is not an Error at all", () => {
-    expect(reducer.errorsFrom("kaputt")).toEqual({ errors: {}, error: "Unbekannter Fehler." });
+    // The one fallback sentence every failure path shares (`core/api/failure.ts`).
+    expect(reducer.errorsFrom("kaputt")).toEqual({ errors: {}, error: FAILURE_MESSAGES.unknown });
   });
 });
 

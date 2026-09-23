@@ -24,6 +24,7 @@ import {
 import {
   publishEffect,
   refuseCancelSchedule,
+  refuseReorder,
   refuseSchedule,
   refuseStalePublish,
   refuseTransition,
@@ -423,8 +424,23 @@ export class ContentService {
     return created;
   }
 
-  /** Bulk reorder, applied in one transaction so the list is never half-sorted. */
+  /**
+   * Bulk reorder, applied in one transaction so the list is never half-sorted.
+   *
+   * Refused unless `ids` is exactly the live collection — see
+   * `refuseReorder`. A partial or foreign set used to be applied as sent.
+   */
   async reorder(typeKey: string, ids: string[], actor: AuthUser, ctx: Ctx) {
+    const live = await this.prisma.contentEntry.findMany({
+      where: { typeKey, deletedAt: null },
+      select: { id: true },
+    });
+    const refusal = refuseReorder(
+      ids,
+      live.map((row) => row.id),
+    );
+    if (refusal) throw new BadRequestException(refusal);
+
     await this.prisma.$transaction(
       ids.map((id, position) =>
         this.prisma.contentEntry.update({

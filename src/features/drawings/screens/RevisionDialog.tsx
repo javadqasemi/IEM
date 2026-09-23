@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import {
   REVISION_REASON_OPTIONS,
   RevisionBadge,
@@ -133,8 +133,9 @@ export function RevisionDialog({
       });
       onCreated(created);
     } catch (err) {
-      if (err instanceof ApiError && err.fields) setErrors(err.fields);
-      setError(err instanceof Error ? err.message : "Nicht möglich.");
+      const failure = toFailure(err);
+      setErrors(failure.fields);
+      setError(failure.message);
     } finally {
       setBusy(false);
     }

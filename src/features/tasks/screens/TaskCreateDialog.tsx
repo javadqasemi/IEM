@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import { useAuth } from "@/core/auth";
 import { PRIORITY_OPTIONS, type Priority } from "@/entities/project";
 import type { TaskDetail } from "@/entities/task";
@@ -114,12 +114,15 @@ export function TaskCreateDialog({
       });
       onCreated(task);
     } catch (err) {
-      if (err instanceof ApiError && err.fields) setErrors(err.fields);
-      setError(err instanceof Error ? err.message : "Anlegen nicht möglich.");
+      const failure = toFailure(err);
+      setErrors(failure.fields);
+      setError(failure.message);
     } finally {
       setBusy(false);
     }
   }
+
+  const TITLE_TOO_SHORT = "Der Titel braucht mindestens zwei Zeichen.";
 
   return (
     <Modal
@@ -133,13 +136,19 @@ export function TaskCreateDialog({
           : "Nur der Titel ist Pflicht. Projekt, Termin und Zuständigkeit können später dazukommen."
       }
       size="lg"
+      hint={title.trim().length < 2 ? TITLE_TOO_SHORT : null}
       footer={
         <>
           <div className="flex-1" />
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={() => void submit()} busy={busy} disabled={title.trim().length < 2}>
+          <Button
+            onClick={() => void submit()}
+            busy={busy}
+            disabled={title.trim().length < 2}
+            disabledReason={TITLE_TOO_SHORT}
+          >
             Anlegen
           </Button>
         </>

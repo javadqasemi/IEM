@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import {
   DRAWING_FORMAT_OPTIONS,
   DRAWING_TYPE_OPTIONS,
@@ -119,12 +119,24 @@ export function DrawingCreateDialog({
       });
       onCreated(drawing);
     } catch (err) {
-      if (err instanceof ApiError && err.fields) setErrors(err.fields);
-      setError(err instanceof Error ? err.message : "Anlegen nicht möglich.");
+      const failure = toFailure(err);
+      setErrors(failure.fields);
+      setError(failure.message);
     } finally {
       setBusy(false);
     }
   }
+
+  /** Why "Anlegen" cannot be pressed yet, in the order the form asks. */
+  const blocked = !number.trim()
+    ? "Plannummer fehlt."
+    : title.trim().length < 2
+      ? "Der Titel braucht mindestens zwei Zeichen."
+      : !projectId && !project
+        ? "Projekt wählen."
+        : !discipline
+          ? "Gewerk wählen."
+          : null;
 
   return (
     <Modal
@@ -134,6 +146,7 @@ export function DrawingCreateDialog({
       title="Neuer Plan"
       description="Nummer, Titel, Projekt und Gewerk. Die erste Revision kommt mit der Datei."
       size="lg"
+      hint={blocked}
       footer={
         <>
           <div className="flex-1" />
@@ -143,7 +156,8 @@ export function DrawingCreateDialog({
           <Button
             onClick={() => void submit()}
             busy={busy}
-            disabled={!ready || (!projectId && !project)}
+            disabled={!ready || Boolean(blocked)}
+            disabledReason={blocked}
           >
             Anlegen
           </Button>

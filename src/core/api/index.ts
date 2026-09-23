@@ -27,6 +27,9 @@ export { download, filenameFrom } from "./download";
 export {
   useQuery,
   invalidate,
+  settle,
+  invalidateAround,
+  revalidate,
   prime,
   peek,
   clearQueryCache,
@@ -35,6 +38,15 @@ export {
   type QueryKey,
   type QueryState,
 } from "./query";
+
+export {
+  toFailure,
+  attempt,
+  FAILURE_MESSAGES,
+  type FailureKind,
+  type MutationFailure,
+  type MutationResult,
+} from "./failure";
 
 export {
   listQuery,

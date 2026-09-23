@@ -113,7 +113,27 @@ export function ContentEditorPage({
     setDirty(true);
   };
 
-  if (loaded.error) return <ErrorState message={loaded.error} onRetry={loaded.reload} />;
+  if (loaded.error) {
+    // Inside the page's frame, with a way back — not a bare error where the
+    // editor was (UX-36).
+    return (
+      <>
+        <PageHeader
+          title="Eintrag"
+          actions={
+            <Button variant="ghost" onClick={() => navigate(`/inhalte/${typeKey}`)}>
+              Zurück
+            </Button>
+          }
+        />
+        <ErrorState
+          title="Der Eintrag konnte nicht geladen werden."
+          message={loaded.error}
+          onRetry={loaded.reload}
+        />
+      </>
+    );
+  }
   if (types.loading || (loaded.loading && !isNew)) {
     return (
       <div className="flex flex-col gap-6">
@@ -132,14 +152,16 @@ export function ContentEditorPage({
 
   async function onSave() {
     const result = await save.run();
-    if (!result) return;
+    // The failure is rendered below the status line from `save.error`, with
+    // the field messages beside their fields; the draft is untouched.
+    if (!result.ok) return;
     setDirty(false);
     setNote("");
     toast.success(
       isNew ? "Angelegt" : "Gespeichert",
       "Als Entwurf gesichert. Sichtbar wird die Änderung erst mit der Veröffentlichung.",
     );
-    if (isNew) navigate(`/inhalte/${typeKey}/${(result as EntryRow).id}`, { replace: true });
+    if (isNew) navigate(`/inhalte/${typeKey}/${(result.data as EntryRow).id}`, { replace: true });
     else loaded.reload();
   }
 
@@ -175,12 +197,26 @@ export function ContentEditorPage({
                 </Button>
               ) : null}
               {!isNew && canEdit && can("content.submit") && status === "DRAFT" ? (
-                <Button variant="secondary" onClick={() => setSubmitOpen(true)} disabled={dirty}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    submit.reset();
+                    setSubmitOpen(true);
+                  }}
+                  disabled={dirty}
+                  disabledReason="Erst speichern — eingereicht wird der gespeicherte Stand."
+                >
                   Zur Freigabe
                 </Button>
               ) : null}
               {canEdit ? (
-                <Button variant="primary" onClick={onSave} busy={save.busy} disabled={!dirty && !isNew}>
+                <Button
+                  variant="primary"
+                  onClick={onSave}
+                  busy={save.busy}
+                  disabled={!dirty && !isNew}
+                  disabledReason="Keine Änderungen zu speichern."
+                >
                   {isNew ? "Anlegen" : "Speichern"}
                 </Button>
               ) : null}
@@ -309,7 +345,11 @@ export function ContentEditorPage({
           canRollback={can("content.rollback")}
           busy={rollback.busy}
           onRollback={async (version) => {
-            await rollback.run(entry.id, version);
+            const result = await rollback.run(entry.id, version);
+            if (!result.ok) {
+              toast.error("Nicht zurückgesetzt", result.failure.message);
+              return;
+            }
             toast.success("Zurückgesetzt", `Version ${version} wurde als neue Version übernommen.`);
             setShowVersions(false);
             loaded.reload();
@@ -321,8 +361,11 @@ export function ContentEditorPage({
         open={submitOpen}
         onClose={() => setSubmitOpen(false)}
         busy={submit.busy}
+        error={submit.error}
         onSubmit={async (message) => {
-          await submit.run(entryId, message);
+          const result = await submit.run(entryId, message);
+          // A refusal stays in the dialog, where the message was typed.
+          if (!result.ok) return;
           toast.success("Eingereicht", "Der Eintrag liegt zur Freigabe bereit.");
           setSubmitOpen(false);
           loaded.reload();
@@ -528,11 +571,14 @@ function SubmitDialog({
   onClose,
   onSubmit,
   busy,
+  error,
 }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (message: string) => void;
   busy: boolean;
+  /** Why the last attempt was refused — shown in the dialog, not in a toast. */
+  error: string | null;
 }) {
   const [message, setMessage] = useState("");
   useEffect(() => {
@@ -558,6 +604,14 @@ function SubmitDialog({
         </>
       }
     >
+      {error ? (
+        <p
+          role="alert"
+          className="mb-4 rounded-md bg-brand-bronze/[0.08] px-4 py-3 text-[13px] font-medium text-brand-bronze ring-1 ring-brand-bronze/25"
+        >
+          {error}
+        </p>
+      ) : null}
       <Field
         label="Nachricht an die prüfende Person"
         htmlFor="submit-message"

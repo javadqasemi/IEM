@@ -1,4 +1,5 @@
 ﻿import { Suspense, useId, useMemo, useState } from "react";
+import { toFailure } from "@/core/api";
 import { cn } from "@/shared/utils/cn";
 import { formatDate, formatDateTime, relativeTime } from "@/shared/utils/format";
 import {
@@ -6,7 +7,6 @@ import {
   Button,
   Card,
   EmptyState,
-  ErrorState,
   PageHeader,
   Skeleton,
 } from "@/shared/ui/primitives";
@@ -150,7 +150,7 @@ export function AuditPage() {
               to: isoEnd(range.to),
             })
             .catch((err: unknown) =>
-              toast.error(err instanceof Error ? err.message : "Der Download ist fehlgeschlagen."),
+              toast.error(toFailure(err).message),
             )
             .finally(() => setExporting(false));
         },
@@ -235,8 +235,6 @@ export function AuditPage() {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.reload} />;
-
   return (
     <>
       <PageHeader
@@ -250,8 +248,10 @@ export function AuditPage() {
           rows={list.data?.items ?? []}
           columns={columns}
           rowKey={(r) => r.id}
-          onRowClick={(r) => setDetail(r)}
+          open={{ onOpen: (r) => setDetail(r) }}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.reload}
           caption="Audit-Log"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}
@@ -512,8 +512,8 @@ export function ProfilePage() {
                 return;
               }
               setMismatch("");
-              const ok = await change.run(current, next);
-              if (ok !== null && !change.error) {
+              const result = await change.run(current, next);
+              if (result.ok) {
                 toast.success("Passwort geändert", "Andere Sitzungen wurden abgemeldet.");
                 setCurrent("");
                 setNext("");
@@ -612,7 +612,17 @@ export function ProfilePage() {
       </Suspense>
 
       <Card title="Ihre letzten Aktionen" bodyClassName="px-5 py-1">
-        {activity.loading ? (
+        {activity.error ? (
+          /*
+            Not an empty feed. Most roles hold no `audit.read`, so the request
+            is refused — and an empty list read as "you have done nothing",
+            which is false for everybody who has ever saved anything (UX-31;
+            the self-scoped endpoint that fixes it for real is later work).
+          */
+          <p className="py-4 text-[13px] leading-relaxed text-muted">
+            Ihr Verlauf lässt sich hier nicht anzeigen: {activity.error}
+          </p>
+        ) : activity.loading ? (
           <Skeleton className="h-32" />
         ) : (
           <ActivityFeed

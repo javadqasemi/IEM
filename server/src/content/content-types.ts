@@ -998,6 +998,14 @@ export const CONTENT_TYPES: ContentTypeDef[] = [
         help: "Verspricht eine Bestätigungsmail. Nur zutreffend, wenn der Upload-Endpunkt eine sendet.",
       },
       {
+        // Optional: entries saved before it existed have no value, and the
+        // form falls back to the built-in sentence (UX-43).
+        name: "doneUebersprungen",
+        label: "Erfolg — nicht übernommene Dateien",
+        type: "textarea",
+        help: "Erscheint nur, wenn der Server Dateien abgelehnt hat. {n} = Anzahl, {kontakt} = die allgemeine E-Mail-Adresse.",
+      },
+      {
         name: "mailTitel",
         label: "E-Mail-Weg — Titel",
         type: "text",

@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { Button } from "@/shared/ui/primitives";
 import { Field, OtpInput } from "@/shared/ui/forms";
 import { Modal } from "@/shared/ui/overlays";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import { useMfaMutations } from "../hooks/useMfa";
 import { QrCode } from "./QrCode";
 import { RecoveryCodesPanel } from "./RecoveryCodesPanel";
@@ -101,7 +101,7 @@ export function EnrolDialog({
       // A 503 here is the honest one: `MFA_ENCRYPTION_KEY` is not configured
       // on this server. The server's message names the variable, which is
       // what an operator needs and what a user needs to forward.
-      setError(err instanceof ApiError ? err.message : "Die Einrichtung konnte nicht gestartet werden.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }
@@ -116,7 +116,7 @@ export function EnrolDialog({
       setCodes(await verify(code));
       setStep("codes");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Dieser Code stimmt nicht.");
+      setError(toFailure(err).message);
       // Spent either way — a correct code cannot be presented twice and a
       // wrong one has to be retyped. Clearing saves a select-all.
       setCode("");

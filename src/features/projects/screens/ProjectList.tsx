@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { navigate } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import { formatDate, formatMoneyShort } from "@/shared/utils/format";
@@ -8,7 +9,6 @@ import {
   Card,
   DownloadButton,
   EmptyState,
-  ErrorState,
   PageHeader,
 } from "@/shared/ui/primitives";
 import { SearchInput } from "@/shared/ui/forms";
@@ -209,8 +209,6 @@ export function ProjectList() {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.refetch} />;
-
   return (
     <>
       <PageHeader
@@ -279,7 +277,7 @@ export function ProjectList() {
                     setSelection(new Set());
                     toast.success(`${changed} geändert`);
                   } catch (err) {
-                    toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+                    toast.error(toFailure(err).message);
                   } finally {
                     setBusy(false);
                   }
@@ -298,8 +296,10 @@ export function ProjectList() {
           rowKey={(r) => r.id}
           // A route, not a drawer. A project has fourteen tabs and a URL people
           // paste into e-mails; a panel over the list could carry neither.
-          onRowClick={(r) => navigate(`/projekte/${r.id}`)}
+          open={{ href: (r) => `#/projekte/${r.id}` }}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.refetch}
           caption="Projekte"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}

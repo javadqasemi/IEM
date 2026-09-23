@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatBytes, formatDate, formatDateTime } from "@/shared/utils/format";
-import { Badge, Button, DownloadButton, Skeleton } from "@/shared/ui/primitives";
+import { Badge, Button, DownloadButton, ErrorState, Skeleton } from "@/shared/ui/primitives";
 import { Pair } from "@/shared/ui/data";
 import { Field, Select, Textarea } from "@/shared/ui/forms";
 import { ConfirmDialog, Modal } from "@/shared/ui/overlays";
@@ -36,7 +36,7 @@ export function ApplicationDetail({
 }) {
   const { can } = useAuth();
   const toast = useToast();
-  const { data: application, loading } = useApplication(id);
+  const { data: application, loading, error, refetch } = useApplication(id);
   const mutations = useApplicationMutations();
 
   const [status, setStatus] = useState<ApplicationStatus>("NEW");
@@ -57,6 +57,23 @@ export function ApplicationDetail({
   }, [application?.id]);
 
   if (!id) return null;
+
+  /*
+    A failed load is not a loading state. It used to render the skeleton for
+    ever — `!application` is true whether the dossier is on its way or was
+    refused — so a 403 or a deleted dossier looked like a slow one (UX-21).
+  */
+  if (error && !application) {
+    return (
+      <Modal open onClose={onClose} title="Bewerbung" size="lg">
+        <ErrorState
+          title="Die Bewerbung konnte nicht geladen werden."
+          message={error}
+          onRetry={refetch}
+        />
+      </Modal>
+    );
+  }
 
   if (loading || !application) {
     return (
@@ -101,8 +118,9 @@ export function ApplicationDetail({
                 variant="primary"
                 busy={update.busy}
                 onClick={async () => {
-                  const saved = await update.run(application.id, { status, note });
-                  if (!saved) return;
+                  const result = await update.run(application.id, { status, note });
+                  // The refusal is rendered above the fields from `update.error`.
+                  if (!result.ok) return;
                   onSaved();
                   onClose();
                 }}
@@ -241,9 +259,14 @@ export function ApplicationDetail({
           </>
         }
         onConfirm={async () => {
-          const done = await remove.run(application.id);
-          if (done === null && remove.error) {
-            toast.error(remove.error);
+          const result = await remove.run(application.id);
+          /*
+            `remove.error` read here was the value from before the call —
+            always `null` — so a refused deletion closed the dialog and
+            reported the dossier as gone while it was still there.
+          */
+          if (!result.ok) {
+            toast.error("Nicht gelöscht", result.failure.message);
             return;
           }
           setConfirmDelete(false);

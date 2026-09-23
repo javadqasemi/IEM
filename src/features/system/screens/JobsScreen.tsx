@@ -236,6 +236,8 @@ export function JobsScreen() {
                 rows={rows}
                 columns={columns}
                 rowKey={(job) => job.id}
+                error={jobs.error}
+                onRetry={jobs.refetch}
                 caption="Hintergrundaufgaben"
               />
               {jobs.data.pages > 1 ? (

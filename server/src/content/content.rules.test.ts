@@ -8,6 +8,7 @@ import {
   canTransition,
   publishEffect,
   refuseCancelSchedule,
+  refuseReorder,
   refuseSchedule,
   refuseStalePublish,
   refuseTransition,
@@ -265,5 +266,31 @@ describe("what the next publish would do to one entry", () => {
     // the publish neither adds nor removes it.
     expect(publishEffect({ ...base, status: WorkflowState.PUBLISHED, hasPublishedData: true }))
       .toBe("NONE");
+  });
+});
+
+describe("refuseReorder — an order is the whole collection, once each", () => {
+  const live = ["a", "b", "c"];
+
+  it("accepts the live set in any order", () => {
+    expect(refuseReorder(["c", "a", "b"], live)).toBeNull();
+  });
+
+  it("refuses one page of a longer list", () => {
+    // The bug: page one numbered 0..n, page two numbered 0..n again.
+    expect(refuseReorder(["b", "a"], live)).toMatch(/fehlt/);
+  });
+
+  it("refuses an id from another type, or a deleted one", () => {
+    expect(refuseReorder(["a", "b", "c", "x"], live)).toMatch(/gehört nicht/);
+    expect(refuseReorder(["a", "b", "x"], live)).toMatch(/gehört nicht/);
+  });
+
+  it("refuses a duplicate, which would give two entries one slot", () => {
+    expect(refuseReorder(["a", "a", "b", "c"], live)).toMatch(/mehrfach/);
+  });
+
+  it("refuses an empty order", () => {
+    expect(refuseReorder([], live)).not.toBeNull();
   });
 });

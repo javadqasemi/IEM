@@ -7,6 +7,7 @@
  */
 export { Field } from "./Field";
 export { Input, Textarea, Select, Checkbox, Toggle, SearchInput } from "./inputs";
+export { ListInput, parseList, formatList } from "./ListInput";
 export { OtpInput, RecoveryCodeInput } from "./OtpInput";
 export { FieldRenderer } from "./FieldRenderer";
 export { Combobox, type ComboboxOption } from "./Combobox";

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import {
   Badge,
@@ -6,7 +7,6 @@ import {
   Card,
   DownloadButton,
   EmptyState,
-  ErrorState,
   PageHeader,
 } from "@/shared/ui/primitives";
 import { SearchInput } from "@/shared/ui/forms";
@@ -155,8 +155,6 @@ export function ApplicationList() {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.refetch} />;
-
   return (
     <>
       <PageHeader
@@ -238,7 +236,7 @@ export function ApplicationList() {
                     setSelection(new Set());
                     toast.success(`${changed} geändert`);
                   } catch (err) {
-                    toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+                    toast.error(toFailure(err).message);
                   } finally {
                     setBusy(false);
                   }
@@ -255,8 +253,10 @@ export function ApplicationList() {
           rows={list.data?.items ?? []}
           columns={columns}
           rowKey={(r) => r.id}
-          onRowClick={(r) => setOpenId(r.id)}
+          open={{ onOpen: (r) => setOpenId(r.id) }}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.refetch}
           caption="Bewerbungen"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}

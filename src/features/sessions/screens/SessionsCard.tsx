@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { toFailure } from "@/core/api";
 import { Button, Card, EmptyState, ErrorState, SkeletonTable } from "@/shared/ui/primitives";
 import { DataTable } from "@/shared/ui/data";
 import { ConfirmDialog } from "@/shared/ui/overlays";
@@ -56,17 +57,13 @@ export function SessionsCard({ onSignedOut }: { onSignedOut?: () => void }) {
     } catch (err) {
       // In place, not as a toast: the message names what to do about it and
       // the reader is still looking at the row it refers to.
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }
   }
 
   const columns = sessionColumns({ action: (s) => endButton(() => setPending(s)) });
-
-  if (sessions.error) {
-    return <ErrorState message={sessions.error} onRetry={sessions.refetch} />;
-  }
 
   return (
     <>
@@ -91,7 +88,12 @@ export function SessionsCard({ onSignedOut }: { onSignedOut?: () => void }) {
           </p>
         ) : null}
 
-        {sessions.loading && !sessions.data ? (
+        {sessions.error && !sessions.data ? (
+          // Inside the card, under its title — not in place of it (UX-36).
+          <div className="p-5">
+            <ErrorState message={sessions.error} onRetry={sessions.refetch} />
+          </div>
+        ) : sessions.loading && !sessions.data ? (
           <div className="p-5">
             <SkeletonTable rows={3} cols={5} />
           </div>
@@ -107,6 +109,8 @@ export function SessionsCard({ onSignedOut }: { onSignedOut?: () => void }) {
             rows={rows}
             columns={columns}
             rowKey={(s) => s.id}
+            error={sessions.error}
+            onRetry={sessions.refetch}
             caption="Aktive Sitzungen dieses Kontos"
           />
         )}

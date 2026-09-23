@@ -14,7 +14,6 @@ import {
   Card,
   DownloadButton,
   EmptyState,
-  ErrorState,
   PageHeader,
 } from "@/shared/ui/primitives";
 import { SearchInput } from "@/shared/ui/forms";
@@ -164,8 +163,6 @@ export function MeetingList() {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.refetch} />;
-
   return (
     <>
       <PageHeader
@@ -288,8 +285,10 @@ export function MeetingList() {
           rowKey={(r) => r.id}
           // A route, not a drawer — a protocol gets quoted, and a quote needs a
           // URL. See the note on `MeetingDetail`.
-          onRowClick={(r) => navigate(`/sitzungen/${r.id}`)}
+          open={{ href: (r) => `#/sitzungen/${r.id}` }}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.refetch}
           caption="Sitzungen"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}

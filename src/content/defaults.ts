@@ -1477,6 +1477,8 @@ export const bewerbung: BewerbungCopy = {
   doneMehrereDateien: "{n} Dateien",
   doneText:
     "{dateien} übermittelt ({groesse}). Eine Bestätigung geht an {email}. Wir melden uns innert weniger Tage.",
+  doneUebersprungen:
+    "{n} der gewählten Dateien konnte nicht übernommen werden, weil das Format nicht unterstützt wird. Bitte senden Sie sie per E-Mail an {kontakt}.",
 
   mailTitel: "Ihr Mailprogramm sollte jetzt offen sein.",
   mailText:

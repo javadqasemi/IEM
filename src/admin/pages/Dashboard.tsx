@@ -37,14 +37,25 @@ export function DashboardPage() {
   );
   const health = useAsync(() => (can("system.health") ? api.health() : Promise.resolve(null)), []);
 
-  // A genuine failure still gets an error state; a *refused* one does not,
-  // because for these roles it is the expected answer rather than a fault.
-  if (overview.error && mayReadOverview) {
-    return <ErrorState message={overview.error} onRetry={overview.reload} />;
-  }
+  /**
+   * What the next publish would change — the **same** question the publish
+   * screen asks, answered by the same endpoint.
+   *
+   * This page used to count `APPROVED` entries (`readyToPublish`), which is a
+   * different question with a blind spot the publish screen had already been
+   * fixed for: a deletion, a reordering and a hide never become `APPROVED`, so
+   * the home page said "nothing to publish" while a deleted colleague was
+   * still on the live site (UX-07). Two screens deriving "is the site up to
+   * date" two ways is how they came to disagree; now neither derives it.
+   */
+  const mayReadContent = can("content.read");
+  const pending = useAsync(
+    () => (mayReadContent ? api.pendingChanges() : Promise.resolve(null)),
+    [mayReadContent],
+  );
+  const areas = pending.data?.changed ? pending.data.changes.length : 0;
 
   const data = overview.data;
-  const ready = data?.content.readyToPublish ?? 0;
 
   return (
     <>
@@ -53,33 +64,47 @@ export function DashboardPage() {
         title={user?.name ?? "Dashboard"}
         description="Was seit Ihrem letzten Besuch passiert ist — und was auf eine Entscheidung wartet."
         actions={
-          can("content.publish") && ready > 0 ? (
+          can("content.publish") && areas > 0 ? (
             <Button variant="primary" href="#/veroeffentlichen" trailing={<span aria-hidden>→</span>}>
-              {ready} {ready === 1 ? "Eintrag" : "Einträge"} veröffentlichen
+              {areas} {areas === 1 ? "Bereich" : "Bereiche"} veröffentlichen
             </Button>
           ) : null
         }
       />
 
+      {/* A genuine failure still gets an error state — inside the page, under
+          its greeting, rather than in place of it (UX-36). A *refused* one
+          does not, because for those roles it is the expected answer. */}
+      {overview.error && mayReadOverview ? (
+        <ErrorState
+          title="Die Übersicht konnte nicht geladen werden."
+          message={overview.error}
+          onRetry={overview.reload}
+        />
+      ) : null}
+
       {/* ---- Waiting on someone ---- */}
-      {data && (data.content.inReview > 0 || ready > 0) ? (
-        <div className="flex flex-wrap items-center gap-4 rounded-lg bg-brand-navy px-5 py-4 text-inverse">
+      {(data && data.content.inReview > 0) || areas > 0 ? (
+        <div
+          className="flex flex-wrap items-center gap-4 rounded-lg bg-brand-navy px-5 py-4 text-inverse"
+          data-testid="dashboard-waiting"
+        >
           <p className="min-w-0 flex-1 text-[14px] leading-snug">
-            {data.content.inReview > 0 ? (
+            {data && data.content.inReview > 0 ? (
               <>
                 <span className="font-medium">{data.content.inReview}</span>{" "}
                 {data.content.inReview === 1 ? "Eintrag wartet" : "Einträge warten"} auf Freigabe.{" "}
               </>
             ) : null}
-            {ready > 0 ? (
+            {areas > 0 ? (
               <>
-                <span className="font-medium">{ready}</span>{" "}
-                {ready === 1 ? "ist freigegeben und" : "sind freigegeben und"} noch nicht
-                veröffentlicht.
+                <span className="font-medium">{areas}</span>{" "}
+                {areas === 1 ? "Bereich weicht" : "Bereiche weichen"} von der Website ab und{" "}
+                {areas === 1 ? "wird" : "werden"} mit dem nächsten Veröffentlichen aktualisiert.
               </>
             ) : null}
           </p>
-          {data.content.inReview > 0 && can("content.approve") ? (
+          {data && data.content.inReview > 0 && can("content.approve") ? (
             // `subtle` on the navy panel: the admin `Button` has no inverse
             // variant, and a white-on-navy chip is what this needs.
             <Button
@@ -306,7 +331,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {!overview.loading && !data ? (
+      {!overview.loading && !data && !overview.error ? (
         mayReadOverview ? (
           <EmptyState
             title="Keine Daten"

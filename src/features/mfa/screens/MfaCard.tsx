@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { Badge, Button, Card, ErrorState, Skeleton } from "@/shared/ui/primitives";
 import { Modal, ReauthenticationDialog } from "@/shared/ui/overlays";
 import { Pair } from "@/shared/ui/data";
@@ -84,7 +85,7 @@ export function MfaCard({ account }: { account: string }) {
     } catch (err) {
       // In place rather than as a toast: the message names what to do about
       // it and the reader is still looking at the card it belongs to.
-      setError(err instanceof Error ? err.message : "Das hat nicht geklappt.");
+      setError(toFailure(err).message);
     } finally {
       setConfirming(null);
     }

@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { toFailure } from "@/core/api";
 import { Badge, Button, Card } from "@/shared/ui/primitives";
 import { Field, Input } from "@/shared/ui/forms";
 import { useToast } from "@/shared/ui/feedback";
@@ -79,7 +80,7 @@ export function MailDiagnostics() {
                       if (d.ok) toast.success("Verbindung steht", d.message);
                       else toast.error("Verbindungstest fehlgeschlagen", d.message);
                     },
-                    (err: Error) => toast.error("Verbindungstest fehlgeschlagen", err.message),
+                    (err: unknown) => toast.error("Verbindungstest fehlgeschlagen", toFailure(err).message),
                   );
                 }}
               >
@@ -124,7 +125,7 @@ export function MailDiagnostics() {
                       if (d.ok) toast.success("Nachricht angenommen", d.message);
                       else toast.error("Test-Versand fehlgeschlagen", d.message);
                     },
-                    (err: Error) => toast.error("Test-Versand fehlgeschlagen", err.message),
+                    (err: unknown) => toast.error("Test-Versand fehlgeschlagen", toFailure(err).message),
                   );
                 }}
               >

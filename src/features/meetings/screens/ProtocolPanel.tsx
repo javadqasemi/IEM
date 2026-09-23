@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import { useAuth } from "@/core/auth";
 import { navigate } from "@/core/router";
 import {
@@ -63,7 +63,7 @@ export function ProtocolPanel({ meeting }: { meeting: MeetingDetail }) {
       setAdding(false);
       setEditing(null);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Nicht möglich.");
+      toast.error(toFailure(err).message);
     } finally {
       setBusy(false);
     }

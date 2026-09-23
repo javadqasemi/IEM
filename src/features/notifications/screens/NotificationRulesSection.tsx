@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { Badge, Button, Card, ErrorState, Skeleton } from "@/shared/ui/primitives";
 import { Select } from "@/shared/ui/forms";
 import { type Column, DataView } from "@/shared/ui/data";
@@ -98,7 +99,7 @@ function Rules() {
         "Die Änderung gilt ab der nächsten Benachrichtigung.",
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Das Speichern hat nicht geklappt.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }
@@ -261,7 +262,7 @@ function Deliveries() {
                     "Eingereiht",
                     "Die E-Mail wurde erneut in die Warteschlange gestellt.",
                   ),
-                (err: Error) => toast.error("Erneut senden fehlgeschlagen", err.message),
+                (err: unknown) => toast.error("Erneut senden fehlgeschlagen", toFailure(err).message),
               );
             }}
           >
@@ -282,6 +283,10 @@ function Deliveries() {
         columns={columns}
         rowKey={(row) => row.id}
         loading={deliveries.loading}
+        // "Noch nichts zugestellt" under a refused request was the
+        // error-as-empty reading an operator must never be given (UX-21).
+        error={deliveries.error}
+        onRetry={deliveries.refetch}
         caption="Zustellprotokoll"
         page={deliveries.data?.page ?? 1}
         pages={deliveries.data?.pages ?? 1}

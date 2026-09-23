@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toFailure } from "@/core/api";
 import { formatDateTime, relativeTime } from "@/shared/utils/format";
 import { Button, Card, EmptyState, ErrorState, PageHeader, Skeleton } from "@/shared/ui/primitives";
 import { SearchInput } from "@/shared/ui/forms";
@@ -83,7 +84,7 @@ function SitePreview() {
         setHidden((h) => ({ ...h, [entryId]: !next }));
         toast.error(
           `„${label}" konnte nicht umgeschaltet werden.`,
-          err instanceof Error ? err.message : undefined,
+          toFailure(err).message,
         );
       });
     },
@@ -195,8 +196,6 @@ export function ContentIndexPage() {
     return map;
   }, [entries.data]);
 
-  if (types.error) return <ErrorState message={types.error} onRetry={types.reload} />;
-
   const groups = [
     { label: "Seite", match: (t: ContentTypeRow) => t.rank < 30 },
     { label: "Inhalte", match: (t: ContentTypeRow) => t.rank >= 30 && t.rank < 160 },
@@ -214,7 +213,16 @@ export function ContentIndexPage() {
 
       <SitePreview />
 
-      {types.loading ? (
+      {/* The failure sits where the areas would, under the page's own header,
+          rather than replacing the page — the reader keeps their bearings and
+          the preview above still works (UX-36). */}
+      {types.error ? (
+        <ErrorState
+          title="Die Bereiche konnten nicht geladen werden."
+          message={types.error}
+          onRetry={types.reload}
+        />
+      ) : types.loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 9 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-lg" />
@@ -271,6 +279,19 @@ export function ContentIndexPage() {
 /* One content type's entries                                          */
 /* ================================================================== */
 
+/**
+ * How many entries a list asks for per page.
+ *
+ * An orderable collection asks for all of them at once, because an order is a
+ * property of the *whole* collection: `POST /content/entries/reorder` numbers
+ * the ids it is sent from zero, and sending one page of a longer list would
+ * give page two the same positions as page one. The server refuses an
+ * incomplete set for the same reason; this is what keeps the screen from
+ * offering one.
+ */
+const PAGE_SIZE = 50;
+const ORDERABLE_PAGE_SIZE = 200;
+
 export function ContentListPage({ typeKey }: { typeKey: string }) {
   const { can } = useAuth();
   const toast = useToast();
@@ -280,16 +301,56 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
   const [confirmDelete, setConfirmDelete] = useState<EntryRow | null>(null);
 
   const types = useAsync(() => api.contentTypes(), []);
-  const list = useAsync(
-    () => api.entries({ typeKey, search: debounced || undefined, page, perPage: 50 }),
-    [typeKey, debounced, page],
-  );
-
   const type = types.data?.find((t) => t.key === typeKey);
+  const wantsWholeList = Boolean(type?.orderable && type.kind === "COLLECTION" && !debounced);
+  const perPage = wantsWholeList ? ORDERABLE_PAGE_SIZE : PAGE_SIZE;
+  const list = useAsync(
+    () => api.entries({ typeKey, search: debounced || undefined, page, perPage }),
+    [typeKey, debounced, page, perPage],
+  );
 
   const remove = useMutation(api.deleteEntry);
   const duplicate = useMutation(api.duplicateEntry);
   const reorder = useMutation(api.reorder);
+
+  /**
+   * The order being edited, or `null` when the list is not being reordered.
+   *
+   * Held here rather than inside the controls, because the *table* has to
+   * render it: the arrows sit on each row, beside the entry they move. The
+   * control that shipped before rendered its rows as screen-reader text and
+   * no arrows at all, so the order could be entered into and never changed —
+   * "Speichern" stayed disabled for ever (UX-01).
+   */
+  const [order, setOrder] = useState<string[] | null>(null);
+  const reordering = order !== null;
+
+  async function saveOrder(ids: string[]) {
+    const result = await reorder.run(typeKey, ids);
+    if (!result.ok) {
+      // The order stays as the editor left it, so a retry is one click.
+      toast.error("Reihenfolge nicht gespeichert", result.failure.message);
+      return;
+    }
+    toast.success(
+      "Reihenfolge gespeichert",
+      "Auf der Website gilt sie ab der nächsten Veröffentlichung.",
+    );
+    setOrder(null);
+    list.reload();
+  }
+
+  function move(id: string, by: -1 | 1) {
+    setOrder((current) => {
+      if (!current) return current;
+      const from = current.indexOf(id);
+      const to = from + by;
+      if (from < 0 || to < 0 || to >= current.length) return current;
+      const next = [...current];
+      [next[from], next[to]] = [next[to], next[from]];
+      return next;
+    });
+  }
 
   /**
    * A singleton has exactly one entry and no list worth showing — go straight
@@ -306,6 +367,7 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
     {
       key: "key",
       header: "Eintrag",
+      required: true,
       sortValue: (r) => title(r),
       render: (r) => (
         <div className="flex flex-col gap-0.5">
@@ -349,20 +411,31 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
     },
     {
       key: "actions",
-      header: "",
+      header: reordering ? "Position" : "",
       className: "w-px",
-      render: (r) => (
-        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+      render: (r) =>
+        reordering && order ? (
+          <OrderButtons
+            label={title(r)}
+            index={order.indexOf(r.id)}
+            count={order.length}
+            busy={reorder.busy}
+            onMove={(by) => move(r.id, by)}
+          />
+        ) : (
+        <div className="flex items-center justify-end gap-1">
           {can("content.duplicate") && type?.kind === "COLLECTION" ? (
             <Button
               size="sm"
               variant="ghost"
               onClick={async () => {
-                const created = await duplicate.run(r.id);
-                if (created) {
-                  toast.success("Dupliziert", `„${created.key}“ wurde als Entwurf angelegt.`);
-                  list.reload();
+                const result = await duplicate.run(r.id);
+                if (!result.ok) {
+                  toast.error("Nicht dupliziert", result.failure.message);
+                  return;
                 }
+                toast.success("Dupliziert", `„${result.data.key}“ wurde als Entwurf angelegt.`);
+                list.reload();
               }}
             >
               Duplizieren
@@ -378,10 +451,20 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.reload} />;
-
   const rows = list.data?.items ?? [];
-  const orderable = type?.orderable && type.kind === "COLLECTION" && !debounced;
+  const total = list.data?.total ?? 0;
+  /*
+    Reordering needs every entry on screen — see `ORDERABLE_PAGE_SIZE`. A
+    collection that has outgrown one page is said to have, rather than
+    offered a control the server would refuse.
+  */
+  const orderable = wantsWholeList && rows.length === total;
+
+  const currentIds = rows.map((r) => r.id);
+  const shownRows = order
+    ? order.map((id) => rows.find((r) => r.id === id)).filter((r): r is EntryRow => Boolean(r))
+    : rows;
+  const orderChanged = order !== null && order.join() !== currentIds.join();
 
   return (
     <>
@@ -406,16 +489,18 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
       <Card bodyClassName="p-0">
         <div className="p-5">
           <DataView
-            rows={rows}
+            rows={shownRows}
             columns={columns}
             rowKey={(r) => r.id}
-            onRowClick={(r) => navigate(`/inhalte/${typeKey}/${r.id}`)}
+            open={{ href: (r) => `#/inhalte/${typeKey}/${r.id}` }}
             loading={list.loading}
+            error={list.error}
+            onRetry={list.reload}
             caption={`Einträge im Bereich ${type?.name ?? typeKey}`}
             page={list.data?.page ?? 1}
             pages={list.data?.pages ?? 1}
-            total={list.data?.total ?? 0}
-            perPage={list.data?.perPage ?? 50}
+            total={total}
+            perPage={list.data?.perPage ?? perPage}
             onPageChange={setPage}
             toolbar={
               <>
@@ -424,21 +509,47 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
                   onChange={(v) => {
                     setSearch(v);
                     setPage(1);
+                    setOrder(null);
                   }}
                   label={`${type?.name ?? "Einträge"} durchsuchen`}
                   placeholder="Suchen"
                   className="w-full sm:w-72"
                 />
                 {orderable && can("content.reorder") && rows.length > 1 ? (
-                  <ReorderControls
-                    rows={rows}
-                    busy={reorder.busy}
-                    onApply={async (ids) => {
-                      await reorder.run(typeKey, ids);
-                      toast.success("Reihenfolge gespeichert");
-                      list.reload();
-                    }}
-                  />
+                  reordering ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-md bg-surface-2 px-3 py-2">
+                      <span className="text-[13px] text-muted">
+                        Mit den Pfeilen verschieben, dann speichern.
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        busy={reorder.busy}
+                        disabled={!orderChanged}
+                        disabledReason="Noch nichts verschoben."
+                        onClick={() => order && void saveOrder(order)}
+                      >
+                        Reihenfolge speichern
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={reorder.busy}
+                        onClick={() => setOrder(null)}
+                      >
+                        Abbrechen
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button size="sm" variant="ghost" onClick={() => setOrder(currentIds)}>
+                      Reihenfolge ändern
+                    </Button>
+                  )
+                ) : wantsWholeList && can("content.reorder") && rows.length < total ? (
+                  <span className="text-[12px] text-muted">
+                    Mehr als {ORDERABLE_PAGE_SIZE} Einträge — die Reihenfolge lässt sich hier nicht
+                    mehr ändern.
+                  </span>
                 ) : null}
               </>
             }
@@ -467,7 +578,10 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
 
       <ConfirmDialog
         open={Boolean(confirmDelete)}
-        onClose={() => setConfirmDelete(null)}
+        onClose={() => {
+          setConfirmDelete(null);
+          remove.reset();
+        }}
         busy={remove.busy}
         destructive
         title="Eintrag löschen?"
@@ -481,11 +595,18 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
             <p className="mt-2">
               Sichtbar wird die Änderung erst mit der nächsten Veröffentlichung.
             </p>
+            {remove.error ? (
+              <p role="alert" className="mt-3 font-medium text-brand-bronze">
+                {remove.error}
+              </p>
+            ) : null}
           </>
         }
         onConfirm={async () => {
           if (!confirmDelete) return;
-          await remove.run(confirmDelete.id);
+          const result = await remove.run(confirmDelete.id);
+          // A refusal stays in the dialog, beside the entry it is about.
+          if (!result.ok) return;
           toast.success("Gelöscht", `„${title(confirmDelete)}“ wurde entfernt.`);
           setConfirmDelete(null);
           list.reload();
@@ -496,60 +617,51 @@ export function ContentListPage({ typeKey }: { typeKey: string }) {
 }
 
 /**
- * Moves entries up and down, then saves the order in one call.
+ * Moves one entry up or down while the list is being reordered.
  *
  * Buttons, not drag-and-drop: this is a table row, drag targets in tables are
  * fiddly on a trackpad and impossible on a keyboard, and these lists run to a
  * few dozen items. The order is applied locally and sent once, so a reorder of
  * thirty projects is one request rather than thirty.
+ *
+ * Each button names the entry it moves. Two dozen buttons all called "nach
+ * oben" are indistinguishable to a screen reader's list of controls.
  */
-function ReorderControls({
-  rows,
-  onApply,
+function OrderButtons({
+  label,
+  index,
+  count,
   busy,
+  onMove,
 }: {
-  rows: EntryRow[];
-  onApply: (ids: string[]) => void;
+  label: string;
+  index: number;
+  count: number;
   busy: boolean;
+  onMove: (by: -1 | 1) => void;
 }) {
-  const [order, setOrder] = useState<string[] | null>(null);
-  const current = order ?? rows.map((r) => r.id);
-  const dirty = order !== null && order.join() !== rows.map((r) => r.id).join();
-
-  if (!order) {
-    return (
-      <Button size="sm" variant="ghost" onClick={() => setOrder(rows.map((r) => r.id))}>
-        Reihenfolge ändern
-      </Button>
-    );
-  }
-
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md bg-surface-2 px-3 py-2">
-      <span className="text-[13px] text-muted">
-        Einträge mit den Pfeilen verschieben, dann speichern.
+    <div className="flex items-center justify-end gap-1">
+      <span className="mr-1 font-mono text-[12px] tnum text-muted" aria-hidden>
+        {index + 1}
       </span>
-      <div className="flex items-center gap-1">
-        {current.map((id, i) => {
-          const row = rows.find((r) => r.id === id);
-          return (
-            <span key={id} className="sr-only">
-              {i + 1}. {row ? title(row) : id}
-            </span>
-          );
-        })}
-      </div>
       <Button
         size="sm"
-        variant="primary"
-        disabled={!dirty}
-        busy={busy}
-        onClick={() => onApply(current)}
+        variant="ghost"
+        aria-label={`„${label}“ nach oben`}
+        disabled={busy || index <= 0}
+        onClick={() => onMove(-1)}
       >
-        Speichern
+        <span aria-hidden>↑</span>
       </Button>
-      <Button size="sm" variant="ghost" onClick={() => setOrder(null)}>
-        Abbrechen
+      <Button
+        size="sm"
+        variant="ghost"
+        aria-label={`„${label}“ nach unten`}
+        disabled={busy || index >= count - 1}
+        onClick={() => onMove(1)}
+      >
+        <span aria-hidden>↓</span>
       </Button>
     </div>
   );

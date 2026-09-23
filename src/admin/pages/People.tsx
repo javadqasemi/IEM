@@ -7,7 +7,7 @@ import { type Column, DataView } from "@/shared/ui/data";
 import { useToast } from "@/shared/ui/feedback";
 import { UserMfaRoute } from "@/features/mfa";
 import { UserSessionsRoute } from "@/features/sessions";
-import { ApiError } from "@/core/api";
+import { ApiError, toFailure } from "@/core/api";
 import { api, type RoleRow, type UserRow } from "../lib/api";
 import { authRepository, useAuth } from "@/core/auth";
 import { useDebounced, useMutation } from "@/shared/hooks";
@@ -66,8 +66,9 @@ function useReauthRetry() {
   return { intercept, dialog };
 }
 
+/** The one sentence for a failure — normalised, so a 5xx is not "Internal server error". */
 function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : "Das hat nicht geklappt.";
+  return toFailure(err).message;
 }
 
 /* ================================================================== */
@@ -189,14 +190,18 @@ export function UsersPage() {
       header: "",
       className: "w-px",
       render: (r) => (
-        <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-end gap-1">
           {can("user.update") && !above(r) ? (
             <Button
               size="sm"
               variant="ghost"
-              busy={sendReset.busy}
+              disabled={sendReset.busy}
               onClick={async () => {
-                await sendReset.run(r.id);
+                const result = await sendReset.run(r.id);
+                if (!result.ok) {
+                  toast.error("Link nicht verschickt", result.failure.message);
+                  return;
+                }
                 toast.success("Link verschickt", `${r.email} kann ein neues Passwort setzen.`);
               }}
             >
@@ -212,8 +217,6 @@ export function UsersPage() {
       ),
     },
   ];
-
-  if (list.error) return <ErrorState message={list.error} onRetry={list.reload} />;
 
   return (
     <>
@@ -235,8 +238,10 @@ export function UsersPage() {
           rows={list.data?.items ?? []}
           columns={columns}
           rowKey={(r) => r.id}
-          onRowClick={can("user.assign") ? (r) => setEditing(r) : undefined}
+          open={can("user.assign") ? { onOpen: (r) => setEditing(r) } : undefined}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.reload}
           caption="Benutzerkonten"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}
@@ -298,7 +303,10 @@ export function UsersPage() {
 
       <ConfirmDialog
         open={Boolean(confirmDelete)}
-        onClose={() => setConfirmDelete(null)}
+        onClose={() => {
+          setConfirmDelete(null);
+          remove.reset();
+        }}
         busy={remove.busy}
         destructive
         confirmText="LÖSCHEN"
@@ -313,11 +321,19 @@ export function UsersPage() {
             <p className="mt-2">
               Der Name bleibt im Audit-Log erhalten, damit vergangene Änderungen zuordenbar bleiben.
             </p>
+            {remove.error ? (
+              <p role="alert" className="mt-3 font-medium text-brand-bronze">
+                {remove.error}
+              </p>
+            ) : null}
           </>
         }
         onConfirm={async () => {
           if (!confirmDelete) return;
-          await remove.run(confirmDelete.id);
+          const result = await remove.run(confirmDelete.id);
+          // A refusal — the privilege ceiling, the last Super Admin — stays in
+          // the dialog, beside the account it is about.
+          if (!result.ok) return;
           toast.success("Gelöscht", confirmDelete.name);
           setConfirmDelete(null);
           list.reload();
@@ -394,6 +410,14 @@ function InviteDialog({
     }
   }
   const invite = { busy, error, fields };
+  /** Why "Einladen" cannot be pressed yet, in the order the form asks. */
+  const inviteBlocked = !name.trim()
+    ? "Name fehlt."
+    : !email.trim()
+      ? "E-Mail fehlt."
+      : !roleIds.length
+        ? "Mindestens eine Rolle wählen."
+        : null;
 
   return (
     <Modal
@@ -402,6 +426,7 @@ function InviteDialog({
       title="Benutzer einladen"
       description="Die Person erhält einen Link und setzt ihr Passwort selbst."
       busy={invite.busy}
+      hint={inviteBlocked}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={invite.busy}>
@@ -410,7 +435,8 @@ function InviteDialog({
           <Button
             variant="primary"
             busy={invite.busy}
-            disabled={!email || !name || !roleIds.length}
+            disabled={Boolean(inviteBlocked)}
+            disabledReason={inviteBlocked}
             onClick={() => void submit()}
           >
             Einladen
@@ -540,7 +566,13 @@ function EditUserDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button variant="primary" busy={busy} disabled={above} onClick={() => void save()}>
+          <Button
+            variant="primary"
+            busy={busy}
+            disabled={above}
+            disabledReason="Dieses Konto hat mehr Rechte als Sie — nur jemand mit mindestens diesen Rechten kann es ändern."
+            onClick={() => void save()}
+          >
             Speichern
           </Button>
         </>
@@ -706,8 +738,6 @@ export function RolesPage() {
   const permissions = useAsync(() => api.permissions(), []);
   const remove = useMutation(api.deleteRole);
 
-  if (roles.error) return <ErrorState message={roles.error} onRetry={roles.reload} />;
-
   return (
     <>
       <PageHeader
@@ -723,7 +753,13 @@ export function RolesPage() {
         }
       />
 
-      {roles.loading ? (
+      {roles.error ? (
+        <ErrorState
+          title="Die Rollen konnten nicht geladen werden."
+          message={roles.error}
+          onRetry={roles.reload}
+        />
+      ) : roles.loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-40 rounded-lg" />
@@ -786,16 +822,33 @@ export function RolesPage() {
 
       <ConfirmDialog
         open={Boolean(confirmDelete)}
-        onClose={() => setConfirmDelete(null)}
+        onClose={() => {
+          setConfirmDelete(null);
+          remove.reset();
+        }}
         busy={remove.busy}
         destructive
         title="Rolle löschen?"
         confirmLabel="Löschen"
-        message={`„${confirmDelete?.name}“ wird entfernt. Das geht nur, wenn ihr niemand mehr zugewiesen ist.`}
+        message={
+          <>
+            <p>
+              „{confirmDelete?.name}“ wird entfernt. Das geht nur, wenn ihr niemand mehr zugewiesen
+              ist.
+            </p>
+            {/* It used to fail silently: the refusal ("noch 3 Personen
+                zugewiesen") was captured and never rendered. */}
+            {remove.error ? (
+              <p role="alert" className="mt-3 font-medium text-brand-bronze">
+                {remove.error}
+              </p>
+            ) : null}
+          </>
+        }
         onConfirm={async () => {
           if (!confirmDelete) return;
-          const ok = await remove.run(confirmDelete.id);
-          if (ok !== null) {
+          const result = await remove.run(confirmDelete.id);
+          if (result.ok) {
             toast.success("Gelöscht", confirmDelete.name);
             setConfirmDelete(null);
             roles.reload();
@@ -883,6 +936,8 @@ function RoleDialog({
     }
   }
 
+  const roleBlocked = !name ? "Name fehlt." : creating && !key ? "Kennung fehlt." : null;
+
   return (
     <Modal
       open
@@ -891,6 +946,7 @@ function RoleDialog({
       description={`${selected.length} von ${total} Berechtigungen`}
       size="lg"
       busy={busy}
+      hint={roleBlocked}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
@@ -899,7 +955,8 @@ function RoleDialog({
           <Button
             variant="primary"
             busy={busy}
-            disabled={!name || (creating && !key)}
+            disabled={Boolean(roleBlocked)}
+            disabledReason={roleBlocked}
             onClick={() => void save()}
           >
             Speichern

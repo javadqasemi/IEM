@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
+import { CONFLICT_BLOCKS_SAVE, ConflictNotice } from "@/shared/ui/feedback";
 import {
   DRAWING_FORMAT_OPTIONS,
   DRAWING_TYPE_OPTIONS,
@@ -148,40 +149,28 @@ export function DrawingEditDialog({
       });
       onSaved(next);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setConflict(err.message);
+      const failure = toFailure(err);
+      if (failure.kind === "conflict") {
+        setConflict(failure.message);
       } else {
-        if (err instanceof ApiError && err.fields) setErrors(err.fields);
-        setError(err instanceof Error ? err.message : "Speichern nicht möglich.");
+        setErrors(failure.fields);
+        setError(failure.message);
       }
     } finally {
       setBusy(false);
     }
   }
 
-  if (conflict) {
-    return (
-      <Modal
-        open
-        onClose={onClose}
-        title="Inzwischen geändert"
-        description="Jemand anderes hat diesen Plan gespeichert, während er hier offen war."
-        footer={
-          <>
-            <Button variant="ghost" onClick={onClose}>
-              Verwerfen
-            </Button>
-            <Button onClick={() => window.location.reload()}>Neu laden</Button>
-          </>
-        }
-      >
-        <p className="text-[14px] leading-relaxed">{conflict}</p>
-        <p className="mt-3 text-[13px] text-muted">
-          Ihre Eingaben werden nicht gespeichert. Der Verlauf des Plans zeigt, was geändert wurde.
-        </p>
-      </Modal>
-    );
-  }
+  /** Why "Speichern" cannot be pressed, most important first. */
+  const blocked = conflict
+    ? CONFLICT_BLOCKS_SAVE
+    : !number.trim()
+      ? "Plannummer fehlt."
+      : !title.trim()
+        ? "Titel fehlt."
+        : !discipline
+          ? "Gewerk fehlt."
+          : null;
 
   return (
     <Modal
@@ -191,6 +180,7 @@ export function DrawingEditDialog({
       title={`${drawing.number} bearbeiten`}
       description="Status, Revisionen und Versand haben eigene Vorgänge."
       size="lg"
+      hint={blocked}
       footer={
         <>
           <Badge tone="neutral">v{drawing.version}</Badge>
@@ -201,7 +191,8 @@ export function DrawingEditDialog({
           <Button
             onClick={() => void submit()}
             busy={busy}
-            disabled={!number.trim() || !title.trim() || !discipline}
+            disabled={Boolean(blocked)}
+            disabledReason={blocked}
           >
             Speichern
           </Button>
@@ -209,6 +200,17 @@ export function DrawingEditDialog({
       }
     >
       <Form onSubmit={() => void submit()} error={error}>
+        {conflict ? (
+          // Reload, not "save anyway" — see `ConflictNotice`.
+          <ConflictNotice
+            message={conflict}
+            compareHint="Der Verlauf des Plans zeigt, was geändert wurde."
+            onReload={() => {
+              mutations.reload(drawing.id);
+              onClose();
+            }}
+          />
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
           <Field label="Plannummer" htmlFor={ids.number} error={fieldError("number")}>
             <Input

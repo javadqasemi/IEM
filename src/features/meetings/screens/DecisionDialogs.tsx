@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import {
   DECISION_IMPACT_OPTIONS,
   DECISION_TYPE_OPTIONS,
@@ -9,6 +9,7 @@ import {
 } from "@/entities/meeting";
 import { Badge, Button } from "@/shared/ui/primitives";
 import { Modal } from "@/shared/ui/overlays";
+import { CONFLICT_BLOCKS_SAVE, ConflictNotice } from "@/shared/ui/feedback";
 import {
   DateInput,
   EntityPicker,
@@ -378,8 +379,9 @@ export function DecisionCreateDialog({
       });
       onCreated(decision);
     } catch (err) {
-      if (err instanceof ApiError && err.fields) setErrors(err.fields);
-      setError(err instanceof Error ? err.message : "Anlegen nicht möglich.");
+      const failure = toFailure(err);
+      setErrors(failure.fields);
+      setError(failure.message);
     } finally {
       setBusy(false);
     }
@@ -498,37 +500,26 @@ export function DecisionEditDialog({
       });
       onSaved(next);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setConflict(err.message);
+      const failure = toFailure(err);
+      if (failure.kind === "conflict") {
+        setConflict(failure.message);
       } else {
-        if (err instanceof ApiError && err.fields) setErrors(err.fields);
-        setError(err instanceof Error ? err.message : "Speichern nicht möglich.");
+        setErrors(failure.fields);
+        setError(failure.message);
       }
     } finally {
       setBusy(false);
     }
   }
 
-  if (conflict) {
-    return (
-      <Modal
-        open
-        onClose={onClose}
-        title="Inzwischen geändert"
-        description="Jemand anderes hat diesen Entscheid gespeichert, während er hier offen war."
-        footer={
-          <>
-            <Button variant="ghost" onClick={onClose}>
-              Verwerfen
-            </Button>
-            <Button onClick={() => window.location.reload()}>Neu laden</Button>
-          </>
-        }
-      >
-        <p className="text-[14px] leading-relaxed">{conflict}</p>
-      </Modal>
-    );
-  }
+  /** Why "Speichern" cannot be pressed, most important first. */
+  const blocked = conflict
+    ? CONFLICT_BLOCKS_SAVE
+    : values.title.trim().length < 2
+      ? "Der Titel braucht mindestens zwei Zeichen."
+      : values.rationale.trim().length < RATIONALE_MIN
+        ? `Die Begründung braucht mindestens ${RATIONALE_MIN} Zeichen.`
+        : null;
 
   return (
     <Modal
@@ -538,6 +529,7 @@ export function DecisionEditDialog({
       title={`${decision.number} korrigieren`}
       description="Korrektur, nicht Widerruf. Ein Entscheid, der nicht mehr gilt, wird aufgehoben und ersetzt."
       size="lg"
+      hint={blocked}
       footer={
         <>
           <Badge tone="neutral">v{decision.version}</Badge>
@@ -548,9 +540,8 @@ export function DecisionEditDialog({
           <Button
             onClick={() => void submit()}
             busy={busy}
-            disabled={
-              values.title.trim().length < 2 || values.rationale.trim().length < RATIONALE_MIN
-            }
+            disabled={Boolean(blocked)}
+            disabledReason={blocked}
           >
             Speichern
           </Button>
@@ -558,6 +549,17 @@ export function DecisionEditDialog({
       }
     >
       <Form onSubmit={() => void submit()} error={error}>
+        {conflict ? (
+          // Reload, not "save anyway" — see `ConflictNotice`.
+          <ConflictNotice
+            message={conflict}
+            compareHint="Der Verlauf des Entscheids zeigt, was geändert wurde."
+            onReload={() => {
+              mutations.reloadDecision(decision.id);
+              onClose();
+            }}
+          />
+        ) : null}
         <DecisionFields
           values={values}
           set={set}

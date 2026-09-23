@@ -1,7 +1,29 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { cn } from "@/shared/utils/cn";
-import { EmptyState, SkeletonTable } from "@/shared/ui/primitives";
+import { EmptyState, ErrorState, SkeletonTable } from "@/shared/ui/primitives";
 import { Pagination } from "@/shared/ui/navigation";
+
+/**
+ * Where a row leads, and how.
+ *
+ * **A real link or a real button in the row's identity cell**, never a click
+ * handler on the `<tr>`. A handler on the row is a mouse-only affordance: a
+ * table row is not focusable, has no role a screen reader announces as
+ * actionable, and Enter does nothing on it — so every register in the
+ * dashboard was a list a keyboard user could read and not open (UX-19). The
+ * row keeps the click as a convenience, and it goes *through* the element in
+ * the cell, so there is exactly one way to open a row and both input methods
+ * use it.
+ *
+ * `href` for a record with a URL (a project, a plan, a protocol) — an anchor,
+ * so middle-click and "open in new tab" work. `onOpen` for one opened in
+ * place (a task drawer, a dossier dialog), which has no URL to link to and is
+ * therefore a button.
+ */
+export type RowOpen<T> = { href: (row: T) => string } | { onOpen: (row: T) => void };
+
+/** Elements a click on the row must leave alone — they have their own job. */
+const INTERACTIVE = "a, button, input, select, textarea, label, [role='button'], [role='checkbox']";
 
 export type SortState = { field: string; dir: "asc" | "desc" };
 
@@ -50,8 +72,10 @@ export function DataTable<T>({
   rows,
   columns,
   rowKey,
-  onRowClick,
+  open,
   loading,
+  error,
+  onRetry,
   empty,
   selection,
   onSelectionChange,
@@ -63,8 +87,19 @@ export function DataTable<T>({
   rows: T[];
   columns: Column<T>[];
   rowKey: (row: T) => string;
-  onRowClick?: (row: T) => void;
+  /** Where a row leads. The identity cell becomes the link — see `RowOpen`. */
+  open?: RowOpen<T>;
   loading?: boolean;
+  /**
+   * The request for these rows failed. **Required**, even when it is `null`:
+   * a table that cannot tell a failure from an empty result answers "Noch
+   * keine Sicherung" on the morning the request was refused, which is the
+   * one reading an operator must never be given (UX-21).
+   * `src/architecture.test.ts` fails a table that does not pass it.
+   */
+  error: string | null | undefined;
+  /** Offered beside the error. Absent, the error has no button. */
+  onRetry?: () => void;
   empty?: ReactNode;
   /** Selected keys. Pass with `onSelectionChange` to enable checkboxes. */
   selection?: Set<string>;
@@ -152,11 +187,43 @@ export function DataTable<T>({
     else setLocalSort({ key: column.key, dir: next });
   };
 
+  /*
+    Four states, in this order, and the order is the fix.
+
+    An error is checked before the rows: `rows` is `[]` both when the server
+    said "there are none" and when it said nothing at all, and only the error
+    tells them apart. Rows that *are* on screen from an earlier successful
+    load win over a failed refresh — the stale-while-revalidate promise — so a
+    reader keeps the list and gets the failure as a line above it rather than
+    losing what they were looking at.
+  */
+  if (error && !rows.length) {
+    return (
+      <ErrorState
+        title="Die Liste konnte nicht geladen werden."
+        message={error}
+        onRetry={onRetry}
+      />
+    );
+  }
+
   if (loading) return <SkeletonTable rows={6} cols={visibleColumns.length} />;
 
   if (!rows.length) {
     return <>{empty ?? <EmptyState title="Keine Einträge" />}</>;
   }
+
+  /** The identity column: the first one marked `required`, else the first. */
+  const identityKey = (visibleColumns.find((c) => c.required) ?? visibleColumns[0])?.key;
+
+  /** A click anywhere on the row goes through the link in its identity cell. */
+  const openFromRow = (e: MouseEvent<HTMLTableRowElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest(INTERACTIVE)) return;
+    // Selecting text in a cell is not a request to leave the page.
+    if (typeof window !== "undefined" && window.getSelection()?.toString()) return;
+    e.currentTarget.querySelector<HTMLElement>("[data-row-open]")?.click();
+  };
 
   const selectable = Boolean(selection && onSelectionChange);
   const allSelected = selectable && rows.every((r) => selection!.has(rowKey(r)));
@@ -176,11 +243,27 @@ export function DataTable<T>({
   };
 
   return (
-    // Its own horizontal scroll container, so a wide table scrolls rather than
-    // pushing the whole page sideways. Focusable only while it overflows —
-    // see `scrollable` above for why that is measured and not assumed. The
-    // caption names it, so a screen reader announces which table the region
-    // belongs to rather than an anonymous "Region".
+    <>
+    {error ? (
+      // Rows from an earlier load are still on screen; say that this refresh
+      // failed rather than letting old rows pass for current ones.
+      <p
+        role="alert"
+        className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-brand-bronze/[0.08] px-4 py-2.5 text-[13px] font-medium text-brand-bronze ring-1 ring-brand-bronze/25"
+      >
+        <span className="min-w-0 flex-1">Aktualisieren fehlgeschlagen — angezeigt wird der letzte Stand. {error}</span>
+        {onRetry ? (
+          <button type="button" onClick={onRetry} className="underline underline-offset-2">
+            Nochmals versuchen
+          </button>
+        ) : null}
+      </p>
+    ) : null}
+    {/* Its own horizontal scroll container, so a wide table scrolls rather than
+        pushing the whole page sideways. Focusable only while it overflows —
+        see `scrollable` above for why that is measured and not assumed. The
+        caption names it, so a screen reader announces which table the region
+        belongs to rather than an anonymous "Region". */}
     <div
       ref={paneRef}
       tabIndex={scrollable ? 0 : undefined}
@@ -245,10 +328,10 @@ export function DataTable<T>({
             return (
               <tr
                 key={key}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onClick={open ? openFromRow : undefined}
                 className={cn(
                   "border-b border-line last:border-0 transition-colors",
-                  onRowClick && "cursor-pointer hover:bg-surface-2/60",
+                  open && "cursor-pointer hover:bg-surface-2/60",
                   selectable && selection!.has(key) && "bg-accent/[0.04]",
                 )}
               >
@@ -273,7 +356,13 @@ export function DataTable<T>({
                       c.className,
                     )}
                   >
-                    {c.render(row)}
+                    {open && c.key === identityKey ? (
+                      <RowOpener open={open} row={row}>
+                        {c.render(row)}
+                      </RowOpener>
+                    ) : (
+                      c.render(row)
+                    )}
                   </td>
                 ))}
               </tr>
@@ -282,6 +371,31 @@ export function DataTable<T>({
         </tbody>
       </table>
     </div>
+    </>
+  );
+}
+
+/**
+ * The element in the identity cell that opens the row.
+ *
+ * Styled to look like the text it wraps — the table's visual weight is the
+ * cell's, not a link colour — with a focus ring, because the ring is the only
+ * thing that tells a keyboard user where they are in a register of fifty rows.
+ */
+function RowOpener<T>({ open, row, children }: { open: RowOpen<T>; row: T; children: ReactNode }) {
+  const classes =
+    "block min-w-0 rounded-sm text-left outline-none hover:underline hover:decoration-line-strong hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface";
+  if ("href" in open) {
+    return (
+      <a href={open.href(row)} data-row-open className={classes}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <button type="button" data-row-open onClick={() => open.onOpen(row)} className={cn(classes, "w-full")}>
+      {children}
+    </button>
   );
 }
 
@@ -290,8 +404,10 @@ export function DataView<T>({
   rows,
   columns,
   rowKey,
-  onRowClick,
+  open,
   loading,
+  error,
+  onRetry,
   empty,
   selection,
   onSelectionChange,
@@ -320,8 +436,10 @@ export function DataView<T>({
         rows={rows}
         columns={columns}
         rowKey={rowKey}
-        onRowClick={onRowClick}
+        open={open}
         loading={loading}
+        error={error}
+        onRetry={onRetry}
         empty={empty}
         selection={selection}
         onSelectionChange={onSelectionChange}

@@ -1,5 +1,5 @@
 ﻿import { useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import { useAuth } from "@/core/auth";
 import {
   APPROVAL_DECISIONS,
@@ -99,7 +99,7 @@ export function AttendancePanel({ meeting }: { meeting: MeetingDetail }) {
       setPending(new Map());
       toast.success("Anwesenheit erfasst");
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Nicht möglich.");
+      toast.error(toFailure(err).message);
     } finally {
       setBusy(false);
     }
@@ -206,7 +206,7 @@ export function AttendancePanel({ meeting }: { meeting: MeetingDetail }) {
                         await mutations.removeAttendee(meeting.id, attendee.id);
                         toast.success("Entfernt");
                       } catch (err) {
-                        toast.error(err instanceof ApiError ? err.message : "Nicht möglich.");
+                        toast.error(toFailure(err).message);
                       } finally {
                         setBusy(false);
                       }
@@ -266,6 +266,11 @@ function AddAttendeeDialog({ meetingId, onClose }: { meetingId: string; onClose:
   const [busy, setBusy] = useState(false);
 
   const ready = external ? name.trim().length >= 2 : Boolean(employee);
+  const blocked = ready
+    ? null
+    : external
+      ? "Der Name braucht mindestens zwei Zeichen."
+      : "Eine Person aus dem Personal wählen.";
 
   return (
     <Modal
@@ -274,6 +279,7 @@ function AddAttendeeDialog({ meetingId, onClose }: { meetingId: string; onClose:
       busy={busy}
       title="Person hinzufügen"
       description="Aus dem Personal oder extern — die Bauherrschaft und der Architekt sind keine Benutzer dieses Systems."
+      hint={blocked}
       footer={
         <>
           <div className="flex-1" />
@@ -283,6 +289,7 @@ function AddAttendeeDialog({ meetingId, onClose }: { meetingId: string; onClose:
           <Button
             busy={busy}
             disabled={!ready}
+            disabledReason={blocked}
             onClick={async () => {
               setError(null);
               setBusy(true);
@@ -296,7 +303,7 @@ function AddAttendeeDialog({ meetingId, onClose }: { meetingId: string; onClose:
                 toast.success("Hinzugefügt");
                 onClose();
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Nicht möglich.");
+                setError(toFailure(err).message);
               } finally {
                 setBusy(false);
               }
@@ -467,7 +474,7 @@ export function AgendaPanel({ meeting }: { meeting: MeetingDetail }) {
                           await mutations.removeAgendaItem(meeting.id, item.id);
                           toast.success("Traktandum entfernt");
                         } catch (err) {
-                          toast.error(err instanceof ApiError ? err.message : "Nicht möglich.");
+                          toast.error(toFailure(err).message);
                         } finally {
                           setBusy(false);
                         }
@@ -532,7 +539,7 @@ function AgendaDialog({
       toast.success(existing ? "Traktandum geändert" : "Traktandum hinzugefügt");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nicht möglich.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }
@@ -723,7 +730,7 @@ function ApproveDialog({ meeting, onClose }: { meeting: MeetingDetail; onClose: 
                 toast.success("Protokoll genehmigt");
                 onClose();
               } catch (err) {
-                setError(err instanceof Error ? err.message : "Nicht möglich.");
+                setError(toFailure(err).message);
               } finally {
                 setBusy(false);
               }

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "./Button";
 import { useContent, type BewerbungCopy } from "@/content/iem";
+import { defaultContent } from "@/content/defaults";
 
 /**
  * Fills `{name}`-style placeholders in a copy string.
@@ -121,13 +122,24 @@ function mailtoHref(v: Values, files: File[], L: BewerbungCopy, mail: string) {
  * upload progress. A 20 MB dossier on a site connection is long enough that a
  * button with no feedback reads as broken.
  */
+/**
+ * What the server kept.
+ *
+ * The dialog used to report every *selected* file as received. The server
+ * keeps only the formats it accepts and says how many it dropped —
+ * `{ received, skipped }` — so an applicant whose CV was a `.pages` file was
+ * told "3 Dateien übermittelt" when two had arrived (UX-43).
+ */
+type Receipt = { received: number; skipped: number };
+
 function postDossier(
   url: string,
   data: FormData,
   onProgress: (pct: number) => void,
   L: BewerbungCopy,
+  selected: number,
 ) {
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<Receipt>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.upload.addEventListener("progress", (e) => {
@@ -135,13 +147,33 @@ function postDossier(
     });
     xhr.addEventListener("load", () =>
       xhr.status >= 200 && xhr.status < 300
-        ? resolve()
+        ? resolve(readReceipt(xhr.responseText, selected))
         : reject(new Error(fill(L.fehlerServer, { status: xhr.status }))),
     );
     xhr.addEventListener("error", () => reject(new Error(L.fehlerVerbindung)));
     xhr.addEventListener("abort", () => reject(new Error(L.fehlerAbbruch)));
     xhr.send(data);
   });
+}
+
+/**
+ * The server's receipt out of the `{ data: … }` envelope.
+ *
+ * Unwrapped unconditionally, like every client of this API. A body that does
+ * not parse falls back to "all selected, none skipped", which is what the
+ * dialog claimed before — no worse than it was, and only reachable if the
+ * endpoint stops answering in its own shape.
+ */
+function readReceipt(body: string, selected: number): Receipt {
+  try {
+    const data = (JSON.parse(body) as { data?: Partial<Receipt> }).data;
+    if (data && typeof data.received === "number" && typeof data.skipped === "number") {
+      return { received: data.received, skipped: data.skipped };
+    }
+  } catch {
+    // fall through
+  }
+  return { received: selected, skipped: 0 };
 }
 
 const fieldBase =
@@ -232,6 +264,7 @@ export function BewerbungDialog({
   const [status, setStatus] = useState<"idle" | "sending" | "mail" | "done" | "failed">("idle");
   const [progress, setProgress] = useState(0);
   const [failure, setFailure] = useState("");
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
 
   useEffect(() => {
     const el = ref.current;
@@ -256,6 +289,7 @@ export function BewerbungDialog({
     setStatus("idle");
     setProgress(0);
     setFailure("");
+    setReceipt(null);
     setMode(ENDPOINT ? "upload" : "mail");
   }
 
@@ -322,7 +356,7 @@ export function BewerbungDialog({
     setStatus("sending");
     setProgress(0);
     try {
-      await postDossier(ENDPOINT, data, setProgress, L);
+      setReceipt(await postDossier(ENDPOINT, data, setProgress, L, files.length));
       setStatus("done");
     } catch (err) {
       setFailure(err instanceof Error ? err.message : L.fehlerUnbekannt);
@@ -371,14 +405,23 @@ export function BewerbungDialog({
           <p className="font-display text-xl font-semibold text-ink">{L.doneTitel}</p>
           <p className="text-[15px] leading-relaxed text-muted">
             {fill(L.doneText, {
+              // What the server kept, not what was selected (UX-43).
               dateien:
-                files.length === 1
+                (receipt?.received ?? files.length) === 1
                   ? L.doneEineDatei
-                  : fill(L.doneMehrereDateien, { n: files.length }),
+                  : fill(L.doneMehrereDateien, { n: receipt?.received ?? files.length }),
               groesse: formatBytes(totalBytes),
               email: values.email,
             })}
           </p>
+          {receipt && receipt.skipped > 0 ? (
+            <p className="text-[15px] font-medium leading-relaxed text-brand-bronze" role="status">
+              {fill(L.doneUebersprungen ?? defaultContent.bewerbung.doneUebersprungen ?? "", {
+                n: receipt.skipped,
+                kontakt: contactEmail,
+              })}
+            </p>
+          ) : null}
           <div className="pt-2">
             <Button onClick={handleClose}>{L.schliessen}</Button>
           </div>

@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { toFailure } from "@/core/api";
 import { useAuth } from "@/core/auth";
 import {
   DisciplineDot,
@@ -238,7 +239,7 @@ function ScopeDialog({
       toast.success("Gespeichert");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nicht möglich.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }

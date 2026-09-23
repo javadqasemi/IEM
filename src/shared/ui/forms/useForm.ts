@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import type { FieldErrors } from "./types";
 
 /**
@@ -96,10 +96,10 @@ const rules = {
   },
 
   errorsFrom: (err: unknown): { errors: FieldErrors; error: string } => {
-    if (err instanceof ApiError) {
-      return { errors: err.fields ?? {}, error: err.message };
-    }
-    return { errors: {}, error: err instanceof Error ? err.message : "Unbekannter Fehler." };
+    // One classifier for every form: a 5xx or a dropped connection reads as
+    // German and says the input is still there, never "Internal server error".
+    const failure = toFailure(err);
+    return { errors: failure.fields, error: failure.message };
   },
 
   hasErrors: (errors: FieldErrors) => Object.keys(errors).length > 0,

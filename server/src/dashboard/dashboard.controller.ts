@@ -129,8 +129,15 @@ export class DashboardController {
         inReview: entriesPending,
         approved: entriesApproved,
         published: entriesPublished,
-        /** Entries approved and waiting for someone to press Publish. */
-        readyToPublish: entriesApproved,
+        /*
+          `readyToPublish` stood here — `entriesApproved` under a second name —
+          and is **gone** (P1A, UX-07). It answered "how many entries are
+          approved" under a label that said "what is waiting to go out", and a
+          deletion, a reordering or a hide is waiting to go out without ever
+          being approved. The home page read it and said "nothing to publish"
+          while the site was out of date. `GET /content/pending` is the one
+          answer; a count here would be a second one that drifts.
+        */
       },
       lastPublish: lastSnapshot,
       recentActivity,

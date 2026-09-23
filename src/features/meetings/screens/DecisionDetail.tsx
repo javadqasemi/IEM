@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { toFailure } from "@/core/api";
 import { Link, navigate } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import { usePageTitle } from "@/core/router";
@@ -250,7 +251,7 @@ function StatusButton({ decision }: { decision: Decision }) {
                   toast.success(`Status: ${decisionStatusLabel(status)}`);
                   setOpen(false);
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Nicht möglich.");
+                  setError(toFailure(err).message);
                 } finally {
                   setBusy(false);
                 }
@@ -338,7 +339,7 @@ function SupersedeButton({ decision }: { decision: Decision }) {
                   setOpen(false);
                   navigate(`/entscheide/${replacement!.value}`);
                 } catch (err) {
-                  setError(err instanceof Error ? err.message : "Nicht möglich.");
+                  setError(toFailure(err).message);
                 } finally {
                   setBusy(false);
                 }
@@ -434,7 +435,7 @@ function DeleteButton({ decision }: { decision: Decision }) {
             toast.success("Gelöscht");
             navigate("/entscheide");
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+            toast.error(toFailure(err).message);
           } finally {
             setBusy(false);
             setOpen(false);

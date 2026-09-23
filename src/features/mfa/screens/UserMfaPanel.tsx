@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { Badge, Button } from "@/shared/ui/primitives";
 import { ReauthenticationDialog } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
@@ -124,7 +125,7 @@ export function UserMfaPanel({
             );
             onReset?.();
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Das hat nicht geklappt.");
+            setError(toFailure(err).message);
           }
         }}
       />

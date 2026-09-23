@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { invalidate, useQuery, type Paginated } from "@/core/api";
+import { invalidate, invalidateAround, revalidate, settle, useQuery, type Paginated } from "@/core/api";
 import type {
   ChecklistItem,
   CommentDraft,
@@ -46,6 +46,18 @@ import { taskRepository, type TaskQuery } from "../repository";
  * ever invalidates, which shows up weeks later as a board that will not refresh.
  */
 const KEY = "tasks";
+
+/**
+ * A write that returns the whole task: primed, the rest of the prefix
+ * invalidated. The board and the counts still refetch, as the note on the
+ * writes below requires; the open drawer keeps its task instead of dropping
+ * to a skeleton under the cursor (UX-03).
+ */
+function settleTask(dto: Parameters<typeof toTaskDetail>[0]): TaskDetail {
+  const detail = toTaskDetail(dto);
+  settle(KEY, { key: [KEY, "detail", detail.id], data: detail });
+  return detail;
+}
 
 /**
  * Every part of the query that changes the answer, in the key.
@@ -194,6 +206,8 @@ export type TaskMutations = {
   removeChecklistItem: (id: string, itemId: string) => Promise<void>;
   addComment: (id: string, draft: CommentDraft) => Promise<TaskComment>;
   removeComment: (id: string, commentId: string) => Promise<void>;
+  /** After a 409: fetch the newer task without taking this one off screen. */
+  reload: (id: string) => void;
 };
 
 /**
@@ -219,38 +233,32 @@ export type TaskMutations = {
 export function useTaskMutations(): TaskMutations {
   const create = useCallback(async (draft: TaskDraft) => {
     const dto = await taskRepository.create(toCreateBody(draft));
-    invalidate(KEY);
-    return toTaskDetail(dto);
+    return settleTask(dto);
   }, []);
 
   const update = useCallback(async (id: string, edit: TaskEdit) => {
     const dto = await taskRepository.update(id, toUpdateBody(edit));
-    invalidate(KEY);
-    return toTaskDetail(dto);
+    return settleTask(dto);
   }, []);
 
   const changeStatus = useCallback(async (id: string, change: StatusChange) => {
     const dto = await taskRepository.changeStatus(id, toStatusBody(change));
-    invalidate(KEY);
-    return toTaskDetail(dto);
+    return settleTask(dto);
   }, []);
 
   const unblock = useCallback(async (id: string) => {
     const dto = await taskRepository.unblock(id);
-    invalidate(KEY);
-    return toTaskDetail(dto);
+    return settleTask(dto);
   }, []);
 
   const move = useCallback(async (id: string, payload: TaskMove) => {
     const dto = await taskRepository.move(id, toMoveBody(payload));
-    invalidate(KEY);
-    return toTaskDetail(dto);
+    return settleTask(dto);
   }, []);
 
   const assign = useCallback(async (id: string, assigneeId: string | null) => {
     const dto = await taskRepository.assign(id, { assigneeId });
-    invalidate(KEY);
-    return toTaskDetail(dto);
+    return settleTask(dto);
   }, []);
 
   const remove = useCallback(async (id: string) => {
@@ -271,45 +279,49 @@ export function useTaskMutations(): TaskMutations {
 
   const addDependency = useCallback(async (id: string, draft: DependencyDraft) => {
     const dto = await taskRepository.addDependency(id, toDependencyBody(draft));
-    invalidate(KEY);
-    return toTaskDetail(dto);
+    return settleTask(dto);
   }, []);
 
   const removeDependency = useCallback(async (id: string, dependencyId: string) => {
     const dto = await taskRepository.removeDependency(id, dependencyId);
-    invalidate(KEY);
-    return toTaskDetail(dto);
+    return settleTask(dto);
   }, []);
 
   const addChecklistItem = useCallback(async (id: string, text: string) => {
     const dto = await taskRepository.addChecklistItem(id, { text });
-    invalidate(KEY);
+    invalidateAround(KEY, [KEY, "detail", id], [KEY, "checklist", id]);
     return toChecklistItem(dto);
   }, []);
 
   const setChecklistItem = useCallback(async (id: string, itemId: string, done: boolean) => {
     const dto = await taskRepository.updateChecklistItem(id, itemId, { done });
-    invalidate(KEY);
+    invalidateAround(KEY, [KEY, "detail", id], [KEY, "checklist", id]);
     return toChecklistItem(dto);
   }, []);
 
   const removeChecklistItem = useCallback(async (id: string, itemId: string) => {
     await taskRepository.removeChecklistItem(id, itemId);
-    invalidate(KEY);
+    invalidateAround(KEY, [KEY, "detail", id], [KEY, "checklist", id]);
   }, []);
 
   const addComment = useCallback(async (id: string, draft: CommentDraft) => {
     const dto = await taskRepository.addComment(id, toCommentBody(draft));
-    invalidate(KEY);
+    invalidateAround(KEY, [KEY, "detail", id], [KEY, "comments", id]);
     return toTaskComment(dto);
   }, []);
 
   const removeComment = useCallback(async (id: string, commentId: string) => {
     await taskRepository.removeComment(id, commentId);
-    invalidate(KEY);
+    invalidateAround(KEY, [KEY, "detail", id], [KEY, "comments", id]);
+  }, []);
+
+  const reload = useCallback((id: string) => {
+    revalidate([KEY, "detail", id]);
+    revalidate([KEY, "versions", id]);
   }, []);
 
   return {
+    reload,
     create,
     update,
     changeStatus,

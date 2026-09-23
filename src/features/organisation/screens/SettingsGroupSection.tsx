@@ -1,12 +1,16 @@
 import { useId, useMemo, useState } from "react";
+import { toFailure } from "@/core/api";
 import { Badge, Card } from "@/shared/ui/primitives";
-import { Field, Form, Input, SaveBar, Select, Textarea, Toggle } from "@/shared/ui/forms";
+import { Field, Form, Input, ListInput, SaveBar, Select, Textarea, Toggle } from "@/shared/ui/forms";
 import { ConfirmDialog } from "@/shared/ui/overlays";
 import { useToast } from "@/shared/ui/feedback";
 import { useUnsavedGuard } from "@/shared/hooks";
 import type { Setting, SettingGroup } from "@/entities/organisation";
 import { useSaveSettings } from "../hooks/useOrganisation";
 import { dangerousEdits, pendingSettingUpdates, settingsFor, type SettingsSection } from "../service";
+
+/** One empty list, so an unset `stringList` does not hand `ListInput` a new array each render. */
+const NO_ITEMS: readonly string[] = [];
 
 /**
  * A group of key/value settings, rendered from the server's declarations.
@@ -86,7 +90,7 @@ export function SettingsGroupSection({
       setSavedAt(Date.now());
       toast.success("Gespeichert", `${updates.length} Einstellung(en) übernommen.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(toFailure(err).message);
     } finally {
       setSaving(false);
     }
@@ -263,18 +267,11 @@ function SettingControl({
           onChange={(e) => onChange(e.target.value)}
         />
       ) : setting.type === "stringList" ? (
-        <Input
+        <ListInput
           id={id}
           disabled={disabled}
-          value={Array.isArray(value) ? (value as string[]).join(", ") : ""}
-          onChange={(e) =>
-            onChange(
-              e.target.value
-                .split(",")
-                .map((part) => part.trim())
-                .filter(Boolean),
-            )
-          }
+          value={Array.isArray(value) ? (value as string[]) : NO_ITEMS}
+          onChange={(next) => onChange(next)}
         />
       ) : setting.type === "number" ? (
         <Input

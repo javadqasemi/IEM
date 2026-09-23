@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { invalidate, useQuery, type Paginated } from "@/core/api";
+import { invalidate, revalidate, settle, useQuery, type Paginated } from "@/core/api";
 import type {
   AcknowledgeDraft,
   Drawing,
@@ -59,6 +59,17 @@ import {
  * the register open beside the Planversand they just sent.
  */
 const KEY = "drawings";
+
+/**
+ * A write that returns the whole plan: primed, and the rest of the prefix
+ * invalidated — the Planversand reasoning below still decides what else is
+ * stale; the plan on screen is simply not among it (UX-03).
+ */
+function settleDrawing(dto: Parameters<typeof toDrawingDetail>[0]): DrawingDetail {
+  const detail = toDrawingDetail(dto);
+  settle(KEY, { key: [KEY, "detail", detail.id], data: detail });
+  return detail;
+}
 
 function listKey(query: DrawingQuery): (string | number)[] {
   return [
@@ -188,6 +199,8 @@ export type DrawingMutations = {
   createTransmittal: (draft: TransmittalDraft) => Promise<TransmittalResult>;
   acknowledge: (id: string, draft: AcknowledgeDraft) => Promise<TransmittalDetail>;
   exportTransmittalsCsv: (query: TransmittalQuery) => Promise<void>;
+  /** After a 409: fetch the newer plan without taking this one off screen. */
+  reload: (id: string) => void;
 };
 
 /**
@@ -206,20 +219,17 @@ export type DrawingMutations = {
 export function useDrawingMutations(): DrawingMutations {
   const create = useCallback(async (draft: DrawingDraft) => {
     const dto = await drawingRepository.create(toCreateDrawingBody(draft));
-    invalidate(KEY);
-    return toDrawingDetail(dto);
+    return settleDrawing(dto);
   }, []);
 
   const update = useCallback(async (id: string, edit: DrawingEdit) => {
     const dto = await drawingRepository.update(id, toUpdateDrawingBody(edit));
-    invalidate(KEY);
-    return toDrawingDetail(dto);
+    return settleDrawing(dto);
   }, []);
 
   const changeStatus = useCallback(async (id: string, change: DrawingStatusChange) => {
     const dto = await drawingRepository.changeStatus(id, toStatusBody(change));
-    invalidate(KEY);
-    return toDrawingDetail(dto);
+    return settleDrawing(dto);
   }, []);
 
   const remove = useCallback(async (id: string) => {
@@ -245,8 +255,9 @@ export function useDrawingMutations(): DrawingMutations {
 
   const acknowledge = useCallback(async (id: string, draft: AcknowledgeDraft) => {
     const dto = await drawingRepository.acknowledge(id, toAcknowledgeBody(draft));
-    invalidate(KEY);
-    return toTransmittalDetail(dto);
+    const detail = toTransmittalDetail(dto);
+    settle(KEY, { key: [KEY, "transmittal", detail.id], data: detail });
+    return detail;
   }, []);
 
   const exportTransmittalsCsv = useCallback(
@@ -254,7 +265,13 @@ export function useDrawingMutations(): DrawingMutations {
     [],
   );
 
+  const reload = useCallback((id: string) => {
+    revalidate([KEY, "detail", id]);
+    revalidate([KEY, "versions", id]);
+  }, []);
+
   return {
+    reload,
     create,
     update,
     changeStatus,

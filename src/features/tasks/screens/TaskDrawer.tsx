@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import { useAuth } from "@/core/auth";
 import {
   OverdueBadge,
@@ -60,7 +60,7 @@ export function TaskDrawer({ id, onClose }: { id: string | null; onClose: () => 
       await action();
       toast.success(success);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Nicht möglich.");
+      toast.error(toFailure(err).message);
     } finally {
       setBusy(false);
     }

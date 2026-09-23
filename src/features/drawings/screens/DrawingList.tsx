@@ -17,7 +17,6 @@ import {
   Card,
   DownloadButton,
   EmptyState,
-  ErrorState,
   PageHeader,
 } from "@/shared/ui/primitives";
 import { SearchInput, Select } from "@/shared/ui/forms";
@@ -171,8 +170,6 @@ export function DrawingList() {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.refetch} />;
-
   return (
     <>
       <PageHeader
@@ -257,8 +254,10 @@ export function DrawingList() {
           rowKey={(r) => r.id}
           // A route, not a drawer: a plan is cited by number and its URL gets
           // pasted into an e-mail, the same argument Sitzungen made.
-          onRowClick={(r) => navigate(`/plaene/${r.id}`)}
+          open={{ href: (r) => `#/plaene/${r.id}` }}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.refetch}
           caption="Pläne"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}

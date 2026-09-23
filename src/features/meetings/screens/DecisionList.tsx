@@ -15,7 +15,6 @@ import {
   Card,
   DownloadButton,
   EmptyState,
-  ErrorState,
   PageHeader,
 } from "@/shared/ui/primitives";
 import { SearchInput } from "@/shared/ui/forms";
@@ -165,8 +164,6 @@ export function DecisionList() {
     },
   ];
 
-  if (list.error) return <ErrorState message={list.error} onRetry={list.refetch} />;
-
   return (
     <>
       <PageHeader
@@ -234,8 +231,10 @@ export function DecisionList() {
           rows={list.data?.items ?? []}
           columns={columns}
           rowKey={(r) => r.id}
-          onRowClick={(r) => navigate(`/entscheide/${r.id}`)}
+          open={{ href: (r) => `#/entscheide/${r.id}` }}
           loading={list.loading}
+          error={list.error}
+          onRetry={list.refetch}
           caption="Entscheide"
           page={list.data?.page ?? 1}
           pages={list.data?.pages ?? 1}

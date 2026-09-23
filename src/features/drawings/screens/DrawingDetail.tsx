@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { toFailure } from "@/core/api";
 import { Link, navigate, useRoute, usePageTitle } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import {
@@ -453,7 +454,7 @@ function StatusButton({ drawing }: { drawing: Drawing }) {
                 } catch (err) {
                   // The server's refusal, verbatim: "Wer den Plan gezeichnet
                   // hat, kann ihn nicht selbst prüfen." says what to do next.
-                  setError(err instanceof Error ? err.message : "Nicht möglich.");
+                  setError(toFailure(err).message);
                 } finally {
                   setBusy(false);
                 }
@@ -586,7 +587,7 @@ function DeleteButton({ drawing }: { drawing: Drawing }) {
             toast.success("Gelöscht");
             navigate("/plaene");
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+            toast.error(toFailure(err).message);
           } finally {
             setBusy(false);
             setOpen(false);

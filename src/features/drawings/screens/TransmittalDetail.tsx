@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toFailure } from "@/core/api";
 import { Link, usePageTitle } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import {
@@ -222,7 +223,7 @@ function RecipientRow({
               await mutations.acknowledge(transmittalId, { recipientId: recipient.id });
               toast.success("Empfang bestätigt");
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+              toast.error(toFailure(err).message);
             } finally {
               setBusy(false);
             }

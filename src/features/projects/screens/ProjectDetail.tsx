@@ -1,4 +1,5 @@
 import { Suspense, useState, type ComponentType } from "react";
+import { toFailure } from "@/core/api";
 import { Link, navigate, useRoute } from "@/core/router";
 import { useAuth } from "@/core/auth";
 import {
@@ -333,7 +334,7 @@ function StatusButton({ project }: { project: Project }) {
                   // weder erreicht noch ausdrücklich erlassen." is a better
                   // message than anything this screen could compose, and it is
                   // the authoritative one.
-                  setError(err instanceof Error ? err.message : "Nicht möglich.");
+                  setError(toFailure(err).message);
                 } finally {
                   setBusy(false);
                 }
@@ -445,7 +446,7 @@ function DeleteButton({ project }: { project: Project }) {
             toast.success("Gelöscht");
             navigate("/projekte");
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Nicht möglich.");
+            toast.error(toFailure(err).message);
           } finally {
             setBusy(false);
             setOpen(false);

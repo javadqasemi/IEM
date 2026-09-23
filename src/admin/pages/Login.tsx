@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { Button } from "@/shared/ui/primitives";
 import { Field, Input, OtpInput, RecoveryCodeInput } from "@/shared/ui/forms";
 import { Wordmark } from "@/components/Wordmark";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import { authRepository } from "@/core/auth";
 import { useAuth } from "@/core/auth";
 import type { MfaRequired } from "@/core/auth";
@@ -132,7 +132,7 @@ function SignIn() {
       // The server's message is shown as-is. It is deliberately the same for a
       // wrong password and an unknown address, and it says something useful
       // when an account is locked — rewording it here would lose that.
-      setError(err instanceof ApiError ? err.message : "Die Anmeldung ist fehlgeschlagen.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }
@@ -266,7 +266,7 @@ function MfaStep({
         thing has expired. Rewording it here would lose that, and guessing
         which case it was would be guessing.
       */
-      setError(err instanceof ApiError ? err.message : "Die Bestätigung ist fehlgeschlagen.");
+      setError(toFailure(err).message);
       // The code is spent either way — right or wrong, it will not be
       // accepted twice — so clearing it saves a select-all before retyping.
       setCode("");
@@ -440,7 +440,7 @@ function SetPassword({ token, invite }: { token: string; invite: boolean }) {
       await authRepository.resetPassword(token, password);
       setDone(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Das hat nicht geklappt.");
+      setError(toFailure(err).message);
     } finally {
       setBusy(false);
     }

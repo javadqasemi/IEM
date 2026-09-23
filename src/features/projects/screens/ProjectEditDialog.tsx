@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ApiError } from "@/core/api";
+import { toFailure } from "@/core/api";
 import {
   PRIORITY_OPTIONS,
   SIA_PHASE_OPTIONS,
@@ -9,6 +9,7 @@ import {
 } from "@/entities/project";
 import { Badge, Button } from "@/shared/ui/primitives";
 import { Modal } from "@/shared/ui/overlays";
+import { CONFLICT_BLOCKS_SAVE, ConflictNotice } from "@/shared/ui/feedback";
 import {
   DateInput,
   EntityPicker,
@@ -36,9 +37,12 @@ import { toEmployeeOption } from "../mapper";
  * A 409 is handled differently from every other error here, and that is the
  * point of the status being distinct: a 400 means "fix your input" and leaves
  * the form alone, while a 409 means "somebody else got there first" and the
- * only safe thing is to stop and reload. The dialog says so and offers the
- * reload; it does **not** silently re-submit with the new version, which would
- * be a two-click way to do exactly the overwrite the lock exists to prevent.
+ * only safe thing is to stop and reload. The dialog says so above the form —
+ * which stays, so the input is not lost from view — and offers the newer
+ * version (`ConflictNotice`); it does **not** silently re-submit with the new
+ * version, which would be a two-click way to do exactly the overwrite the lock
+ * exists to prevent. The reload refetches the project in place rather than
+ * reloading the whole application, which is what it used to do.
  *
  * `status` is not here. It has its own route, its own permission and its own
  * preconditions — see `ProjectDetail`'s status control.
@@ -112,47 +116,20 @@ export function ProjectEditDialog({
       });
       onSaved(next);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setConflict(err.message);
+      const failure = toFailure(err);
+      if (failure.kind === "conflict") {
+        setConflict(failure.message);
       } else {
-        if (err instanceof ApiError && err.fields) setErrors(err.fields);
-        setError(err instanceof Error ? err.message : "Speichern nicht möglich.");
+        setErrors(failure.fields);
+        setError(failure.message);
       }
     } finally {
       setBusy(false);
     }
   }
 
-  if (conflict) {
-    return (
-      <Modal
-        open
-        onClose={onClose}
-        title="Inzwischen geändert"
-        description="Jemand anderes hat dieses Projekt gespeichert, während es hier offen war."
-        footer={
-          <>
-            <Button variant="ghost" onClick={onClose}>
-              Verwerfen
-            </Button>
-            {/*
-              Reload, not "save anyway". A button that resubmitted with the new
-              version would be a two-click way to do exactly the overwrite the
-              lock exists to prevent — and it would look like the safe option,
-              which is worse.
-            */}
-            <Button onClick={() => window.location.reload()}>Neu laden</Button>
-          </>
-        }
-      >
-        <p className="text-[14px] leading-relaxed">{conflict}</p>
-        <p className="mt-3 text-[13px] text-muted">
-          Ihre Eingaben werden nicht gespeichert. Der Verlauf des Projekts zeigt, was geändert
-          wurde.
-        </p>
-      </Modal>
-    );
-  }
+  /** Why "Speichern" cannot be pressed, most important first. */
+  const blocked = conflict ? CONFLICT_BLOCKS_SAVE : !name.trim() ? "Projektname fehlt." : null;
 
   return (
     <Modal
@@ -162,6 +139,7 @@ export function ProjectEditDialog({
       title={`${project.number} bearbeiten`}
       description="Status, Team, Gewerke und Termine haben eigene Ansichten."
       size="lg"
+      hint={blocked}
       footer={
         <>
           <Badge tone="neutral">v{project.version}</Badge>
@@ -169,13 +147,32 @@ export function ProjectEditDialog({
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Abbrechen
           </Button>
-          <Button onClick={() => void submit()} busy={busy} disabled={!name.trim()}>
+          <Button
+            onClick={() => void submit()}
+            busy={busy}
+            disabled={Boolean(blocked)}
+            disabledReason={blocked}
+          >
             Speichern
           </Button>
         </>
       }
     >
       <Form onSubmit={() => void submit()} error={error}>
+        {conflict ? (
+          /*
+            Reload, not "save anyway" — see `ConflictNotice`. The form stays
+            below it so the reader can see, and copy, what they typed.
+          */
+          <ConflictNotice
+            message={conflict}
+            compareHint="Der Verlauf des Projekts zeigt, was geändert wurde."
+            onReload={() => {
+              mutations.reload(project.id);
+              onClose();
+            }}
+          />
+        ) : null}
         <Field label="Projektname" htmlFor={ids.name} error={fieldError("name")}>
           <Input
             id={ids.name}

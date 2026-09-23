@@ -233,3 +233,141 @@ describe("the public site and the dashboard do not mix", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/* ================================================================== */
+/* P1A — defects that must not come back                               */
+/* ================================================================== */
+
+/**
+ * Source with its comments removed, so a guard matches code and not the
+ * sentence that explains why the code is gone. Approximate — a `//` inside a
+ * string would be cut — and good enough for the patterns below, none of which
+ * occurs inside a string literal.
+ */
+const withoutComments = (text: string) =>
+  text
+    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+/* ================================================================== */
+/* ================================================================== */
+
+/**
+ * Four shapes the UX defect sweep removed, each of which is one keystroke
+ * from returning — so each is counted here rather than remembered.
+ */
+describe("P1A: a write's result is read before anything is said about it", () => {
+  /**
+   * UX-02. `useMutation().run` resolves to a `MutationResult`, never `null`,
+   * so the type forbids reading `data` from a failure. What the type cannot
+   * see is a result that is **thrown away** — `await remove.run(id);` followed
+   * by a success toast is exactly the shape fourteen call sites had — or one
+   * tested for truthiness, which an object always passes. So this walks the
+   * syntax tree: every `x.run(…)` where `x` came from `useMutation(…)` must be
+   * assigned, and the name it is assigned to must be read as `.ok`.
+   */
+  it("every useMutation().run result is assigned and narrowed on .ok", async () => {
+    const ts = (await import("typescript")).default;
+    const offenders: string[] = [];
+    const files = [...sources(join(SRC, "admin")), ...sources(join(SRC, "features"))].filter(
+      (f) => !/\.test\.tsx?$/.test(f),
+    );
+
+    for (const file of files) {
+      const text = read(file);
+      if (!text.includes("useMutation(")) continue;
+      const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+      const mutations = new Set<string>();
+      const visitDecl = (node: import("typescript").Node) => {
+        if (
+          ts.isVariableDeclaration(node) &&
+          ts.isIdentifier(node.name) &&
+          node.initializer &&
+          ts.isCallExpression(node.initializer) &&
+          ts.isIdentifier(node.initializer.expression) &&
+          node.initializer.expression.text === "useMutation"
+        ) {
+          mutations.add(node.name.text);
+        }
+        ts.forEachChild(node, visitDecl);
+      };
+      visitDecl(source);
+      if (!mutations.size) continue;
+
+      const where = (node: import("typescript").Node) =>
+        `${rel(file)}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}`;
+
+      const visit = (node: import("typescript").Node) => {
+        if (
+          ts.isCallExpression(node) &&
+          ts.isPropertyAccessExpression(node.expression) &&
+          node.expression.name.text === "run" &&
+          ts.isIdentifier(node.expression.expression) &&
+          mutations.has(node.expression.expression.text)
+        ) {
+          let parent = node.parent;
+          if (ts.isAwaitExpression(parent)) parent = parent.parent;
+          if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+            const name = parent.name.text;
+            // The enclosing function body is where the check has to happen.
+            let scope: import("typescript").Node = parent;
+            while (scope && !ts.isFunctionLike(scope)) scope = scope.parent;
+            const body = scope ? scope.getText() : text;
+            if (!new RegExp(`\\b${name}\\.ok\\b`).test(body)) {
+              offenders.push(`${where(node)} — "${name}" is never checked with .ok`);
+            }
+          } else {
+            offenders.push(`${where(node)} — the result of .run() is discarded`);
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("P1A: a list opens through a real link, not a clickable row", () => {
+  /**
+   * UX-19. `onRowClick` put the only way into a record on a `<tr>`, which a
+   * keyboard cannot reach. `DataTable` now takes `open` and renders a link or
+   * a button in the identity cell; the row's own click goes through that
+   * element. `DataTable.tsx` is the one file allowed a handler on a row.
+   */
+  it("no onRowClick prop and no <tr onClick> outside DataTable", () => {
+    const offenders = sources(SRC)
+      .filter((f) => !/\.test\.tsx?$/.test(f))
+      .filter((f) => !f.endsWith(join("shared", "ui", "data", "DataTable.tsx")))
+      .filter((f) => /\bonRowClick\b|<tr\b[^>]*\bonClick=/.test(withoutComments(read(f))))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("P1A: a conflict is not answered by reloading the application", () => {
+  /**
+   * UX-15. Five edit dialogs answered a 409 with `window.location.reload()`,
+   * which threw the reader's input away and restarted the SPA. The answer is
+   * `ConflictNotice`. The error boundary keeps its reload: a render that threw
+   * has no state worth keeping and no smaller unit to restart.
+   */
+  const ALLOWED = [join("shared", "ui", "feedback", "ErrorBoundary.tsx")];
+
+  it("window.location.reload appears only in the error boundary", () => {
+    const offenders = [
+      ...sources(join(SRC, "admin")),
+      ...sources(join(SRC, "features")),
+      ...sources(join(SRC, "shared")),
+      ...sources(join(SRC, "widgets")),
+    ]
+      .filter((f) => !/\.test\.tsx?$/.test(f))
+      .filter((f) => !ALLOWED.some((allowed) => f.endsWith(allowed)))
+      .filter((f) => /location\.reload\(/.test(withoutComments(read(f))))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
+});
