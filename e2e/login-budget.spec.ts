@@ -45,6 +45,22 @@ function sources(): { name: string; code: string }[] {
     }));
 }
 
+/**
+ * Specs whose sign-in traffic **never leaves the browser**.
+ *
+ * `otp-motion.spec.ts` drives the sign-in form against an API that exists
+ * only as a `route.fulfill` handler, because the states it checks — a
+ * verification held open, a refusal and an acceptance on cue — cannot be
+ * produced on demand by the real one. Nothing it sends reaches the throttle,
+ * so there is nothing to pace, and pacing it anyway would spend real budget
+ * on requests that are never made.
+ *
+ * An exemption is a hole in a guard, so it is checked rather than trusted:
+ * the last test below fails a listed file that stops fulfilling *every* API
+ * request itself, or that has any way to let one through.
+ */
+const FULFILLED_IN_BROWSER = ["otp-motion.spec.ts"];
+
 test.describe("the sign-in budget", () => {
   test("every path to /auth/login reserves an attempt first", () => {
     /*
@@ -56,6 +72,7 @@ test.describe("the sign-in budget", () => {
       heard of the budget, not an off-by-one.
     */
     const offenders = sources()
+      .filter(({ name }) => !FULFILLED_IN_BROWSER.includes(name))
       .filter(({ code }) => /auth\/login/.test(code))
       .filter(({ code }) => !/spendLogin\s*\(/.test(code))
       .map(({ name }) => name);
@@ -71,6 +88,7 @@ test.describe("the sign-in budget", () => {
     // because it looks like a click rather than a request.
     const offenders = sources()
       .filter(({ name }) => name !== "login-budget.spec.ts")
+      .filter(({ name }) => !FULFILLED_IN_BROWSER.includes(name))
       .filter(({ code }) => /name:\s*\/\^Anmelden\$\/\s*\}\s*\)\s*\.click\(\)/.test(code))
       .filter(({ code }) => !/spendLogin\s*\(/.test(code))
       .map(({ name }) => name);
@@ -97,6 +115,7 @@ test.describe("the sign-in budget", () => {
   test("every path to an MFA verification route reserves an attempt first", () => {
     const offenders = sources()
       .filter(({ name }) => name !== "login-budget.spec.ts")
+      .filter(({ name }) => !FULFILLED_IN_BROWSER.includes(name))
       .filter(({ code }) => /auth\/mfa\/challenge|mfa\/enroll\/verify|auth\/reauthenticate/.test(code))
       .filter(({ code }) => !/spendMfa\s*\(/.test(code))
       .map(({ name }) => name);
@@ -112,6 +131,19 @@ test.describe("the sign-in budget", () => {
     // above pass by comparing an empty list with itself.
     const withLogins = sources().filter(({ code }) => /spendLogin\s*\(/.test(code));
     expect(withLogins.length, "no file calls spendLogin() at all").toBeGreaterThan(2);
+  });
+
+  test("an exempt file really does answer every API request itself", () => {
+    for (const name of FULFILLED_IN_BROWSER) {
+      // The raw text, not `sources()`: the route glob contains `*/`, which the
+      // comment stripper would take for the end of a block comment.
+      const code = readFileSync(join(E2E, name), "utf8");
+      expect(code, `${name} must route the whole API`).toMatch(/\.route\(\s*"\*\*\/api\/v1\/\*\*"/);
+      // Any of these would let a request through to the real, throttled API.
+      expect(code, `${name} must not pass a request on`).not.toMatch(
+        /route\.(continue|fallback|fetch)\s*\(|request\.newContext|apiAs\s*\(|signIn\s*\(/,
+      );
+    }
   });
 
   /*

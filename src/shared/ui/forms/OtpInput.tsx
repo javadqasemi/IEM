@@ -1,4 +1,4 @@
-import { forwardRef, type ChangeEvent, type ClipboardEvent } from "react";
+import { forwardRef, useState, type ChangeEvent, type ClipboardEvent, type MouseEvent } from "react";
 import { cn } from "@/shared/utils/cn";
 
 /**
@@ -40,8 +40,25 @@ import { cn } from "@/shared/utils/cn";
  *   to trigger. `onComplete` is offered so a caller can focus the button
  *   instead.
  *
- * `tracking` and the monospace face are what make six digits readable as
- * three-and-three without splitting the element.
+ * ## Six boxes on screen, one input underneath
+ *
+ * The *look* of six slots is drawn by an `aria-hidden` row of spans, and the
+ * real input lies transparently on top of it. Everything above still holds —
+ * there is still exactly one element to focus, label, paste into and autofill
+ * — and the slots only mirror its value and its caret:
+ *
+ * - the slot under the caret is the **active** one: a gold border and a soft
+ *   gold glow, which is also this control's focus indicator (the input's own
+ *   outline is suppressed because it would outline an invisible box);
+ * - clicking a filled slot selects that one digit, so typing replaces it —
+ *   the one behaviour of separate boxes worth having;
+ * - a selection across several digits is drawn across their slots.
+ *
+ * Moving "to the next box" and `Backspace` "into the previous box" are the
+ * caret moving inside one input, which the platform already does.
+ *
+ * `invalid` and `success` tone every slot at once. The styles are the `otp-`
+ * block in `admin.css`.
  */
 export const OtpInput = forwardRef<HTMLInputElement, {
   value: string;
@@ -51,6 +68,8 @@ export const OtpInput = forwardRef<HTMLInputElement, {
   id: string;
   length?: number;
   invalid?: boolean;
+  /** The server accepted the code: every slot turns to the success tone. */
+  success?: boolean;
   disabled?: boolean;
   autoFocus?: boolean;
   /** For the rare second field on a screen — the label text is the caller's. */
@@ -58,57 +77,133 @@ export const OtpInput = forwardRef<HTMLInputElement, {
   "aria-invalid"?: boolean;
   className?: string;
 }>(function OtpInput(
-  { value, onChange, onComplete, id, length = 6, invalid, disabled, autoFocus, className, ...aria },
+  {
+    value,
+    onChange,
+    onComplete,
+    id,
+    length = 6,
+    invalid,
+    success,
+    disabled,
+    autoFocus,
+    className,
+    ...aria
+  },
   ref,
 ) {
+  /*
+    The caret, mirrored. `null` while the input does not have focus, so no
+    slot claims to be active when the keyboard is somewhere else. Updated on
+    `select`, which React fires for every caret move — typing, arrows, clicks,
+    select-all — so this is a handful of renders per keystroke, not per frame.
+  */
+  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
+  const track = (el: HTMLInputElement) =>
+    setSelection({ start: el.selectionStart ?? el.value.length, end: el.selectionEnd ?? el.value.length });
+
   const accept = (raw: string) => {
     const digits = raw.replace(/\D/g, "").slice(0, length);
     onChange(digits);
     if (digits.length === length) onComplete?.();
   };
 
+  const state = invalid ? "error" : success ? "success" : undefined;
+  const half = length % 2 === 0 ? length / 2 : 0;
+  const activeSlot =
+    selection && selection.end - selection.start <= 1
+      ? Math.min(selection.start, length - 1)
+      : -1;
+
   return (
-    <input
-      ref={ref}
-      id={id}
-      value={value}
-      onChange={(e: ChangeEvent<HTMLInputElement>) => accept(e.target.value)}
-      /*
-        Paste is handled explicitly as well as through `onChange`, because a
-        paste over a *selection* in some browsers fires `paste` with the new
-        text and `change` with a value the filter would then re-truncate.
-        Taking the clipboard directly makes the result the same either way.
-      */
-      onPaste={(e: ClipboardEvent<HTMLInputElement>) => {
-        const pasted = e.clipboardData.getData("text");
-        if (!pasted) return;
-        e.preventDefault();
-        accept(pasted);
-      }}
-      type="text"
-      inputMode="numeric"
-      // A pattern the browser can validate, so a native form report says
-      // something true rather than "please match the requested format".
-      pattern={`[0-9]{${length}}`}
-      maxLength={length}
-      autoComplete="one-time-code"
-      autoCorrect="off"
-      autoCapitalize="off"
-      spellCheck={false}
-      disabled={disabled}
-      autoFocus={autoFocus}
-      aria-invalid={invalid || aria["aria-invalid"] || undefined}
-      aria-describedby={aria["aria-describedby"]}
-      className={cn(
-        "field-input text-center font-mono text-[22px] tracking-[0.5em] tnum",
-        // The tracking pushes the visual centre left by half a letter-space,
-        // because the gap after the last digit has nothing after it to
-        // balance. An equal indent puts the digits back in the middle.
-        "indent-[0.5em]",
-        invalid && "field-input-error",
-        className,
-      )}
-    />
+    <div
+      className={cn("otp", className)}
+      data-state={state}
+      data-disabled={disabled || undefined}
+    >
+      <input
+        ref={ref}
+        id={id}
+        value={value}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => accept(e.target.value)}
+        onFocus={(e) => track(e.currentTarget)}
+        onSelect={(e) => track(e.currentTarget)}
+        onBlur={() => setSelection(null)}
+        /*
+          A click lands on the invisible text, whose caret position has nothing
+          to do with the slot underneath the pointer. So the slot is worked out
+          from the pointer instead: a filled slot selects its digit (typing then
+          replaces it), anything past the end puts the caret at the end.
+        */
+        onMouseUp={(e: MouseEvent<HTMLInputElement>) => {
+          const el = e.currentTarget;
+          const boxes = Array.from(el.nextElementSibling?.children ?? [], (s) => s.getBoundingClientRect());
+          if (!boxes.length) return;
+          // The slot under the pointer, or the nearest one when it is in a gap.
+          let slot = 0;
+          for (let i = 0; i < boxes.length; i += 1) if (e.clientX >= boxes[i].left) slot = i;
+          if (slot < el.value.length) el.setSelectionRange(slot, slot + 1);
+          else el.setSelectionRange(el.value.length, el.value.length);
+          track(el);
+        }}
+        /*
+          Paste is handled explicitly as well as through `onChange`, because a
+          paste over a *selection* in some browsers fires `paste` with the new
+          text and `change` with a value the filter would then re-truncate.
+          Taking the clipboard directly makes the result the same either way.
+        */
+        onPaste={(e: ClipboardEvent<HTMLInputElement>) => {
+          const pasted = e.clipboardData.getData("text");
+          if (!pasted) return;
+          e.preventDefault();
+          accept(pasted);
+        }}
+        type="text"
+        inputMode="numeric"
+        // A pattern the browser can validate, so a native form report says
+        // something true rather than "please match the requested format".
+        pattern={`[0-9]{${length}}`}
+        maxLength={length}
+        autoComplete="one-time-code"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        aria-invalid={invalid || aria["aria-invalid"] || undefined}
+        aria-describedby={aria["aria-describedby"]}
+        className="otp-input"
+      />
+      <div
+        aria-hidden="true"
+        className="otp-slots"
+        style={{
+          gridTemplateColumns: half
+            ? `repeat(${half}, minmax(0, 1fr)) 0.25rem repeat(${half}, minmax(0, 1fr))`
+            : `repeat(${length}, minmax(0, 1fr))`,
+        }}
+      >
+        {Array.from({ length }, (_, i) => {
+          const selected =
+            selection !== null && selection.end - selection.start > 1 && i >= selection.start && i < selection.end;
+          return (
+            <span
+              key={i}
+              className="otp-slot tnum"
+              // Three and three, with a narrow column between the halves —
+              // the grouping the old tracking gave the single field.
+              style={half && i >= half ? { gridColumn: i + 2 } : undefined}
+              data-active={i === activeSlot || undefined}
+              data-selected={selected || undefined}
+              data-filled={i < value.length || undefined}
+            >
+              {value[i] ?? ""}
+              {i === activeSlot && i >= value.length ? <span className="otp-caret" /> : null}
+            </span>
+          );
+        })}
+      </div>
+    </div>
   );
 });
 

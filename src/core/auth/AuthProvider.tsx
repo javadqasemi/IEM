@@ -45,10 +45,19 @@ type AuthState = {
    * Resolves with what the server said about the recovery codes, so the
    * screen can pass the warning through to the dashboard. `null` is never
    * returned — a failure throws, and the form shows the message.
+   *
+   * `beforeAdopt` runs **after** the server has accepted the code and before
+   * the session is adopted — the moment the sign-in screen is replaced by the
+   * dashboard. It exists so that screen can show the acceptance before it
+   * disappears. It is only ever reached through a resolved request, so it
+   * cannot make a refused code look accepted; and it decides nothing, because
+   * by the time it runs the session already exists on the server and in the
+   * refresh cookie.
    */
   completeMfa: (
     challenge: string,
     input: { code?: string; recoveryCode?: string },
+    options?: { beforeAdopt?: () => Promise<void> },
   ) => Promise<{ usedRecoveryCode: boolean; remainingRecoveryCodes: number }>;
   logout: () => Promise<void>;
   reload: () => Promise<void>;
@@ -236,8 +245,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const completeMfa = useCallback(
-    async (challenge: string, input: { code?: string; recoveryCode?: string }) => {
+    async (
+      challenge: string,
+      input: { code?: string; recoveryCode?: string },
+      options?: { beforeAdopt?: () => Promise<void> },
+    ) => {
       const result = await authRepository.verifyMfa(challenge, input);
+      // A presentational pause must never cost the session it is presenting,
+      // nor turn an accepted code into an error on screen: whatever it does,
+      // the result is adopted and the call resolves.
+      try {
+        await options?.beforeAdopt?.();
+      } catch {
+        /* presentational only */
+      }
       adopt(result);
       return {
         usedRecoveryCode: result.usedRecoveryCode ?? false,

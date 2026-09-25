@@ -15,3 +15,12 @@ export { ErrorBoundary, RootErrorBoundary } from "./ErrorBoundary";
 export { ModulePlaceholder, type ModuleStatus } from "./ModulePlaceholder";
 export { ConflictNotice, CONFLICT_BLOCKS_SAVE } from "./ConflictNotice";
 export { Callout, type CalloutTone } from "./Callout";
+export { VerificationMotion, type VerificationMotionStatus } from "./VerificationMotion";
+export {
+  verificationState,
+  prefersReducedMotion,
+  SUCCESS_HOLD_MS,
+  REDUCED_SUCCESS_HOLD_MS,
+  type VerificationPhase,
+  type VerificationState,
+} from "./verification";

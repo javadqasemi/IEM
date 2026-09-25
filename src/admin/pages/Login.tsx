@@ -1,6 +1,14 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/shared/ui/primitives";
 import { Field, Input, OtpInput, RecoveryCodeInput } from "@/shared/ui/forms";
+import {
+  REDUCED_SUCCESS_HOLD_MS,
+  SUCCESS_HOLD_MS,
+  VerificationMotion,
+  prefersReducedMotion,
+  verificationState,
+  type VerificationPhase,
+} from "@/shared/ui/feedback";
 import { Wordmark } from "@/components/Wordmark";
 import { toFailure } from "@/core/api";
 import { authRepository } from "@/core/auth";
@@ -221,6 +229,20 @@ function SignIn() {
  * **`autoFocus` on the code field.** The reader arrived here by pressing a
  * button, so the keyboard is already theirs and the next thing they will do
  * is type six digits. On a phone this is also what raises the number pad.
+ *
+ * ---
+ *
+ * **The verification is shown, and only the server can finish it.** While the
+ * request is in flight the form dims and blurs under `VerificationMotion`; the
+ * success animation starts inside `completeMfa`'s `beforeAdopt`, which is
+ * reached only after the server has accepted the code and issued the session.
+ * The hold that follows delays the dashboard by under a second and decides
+ * nothing. A refusal restores the form, shows the refusal through `Field`, and
+ * puts the keyboard back in the field.
+ *
+ * The state is `phase` (where the request is) and `error` (what the server
+ * last said); `verificationState` derives the one value the markup reads, so
+ * there are no two booleans that can disagree about what is on screen.
  */
 function MfaStep({
   challenge,
@@ -236,11 +258,32 @@ function MfaStep({
   const [code, setCode] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<VerificationPhase>("entry");
   const codeId = useId();
   const recoveryId = useId();
+  const codeRef = useRef<HTMLInputElement>(null);
+  const recoveryRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
+  const busy = phase !== "entry";
   const ready = mode === "totp" ? code.length === 6 : recoveryCode.trim().length > 0;
+  const state = verificationState({ phase, error, value: mode === "totp" ? code : recoveryCode });
+
+  /*
+    The dimmed form is `inert` while it is being checked: the overlay already
+    stops the pointer, and this stops the keyboard reaching "Abbrechen" or the
+    recovery switch under a blur. Set as a property because React 18 does not
+    know the attribute.
+  */
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.inert = busy;
+  }, [busy]);
+
+  // After a refusal the field was disabled a moment ago and has lost focus;
+  // the next thing the reader does is type again, so it goes back there.
+  useEffect(() => {
+    if (state === "error") (mode === "totp" ? codeRef : recoveryRef).current?.focus();
+  }, [state, mode]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -249,11 +292,19 @@ function MfaStep({
     // five, and can only produce the answer already in flight.
     if (busy || !ready) return;
     setError("");
-    setBusy(true);
+    setPhase("verifying");
     try {
       await completeMfa(
         challenge.challenge,
         mode === "totp" ? { code } : { recoveryCode },
+        {
+          beforeAdopt: async () => {
+            setPhase("success");
+            await new Promise((resolve) =>
+              setTimeout(resolve, prefersReducedMotion() ? REDUCED_SUCCESS_HOLD_MS : SUCCESS_HOLD_MS),
+            );
+          },
+        },
       );
       onDone();
     } catch (err) {
@@ -270,82 +321,132 @@ function MfaStep({
       // The code is spent either way — right or wrong, it will not be
       // accepted twice — so clearing it saves a select-all before retyping.
       setCode("");
-    } finally {
-      setBusy(false);
+      setPhase("entry");
     }
   }
 
   return (
-    <form onSubmit={submit} className="panel flex flex-col gap-5 p-6">
-      <h1 className="font-display text-xl font-semibold text-ink">Zwei-Faktor-Bestätigung</h1>
-
-      <p className="text-[14px] leading-relaxed text-muted">
-        {mode === "totp"
-          ? "Bitte den sechsstelligen Code aus Ihrer Authenticator-App eingeben."
-          : "Bitte einen Ihrer Wiederherstellungscodes eingeben. Jeder Code funktioniert genau einmal."}
+    <form
+      onSubmit={submit}
+      className="panel vm-stage p-6"
+      data-state={state}
+      aria-busy={busy || undefined}
+    >
+      {/*
+        What the motion says, in words, for a screen reader. Always in the DOM
+        so the change of text is what gets announced; the refusal is not here
+        because `Field` already announces it (`role="alert"`) and wires it to
+        the input.
+      */}
+      <p role="status" className="sr-only">
+        {phase === "verifying"
+          ? "Code wird geprüft."
+          : phase === "success"
+            ? "Code bestätigt. Sie werden angemeldet."
+            : ""}
       </p>
 
-      {/*
-        The error goes **through `Field`**, not beside it.
+      {busy ? (
+        <div className="vm-overlay">
+          <VerificationMotion status={phase === "success" ? "success" : "verifying"} />
+          <div key={phase} aria-hidden="true" className="vm-message flex flex-col gap-1">
+            {phase === "success" ? (
+              <>
+                <p className="text-[15px] font-semibold text-disc-energy">Bestätigt</p>
+                <p className="text-[13px] text-muted">Sie werden angemeldet …</p>
+              </>
+            ) : (
+              <p className="text-[14px] font-medium text-ink">Code wird geprüft …</p>
+            )}
+          </div>
+        </div>
+      ) : null}
 
-        A `<p role="alert">` of its own is announced once and then belongs to
-        nothing: a reader who tabs back to the input hears the label and not
-        the reason it was refused. `Field` owns that relationship — it clones
-        its child to supply `aria-describedby` and `aria-invalid` — and
-        CLAUDE.md records the release where every hand-written
-        `<Field><Input/></Field>` in the dashboard skipped it.
-      */}
-      {mode === "totp" ? (
-        <Field label="Code aus der App" htmlFor={codeId} error={error || undefined}>
-          <OtpInput
-            id={codeId}
-            value={code}
-            onChange={setCode}
-            invalid={Boolean(error)}
-            disabled={busy}
-            autoFocus
-          />
-        </Field>
-      ) : (
-        <Field
-          label="Wiederherstellungscode"
-          htmlFor={recoveryId}
-          hint="Gross- und Kleinschreibung sowie der Bindestrich spielen keine Rolle."
-          error={error || undefined}
-        >
-          <RecoveryCodeInput
-            id={recoveryId}
-            value={recoveryCode}
-            onChange={setRecoveryCode}
-            invalid={Boolean(error)}
-            disabled={busy}
-            autoFocus
-          />
-        </Field>
-      )}
+      <div ref={contentRef} className="vm-content flex flex-col gap-5">
+        <h1 className="font-display text-xl font-semibold text-ink">Zwei-Faktor-Bestätigung</h1>
 
-      <Button type="submit" variant="primary" size="lg" busy={busy} disabled={!ready}>
-        Bestätigen
-      </Button>
+        <p className="text-[14px] leading-relaxed text-muted">
+          {mode === "totp"
+            ? "Bitte den sechsstelligen Code aus Ihrer Authenticator-App eingeben."
+            : "Bitte einen Ihrer Wiederherstellungscodes eingeben. Jeder Code funktioniert genau einmal."}
+        </p>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-[13px]">
-        <button
-          type="button"
-          onClick={() => {
-            setMode(mode === "totp" ? "recovery" : "totp");
-            setError("");
-          }}
-          className="text-brand-blue transition-colors hover:text-brand-bronze"
+        {/*
+          The error goes **through `Field`**, not beside it.
+
+          A `<p role="alert">` of its own is announced once and then belongs to
+          nothing: a reader who tabs back to the input hears the label and not
+          the reason it was refused. `Field` owns that relationship — it clones
+          its child to supply `aria-describedby` and `aria-invalid` — and
+          CLAUDE.md records the release where every hand-written
+          `<Field><Input/></Field>` in the dashboard skipped it.
+        */}
+        {mode === "totp" ? (
+          <Field label="Code aus der App" htmlFor={codeId} error={error || undefined}>
+            <OtpInput
+              ref={codeRef}
+              id={codeId}
+              value={code}
+              onChange={setCode}
+              invalid={Boolean(error)}
+              success={phase === "success"}
+              disabled={busy}
+              autoFocus
+            />
+          </Field>
+        ) : (
+          <Field
+            label="Wiederherstellungscode"
+            htmlFor={recoveryId}
+            hint="Gross- und Kleinschreibung sowie der Bindestrich spielen keine Rolle."
+            error={error || undefined}
+          >
+            <RecoveryCodeInput
+              ref={recoveryRef}
+              id={recoveryId}
+              value={recoveryCode}
+              onChange={setRecoveryCode}
+              invalid={Boolean(error)}
+              disabled={busy}
+              autoFocus
+            />
+          </Field>
+        )}
+
+        {/*
+          No `busy` spinner: the orbital loader over the form is the progress
+          indicator, and a second one under the blur would only be noise.
+          Disabled is what stops the duplicate submission.
+        */}
+        <Button
+          type="submit"
+          variant="primary"
+          size="lg"
+          disabled={!ready || busy}
+          className="vm-submit"
         >
-          {mode === "totp" ? "Wiederherstellungscode verwenden" : "Doch den Code aus der App"}
-        </button>
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-muted transition-colors hover:text-ink"
-        >
-          Abbrechen
-        </button>
+          {phase === "success" ? "Bestätigt" : "Bestätigen"}
+        </Button>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 text-[13px]">
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === "totp" ? "recovery" : "totp");
+              setError("");
+            }}
+            className="text-brand-blue transition-colors hover:text-brand-bronze"
+          >
+            {mode === "totp" ? "Wiederherstellungscode verwenden" : "Doch den Code aus der App"}
+          </button>
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-muted transition-colors hover:text-ink"
+          >
+            Abbrechen
+          </button>
+        </div>
       </div>
     </form>
   );

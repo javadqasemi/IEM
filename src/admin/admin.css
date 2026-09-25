@@ -179,6 +179,16 @@
     --focus-ring: #003882;
     --selection: rgba(0, 56, 130, 0.16);
     --scrollbar-thumb: #bfcad9;
+
+    /* ---- Verification motion ------------------------------------------
+       The one hue the brand does not already own: the cool end of the warm
+       arc that runs gold → heat-orange → rose while a code is being checked.
+       Muted rather than magenta, it only ever appears as a fading tail on a
+       2px ring and in a glow at low alpha, never as text or a surface. The
+       foreground on the success green is its own token because white reads on
+       the light theme's green (5.5:1) and not on the dark theme's (2.0:1). */
+    --vm-rose: 196 96 128; /* #C46080 */
+    --vm-on-success: 255 255 255;
   }
 
   /* ====================================================================
@@ -259,6 +269,9 @@
     --focus-ring: #8ab0e8;
     --selection: rgba(138, 176, 232, 0.24);
     --scrollbar-thumb: #3e4f6c;
+
+    --vm-rose: 224 132 162;
+    --vm-on-success: 9 14 24;
   }
 
   html {
@@ -475,6 +488,528 @@
     .glass-lens {
       background: rgb(var(--c-brand-navy));
     }
+  }
+}
+
+/* ==================================================================== */
+/* The one-time code, and the motion of checking it                      */
+/* ==================================================================== */
+
+/*
+ * Plain CSS outside any layer, for two reasons. The rules are selectors on
+ * `data-*` state rather than classes a call site composes, so there is nothing
+ * for a utility to override; and emitted after `utilities`, they win over the
+ * `ring-*` box-shadow of `.panel` and the colours of `Button` where the success
+ * state has to restate them.
+ *
+ * **Only `transform` and `opacity` repeat.** Box-shadow and colour change on a
+ * state change — a handful of times per sign-in — and never per frame. The
+ * one exception is the stage's `filter: blur(3px)`, which is applied once when
+ * verification starts and then holds still.
+ *
+ * Components: `OtpInput` (`otp-`), `VerificationMotion` (`vm-`), and the stage
+ * the sign-in's second step wraps its form in (`vm-stage`).
+ */
+
+/* ---- OtpInput: six slots under one transparent input ----------------- */
+
+.otp {
+  position: relative;
+  width: 100%;
+}
+
+/* The real control. Covers the slots, draws nothing itself. 16px so iOS
+   does not zoom the page on focus. */
+.otp-input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  cursor: text;
+}
+/* The focus indicator is the active slot, not an outline round an invisible
+   box. Specificity (0,2,0) beats the global `:focus-visible`. */
+.otp-input:focus,
+.otp-input:focus-visible {
+  outline: none;
+}
+.otp-input::selection {
+  background: transparent;
+}
+.otp-input:disabled {
+  cursor: not-allowed;
+}
+
+.otp-slots {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.otp-slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 3rem;
+  min-width: 0;
+  border-radius: 0.375rem;
+  background-color: rgb(var(--c-surface));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-field-border));
+  /* Invisible normally; in forced-colours mode box-shadows are dropped and a
+     transparent outline is painted in the system colour instead, so the
+     slots keep their edges in Windows high contrast. */
+  outline: 1px solid transparent;
+  outline-offset: -1px;
+  font-family: theme("fontFamily.mono");
+  font-size: 22px;
+  line-height: 1;
+  color: rgb(var(--c-ink));
+  transition:
+    box-shadow 200ms ease,
+    background-color 200ms ease,
+    color 200ms ease;
+}
+
+.otp:not([data-disabled]):hover .otp-slot {
+  box-shadow: inset 0 0 0 1px rgb(var(--c-accent) / 0.6);
+}
+
+/* Focused: gold edge, a soft gold halo, and no more. Gold on white measures
+   3.86:1 and on the dark card well above, so it clears the 3:1 a focus
+   indicator needs. */
+.otp .otp-slot[data-active] {
+  box-shadow:
+    inset 0 0 0 2px rgb(var(--c-brand-gold)),
+    0 0 0 3px rgb(var(--c-brand-sand) / 0.28),
+    0 0 14px -2px rgb(var(--c-brand-gold) / 0.5);
+  outline-width: 2px;
+  outline-offset: -2px;
+}
+.otp .otp-slot[data-selected] {
+  background-color: rgb(var(--c-brand-gold) / 0.14);
+}
+
+.otp-caret {
+  width: 1.5px;
+  height: 1.4em;
+  border-radius: 1px;
+  background-color: rgb(var(--c-brand-gold));
+  animation: otp-blink 1.05s steps(1) infinite;
+}
+
+.otp[data-disabled] .otp-slot {
+  color: rgb(var(--c-muted));
+  background-color: rgb(var(--c-surface-2));
+}
+
+/* Refused: bronze, which is this dashboard's error tone (there is no red in
+   the palette — see `Button`'s `danger`), and one small sideways nudge. */
+.otp[data-state="error"] .otp-slot {
+  box-shadow: inset 0 0 0 1px rgb(var(--c-brand-bronze));
+  background-color: rgb(var(--c-brand-bronze) / 0.05);
+}
+.otp[data-state="error"] .otp-slot[data-active] {
+  box-shadow:
+    inset 0 0 0 2px rgb(var(--c-brand-bronze)),
+    0 0 0 3px rgb(var(--c-brand-bronze) / 0.16);
+}
+.otp[data-state="error"] .otp-slots {
+  animation: otp-nudge 300ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* Accepted: the success green, the same token the toast uses for success. */
+.otp[data-state="success"] .otp-slot {
+  color: rgb(var(--c-disc-energy));
+  background-color: rgb(var(--c-disc-energy) / 0.06);
+  box-shadow:
+    inset 0 0 0 1.5px rgb(var(--c-disc-energy)),
+    0 0 12px -3px rgb(var(--c-disc-energy) / 0.5);
+}
+
+@keyframes otp-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes otp-nudge {
+  20% {
+    transform: translateX(-3px);
+  }
+  45% {
+    transform: translateX(3px);
+  }
+  70% {
+    transform: translateX(-1.5px);
+  }
+}
+
+/* ---- The stage: the form dims while the loader sits over it ---------- */
+
+.vm-stage {
+  position: relative;
+  transition: box-shadow 400ms ease;
+}
+
+.vm-content {
+  transform-origin: 50% 45%;
+  transition:
+    opacity 280ms ease,
+    filter 280ms ease,
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.vm-stage[data-state="verifying"] .vm-content,
+.vm-stage[data-state="success"] .vm-content {
+  opacity: 0.35;
+  filter: blur(3px);
+  transform: scale(0.985);
+}
+
+.vm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+/* On its own card-coloured backing, because what lies behind it is the dimmed
+   form — at some widths the button — and text over that measured below AA in
+   the dark theme. On `surface` its colours are the checked pairs. */
+.vm-message {
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background-color: rgb(var(--c-surface) / 0.94);
+  animation: vm-rise 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* The card's own accent follows the state: warm while checking, green once
+   the server has said yes. Overrides `.panel`'s ring, which is a box-shadow. */
+.vm-stage[data-state="verifying"] {
+  box-shadow:
+    0 0 0 1px rgb(var(--c-brand-gold) / 0.4),
+    0 18px 44px -28px rgb(var(--c-brand-gold) / 0.55);
+}
+.vm-stage[data-state="success"] {
+  box-shadow:
+    0 0 0 1px rgb(var(--c-disc-energy) / 0.55),
+    0 18px 44px -26px rgb(var(--c-disc-energy) / 0.6);
+}
+.vm-stage[data-state="success"] .vm-submit {
+  background-color: rgb(var(--c-disc-energy));
+  color: rgb(var(--vm-on-success));
+  opacity: 1;
+}
+
+/* ---- VerificationMotion --------------------------------------------- */
+
+.vm {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 6rem;
+  height: 6rem;
+}
+.vm > * {
+  position: absolute;
+}
+
+.vm-ambient {
+  inset: -2.25rem;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    rgb(var(--c-brand-sand) / 0.36),
+    rgb(var(--vm-rose) / 0.1) 58%,
+    transparent 74%
+  );
+  transition: opacity 420ms ease;
+  animation: vm-breathe 1.8s ease-in-out infinite alternate;
+}
+.vm-ambient-success {
+  background: radial-gradient(closest-side, rgb(var(--c-disc-energy) / 0.3), transparent 72%);
+  opacity: 0;
+  animation: none;
+}
+.vm[data-status="success"] .vm-ambient {
+  opacity: 0;
+}
+.vm[data-status="success"] .vm-ambient-success {
+  opacity: 1;
+}
+
+/* One rotating element carries the ring and the particle. */
+.vm-orbit {
+  inset: 0;
+  animation: vm-spin 1.05s linear infinite;
+  transition: opacity 360ms ease 120ms;
+}
+
+/* The head of the arc is at twelve o'clock, where the particle is, and it
+   fades backwards through orange and rose to nothing. */
+.vm-ring {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 70deg,
+    rgb(var(--vm-rose) / 0.55) 190deg,
+    rgb(var(--c-disc-heat)) 295deg,
+    rgb(var(--c-brand-sand)) 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* On the ring's centre line: 48px − 6px inset − 1.4px half-band. Absolute
+   stated here because `.vm > *` does not reach inside the orbit — without it
+   the span is inline, and an empty inline box with a shadow draws a line. */
+.vm-particle {
+  position: absolute;
+  top: 7.4px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 0 1.5px rgb(var(--c-brand-sand)),
+    0 0 6px 2px rgb(var(--c-brand-gold) / 0.7),
+    0 0 14px 4px rgb(var(--c-disc-heat) / 0.3);
+}
+
+/* A faint full track while checking; the completed green ring on success. */
+.vm-ring-done {
+  inset: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px rgb(var(--c-brand-gold) / 0.14);
+  transition:
+    box-shadow 320ms ease,
+    background-color 320ms ease;
+}
+
+.vm-core {
+  left: 50%;
+  top: 50%;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: -0.75rem 0 0 -0.75rem;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 42% 38%,
+    #fff 0 16%,
+    rgb(var(--c-brand-sand)) 46%,
+    rgb(var(--c-brand-gold)) 100%
+  );
+  box-shadow:
+    0 0 8px 1px rgb(var(--c-brand-gold) / 0.5),
+    0 0 20px 5px rgb(var(--c-disc-heat) / 0.16);
+  animation: vm-pulse 700ms ease-in-out infinite alternate;
+}
+
+/* Success: the ring speeds up (see the component) and fades as the green
+   ring settles in; the core swells and dissolves; the burst and the check
+   follow it. About 650 ms from first frame to the check at rest. */
+.vm[data-status="success"] .vm-orbit {
+  opacity: 0;
+}
+.vm[data-status="success"] .vm-ring {
+  transform: scale(1.08);
+}
+.vm[data-status="success"] .vm-ring-done {
+  box-shadow:
+    inset 0 0 0 2.5px rgb(var(--c-disc-energy)),
+    0 0 18px -4px rgb(var(--c-disc-energy) / 0.6);
+  background-color: rgb(var(--c-disc-energy) / 0.1);
+  animation: vm-settle 480ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.vm[data-status="success"] .vm-core {
+  animation: vm-core-expand 420ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.vm-burst {
+  inset: 0;
+}
+.vm-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--s);
+  height: var(--s);
+  margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2);
+  border-radius: 50%;
+  background: rgb(var(--c-disc-energy));
+  box-shadow: 0 0 6px rgb(var(--c-disc-energy) / 0.6);
+  animation: vm-spark 620ms cubic-bezier(0.16, 1, 0.3, 1) calc(var(--delay) + 80ms) both;
+}
+/* Every other spark keeps the warm tone, so the burst is the palette turning
+   from gold to green rather than a green firework. */
+.vm-spark:nth-child(odd) {
+  background: rgb(var(--c-brand-gold));
+  box-shadow: 0 0 6px rgb(var(--c-brand-sand) / 0.8);
+}
+
+.vm-check {
+  left: 50%;
+  top: 50%;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin: -1.125rem 0 0 -1.125rem;
+  stroke: rgb(var(--c-disc-energy));
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: vm-check-pop 460ms cubic-bezier(0.16, 1, 0.3, 1) 180ms both;
+}
+.vm-check path {
+  stroke-dasharray: 18;
+  stroke-dashoffset: 18;
+  animation: vm-check-draw 320ms ease-out 240ms forwards;
+}
+
+@keyframes vm-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes vm-pulse {
+  from {
+    transform: scale(0.8);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+@keyframes vm-breathe {
+  from {
+    transform: scale(0.94);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
+@keyframes vm-core-expand {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+@keyframes vm-settle {
+  from {
+    transform: scale(0.9);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+/* Most of the distance at nearly full size, then the fade: shrinking and
+   fading from the first frame made the sparks vanish before they cleared the
+   ring, which read as nothing having happened. */
+@keyframes vm-spark {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  65% {
+    transform: translate(calc(var(--dx) * 0.88), calc(var(--dy) * 0.88)) scale(0.8);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0);
+    opacity: 0;
+  }
+}
+@keyframes vm-check-pop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes vm-check-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes vm-rise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * Reduced motion: nothing orbits, nothing bursts, nothing scales. The state
+ * is still told apart by colour, by the check and by the words — which is
+ * everything the motion was carrying. The global rule below would already
+ * shorten every animation to a frame; these remove the ones whose *end state*
+ * would still be motion-shaped (a particle parked on the ring, a scaled form).
+ */
+@media (prefers-reduced-motion: reduce) {
+  .vm-orbit,
+  .vm-core,
+  .vm-ambient,
+  .vm-ring-done,
+  .vm-check,
+  .vm-message,
+  .otp-caret,
+  .otp[data-state="error"] .otp-slots {
+    animation: none !important;
+  }
+  .vm-particle,
+  .vm-burst {
+    display: none;
+  }
+  .vm[data-status="success"] .vm-ring {
+    transform: none;
+  }
+  .vm[data-status="success"] .vm-core {
+    animation: none !important;
+    opacity: 0;
+  }
+  .vm-check path {
+    animation: none !important;
+    stroke-dashoffset: 0;
+  }
+  .vm-stage[data-state="verifying"] .vm-content,
+  .vm-stage[data-state="success"] .vm-content {
+    filter: none;
+    transform: none;
   }
 }
 

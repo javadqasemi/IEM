@@ -1091,11 +1091,22 @@ test.describe("the browser journey", () => {
       await page.getByRole("button", { name: "Bestätigen" }).click();
       await expect(page.getByRole("alert")).toBeVisible({ timeout: 20_000 });
       await expect(page.getByRole("heading", { name: "Zwei-Faktor-Bestätigung" })).toBeVisible();
+      // The refusal from the real server puts the form back and the keyboard
+      // in the field. `otp-motion.spec.ts` covers the states in between.
+      await expect(page.locator("form.vm-stage")).toHaveAttribute("data-state", "error");
+      await expect(page.getByLabel("Code aus der App")).toBeFocused();
 
       // And then the right one.
       await page.getByLabel("Code aus der App").fill(await freshTotp(secret));
       await spendMfa();
       await page.getByRole("button", { name: "Bestätigen" }).click();
+
+      // The acceptance is shown — from the real server's answer — before the
+      // dashboard replaces the step.
+      await expect(page.locator("form.vm-stage")).toHaveAttribute("data-state", "success", {
+        timeout: 20_000,
+      });
+      await expect(page.locator(".vm-check")).toBeVisible();
 
       await expect(
         page.getByRole("heading", { name: "Zwei-Faktor-Authentisierung" }),

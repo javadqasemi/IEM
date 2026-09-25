@@ -216,12 +216,22 @@ const SYSTEM = [/system\.spec\.ts/];
  */
 const SOURCE_ASSERTIONS = [/login-budget\.spec\.ts/];
 
+/**
+ * Suites that set their own viewport and walk through the widths themselves.
+ *
+ * `otp-motion.spec.ts` checks the second sign-in step at the seven widths its
+ * brief names (320 to 1440), which are not the suite's three. The projects
+ * would run that same loop three times over.
+ */
+const OWN_WIDTHS = [/otp-motion\.spec\.ts/];
+
 /** What the two narrower projects skip. */
 const RUN_ONCE = [
   ...API_ONLY,
   ...SIGNS_IN_TWICE,
   ...MUTATES,
   ...SOURCE_ASSERTIONS,
+  ...OWN_WIDTHS,
   ...SECOND_FACTOR,
   ...NOTIFICATIONS,
   ...MAIL,
